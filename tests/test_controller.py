@@ -340,3 +340,64 @@ def test_window_move_makes_visible_bubble_follow(qapp, tmp_path):
         assert fb.calls == []  # 没显示时不用跟
     finally:
         e.close()
+
+
+# ---------------------------------------------------------------- 来自 Claude 的事件
+def test_working_event_shows_working_then_times_out_to_idle(env):
+    env.ctl.handle_event("working", None)
+    assert env.win.sprite_name == "working"
+    env.advance(60)
+    assert env.win.sprite_name == "working"
+    env.ctl.handle_event("working", None)  # 有新事件就续期
+    env.advance(100)
+    assert env.win.sprite_name == "working"
+    env.advance(30)  # 距最后一次事件超过 2 分钟
+    assert env.win.sprite_name == "idle"
+    assert any(t in Lines()._lines["claude_working"] for t in env.said)
+
+
+def test_stop_event_shows_done_counts_task_and_says_done_line(env):
+    env.ctl.handle_event("working", None)
+    env.said.clear()
+    env.ctl.handle_event("stop", None)
+    assert env.win.sprite_name == "done"
+    assert env.data.stats["claude_tasks"] == 1
+    assert env.said[-1] in Lines()._lines["claude_done"]
+    env.advance(3.5)
+    assert env.win.sprite_name == "idle"
+
+
+def test_session_start_and_notification_say_their_lines(env):
+    env.ctl.handle_event("session_start", None)
+    assert env.said[-1] in Lines()._lines["greeting"]
+    env.ctl.handle_event("notification", "等你确认")
+    assert env.said[-1] in Lines()._lines["claude_waiting"]
+
+
+def test_react_event_sets_temporary_expression(env):
+    env.ctl.handle_event("react", "proud")
+    assert env.win.sprite_name == "proud"
+    env.advance(3.5)
+    assert env.win.sprite_name == "idle"
+
+
+def test_unknown_event_or_expression_is_ignored(env):
+    env.ctl.handle_event("bogus", None)
+    env.ctl.handle_event("react", "not_a_state")
+    env.ctl.handle_event("react", None)
+    assert env.win.sprite_name == "idle"
+    assert env.said == []
+
+
+def test_muted_events_still_change_state_but_say_nothing(env):
+    env.ctl.set_muted(True)
+    env.ctl.handle_event("stop", None)
+    assert env.win.sprite_name == "done"
+    assert env.said == []
+
+
+def test_take_praise_returns_and_clears(env):
+    for _ in range(3):
+        env.win.patted.emit()
+    assert env.ctl.take_praise() == 3
+    assert env.ctl.take_praise() == 0

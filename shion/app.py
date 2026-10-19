@@ -13,10 +13,12 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from shion import state as state_mod
+from shion.bridge import ServerBridge
 from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController
 from shion.effects import HeartOverlay
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
+from shion.server import DEFAULT_PORT, ShionServer
 
 log = logging.getLogger("shion")
 
@@ -72,7 +74,7 @@ def run() -> int:
     app.setApplicationName("Shion")
     app.setQuitOnLastWindowClosed(False)
 
-    guard = SingleInstance(parent=app)
+    guard = SingleInstance(os.environ.get("SHION_INSTANCE_NAME") or INSTANCE_NAME, parent=app)
     if not guard.acquire():
         log.info("已有 Shion 在运行，退出")
         return 0
@@ -95,10 +97,25 @@ def run() -> int:
         win, pet_state, scheduler, overlay=overlay, bubble=bubble, parent=app
     )
     controller.quit_requested.connect(app.quit)
+
+    # 本地 HTTP 服务：回调在服务线程里，经 ServerBridge 切回 GUI 线程
+    bridge = ServerBridge(controller, parent=app)
+    port = int(os.environ.get("SHION_PORT") or DEFAULT_PORT)
+    server = ShionServer(bridge.on_event, bridge.on_take_praise, port=port)
+    server_ok = True
+    try:
+        server.start()
+    except OSError as e:
+        server_ok = False
+        log.warning("HTTP 服务启动失败（端口 %s 被占用？）：%s", port, e)
+    app.aboutToQuit.connect(server.stop)  # 先停服务，再写存档
     app.aboutToQuit.connect(scheduler.flush)
+
     controller.restore_position()
     win.show()
     log.info("Shion 启动，存档：%s", save_path)
+    if not server_ok:
+        controller.say(f"本地端口 {port} 被占用了，Claude 联动暂时不可用")
     code = app.exec()
     scheduler.flush()
     guard.release()

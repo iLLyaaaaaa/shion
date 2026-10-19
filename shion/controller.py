@@ -188,6 +188,16 @@ class PetController(QObject):
             self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
 
+    # ------------------------------------------------------------ 来自 Claude 的事件
+    def handle_event(self, etype: str, detail: Optional[str] = None) -> None:
+        """处理本地 HTTP 服务转来的事件（必须在 GUI 线程调用，见 bridge.py）。"""
+        self.react(self.state.claude_event(etype, detail, self._now()))
+        self.sync()
+
+    def take_praise(self) -> int:
+        """取走待夸奖计数（给 /praise/take 用）。"""
+        return self.state.take_praise()
+
     def praise(self) -> None:
         self.react(self.state.praise_claude(self._now()))
         self.sync()

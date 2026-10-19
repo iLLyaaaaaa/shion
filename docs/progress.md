@@ -3,7 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- 下一步：**把 server 回调接到 Qt 信号**，然后 v0.1 审查（调用 `reviewer` 子代理）。第 1、2、4、5 步代码已完成并自测，但**真机验收项还没做**（见下）
+- 下一步：**v0.1 审查**（调用 `reviewer` 子代理，对照 spec 检查整个 v0.1）。第 1、2、4、5 步代码已完成并自测，但**真机验收项还没做**（见下）
 - 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
@@ -16,8 +16,8 @@
 - [x] v0.1-2 程序动画（`shion/animator.py`；pytest 共 121 个通过；**真机验收待用户**）
 - [x] v0.1-4 交互接入状态机（`shion/controller.py`、`effects.py`、`lines.py`、`assets/lines/zh.json`；pytest 共 151 个通过；**真机验收待用户**）
 - [x] v0.1-5 气泡与台词（`shion/bubble.py`；pytest 共 173 个通过；**真机验收待用户**）
-- [ ] 把 server 回调接到 Qt 信号上 ← 下一步
-- [ ] v0.1 审查
+- [x] 把 server 回调接到 Qt 信号上（`shion/bridge.py`、`app.run()` 启动服务；pytest 共 189 个通过；真机用 curl 验收待用户）
+- [ ] v0.1 审查 ← 下一步
 - [ ] v0.2 Claude Code hooks
 - [ ] v0.3 MCP
 - [ ] v1.0 发布
@@ -31,6 +31,22 @@
 - [ ] 再开第二个 `python -m shion` 会直接退出，不出现第二只
 - [ ] 高分屏（缩放 150%）下清晰度、窗口大小正常
 没能真机验证透明点穿的原因：测试时电脑处于锁屏状态（`WindowFromPoint` 返回 LockScreenBackstopFrame）。实现用的是 `setMask`（按精灵 alpha 生成遮罩），不依赖 Windows 分层窗口的自动穿透。
+
+## 服务接入 Qt：待用户验收（同样没手动测）
+自动验证过：控制器 `handle_event`（working 续期与 2 分钟超时、stop→done+计数+台词、greeting、notification、react、未知类型/表情忽略、静音时仍改状态）；真 HTTP 服务 + 假时钟控制器（处理函数确实在主线程执行、20 个并发事件全部处理、非法请求 400 且不改状态、`/praise/take` 计数正确且 20 个并发请求总数恰好等于待夸奖数、GUI 不泵事件时超时返回 500）；子进程冒烟：真的启动 `python -m shion`，HTTP 发 working/stop 后日志出现状态变化，第二个实例抢同一端口时不崩溃并记录“HTTP 服务启动失败”。
+**需要用户在电脑前确认**（先 `.venv\Scripts\python -m shion` 启动桌宠，另开终端；PowerShell 里用 `curl.exe`，不要用 `curl` 别名）：
+- [ ] `curl.exe -X POST http://127.0.0.1:47613/event -d "{\"type\":\"working\"}"` → 桌宠变成抱电脑的 working，气泡说「Claude 在努力中」之类
+- [ ] `curl.exe -X POST http://127.0.0.1:47613/event -d "{\"type\":\"stop\"}"` → done 3 秒 + 气泡「做完啦！」，双击看“Claude 完成了 1 个任务”
+- [ ] `curl.exe -X POST http://127.0.0.1:47613/event -d "{\"type\":\"notification\"}"` → 气泡「Claude 在等你回话呢」
+- [ ] 摸几下头后 `curl.exe -X POST http://127.0.0.1:47613/praise/take -d "{}"` → 返回 `{"count":N}`，再发一次返回 0
+- [ ] 桌宠没开时这些 curl 会连接失败（符合预期：关了桌宠不影响 Claude）
+- [ ] 如果端口被别的程序占着，桌宠启动后会说「本地端口 47613 被占用了…」且其他功能正常
+
+## 服务接入 Qt 留给后面步骤的接口
+- `ServerBridge(controller, take_timeout=2.0)`：`on_event`/`on_take_praise` 给 `ShionServer` 用；事件用排队信号切到 GUI 线程，夸奖用请求对象 + `threading.Event` 等结果，超时抛 `TimeoutError`（server 回 500）。**ShionServer 的回调都在服务线程，PetState 和界面只在 GUI 线程动**
+- `PetController.handle_event(type, detail)`、`take_praise()`
+- 环境变量：`SHION_PORT`（覆盖端口）、`SHION_INSTANCE_NAME`（覆盖单实例名，自动测试用）、`SHION_DATA_DIR`、`SHION_DEBUG`
+- v0.2 的 hook 脚本只需要往 `http://127.0.0.1:47613/event` POST JSON，超时要短（桌宠没开时不能拖慢 Claude Code）
 
 ## 第 5 步：待用户验收（同样没手动测）
 自动验证过：时间线（30ms/字、打完停留 4s、0.3s 淡出、新台词替换）、`place_bubble`（头顶居中、顶部放不下翻到脚下、左右夹进屏幕）、窗口（不抢焦点/不挡鼠标的窗口标志、打字全程大小不变、字数随时间单调增加、背景 #0A0A0A / 边框 #F58236 / 圆角 / 米白文字、到时自动隐藏）、控制器（默认出口走气泡、静音收起并不再弹、桌宠移动时气泡跟随）；`--snapshot --bubble` 截图目视检查过（中文折行、`> ` 前缀、位置）；真实运行 1.5 秒：单击后气泡出现在桌宠头顶，字体选到 Cascadia Mono。
