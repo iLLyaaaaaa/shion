@@ -1,9 +1,11 @@
 """Claude Code hook 脚本：把事件转发给本机的 Shion 桌宠。
 
 只用标准库。无论发生什么都返回 0、不输出多余内容，绝不能影响 Claude Code。
-用法：shion_hook.py <SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PostToolUseFailure|Stop|Notification>
+用法：shion_hook.py <SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PostToolUseFailure|PermissionRequest|Stop|Notification>
 
 暂停/继续：PreToolUse 在用户点了“暂停”时一直等；诗音没开、连不上、出错一律放行。
+同意/否决：PermissionRequest 把要执行的内容交给诗音，等用户在诗音上点按钮；只有收到明确的 allow 才输出 allow，
+其余一切情况（诗音没开、超时、出错、返回内容不对）都不输出任何决定，交回 CC 自己的授权框。
 反馈队列：PostToolUse（工作中）和 UserPromptSubmit（空闲时）把诗音里攒的反馈作为附加上下文送出。
 """
 import json
@@ -23,6 +25,7 @@ EVENTS = {
     "UserPromptSubmit": "prompt",
     "PreToolUse": "working",
     "PostToolUse": None,
+    "PermissionRequest": None,
     "PostToolUseFailure": "tool_error",
     "Stop": "stop",
     "Notification": "notification",
@@ -37,7 +40,7 @@ def base_url() -> str:
 def request(path: str, payload=None, timeout: float = TIMEOUT):
     """成功返回解析后的 JSON，失败返回 None。"""
     try:
-        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(base_url() + path, data=data)
         if data is not None:
             req.add_header("Content-Type", "application/json")
@@ -90,6 +93,83 @@ def pause_gate(limit: float, poll: float = PAUSE_POLL):
         wait = min(poll, remaining)
         result = request("/pause/wait", {"wait": wait}, timeout=wait + 3)
         if not isinstance(result, dict) or result.get("paused") is not True:
+            return None
+
+
+PERMISSION_POLL = 10.0
+DETAIL_LIMIT = 12000  # 发给诗音的内容字数上限（再长的计划只显示前面）
+
+
+def permission_limit() -> int:
+    return remote_setting("permission_timeout", 120, 10, 170)
+
+
+def _clip(text, limit: int = DETAIL_LIMIT) -> str:
+    text = str(text)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def describe_permission(tool_name, tool_input) -> str:
+    """把要授权的操作写成给人看的文字：命令、文件完整路径、网址、计划全文等。"""
+    ti = tool_input if isinstance(tool_input, dict) else {}
+    kind = TOOL_KIND.get(tool_name, "other")
+    if kind == "bash" and ti.get("command"):
+        desc = ti.get("description")
+        return _clip(str(ti["command"]) + (f"\n# {desc}" if desc else ""))
+    if kind in ("edit", "write") and (ti.get("file_path") or ti.get("notebook_path")):
+        return _clip(ti.get("file_path") or ti.get("notebook_path"))
+    if tool_name == "WebFetch" and ti.get("url"):
+        return _clip(ti["url"])
+    if tool_name == "WebSearch" and ti.get("query"):
+        return _clip(ti["query"])
+    if tool_name == "ExitPlanMode" and ti.get("plan"):
+        return _clip(ti["plan"])
+    try:
+        return _clip(json.dumps(ti, ensure_ascii=False, indent=2))
+    except Exception:
+        return _clip(ti)
+
+
+def deny_message() -> str:
+    lang = read_save().get("language")
+    lang = lang if lang in ("zh", "en", "ja") else "zh"
+    try:
+        raw = json.loads((ROOT / "assets" / "lines" / f"{lang}.json").read_text(encoding="utf-8"))
+        return raw["ui"]["hook_deny"]
+    except Exception:
+        return "用户通过诗音否决了这个操作"
+
+
+def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL):
+    """返回 {"behavior": "allow"} / {"behavior": "deny", "message": …}，或 None（不给决定）。
+
+    allow 只在服务器明确回答 status == "allow"（且 id 对得上）时才会出现。
+    """
+    tool = data.get("tool_name")
+    if not isinstance(tool, str) or not tool or tool == "AskUserQuestion":
+        return None  # 提问不是同意/否决，交给 CC
+    opened = request(
+        "/permission/open", {"tool": tool, "detail": describe_permission(tool, data.get("tool_input"))}, timeout=2.0
+    )
+    rid = opened.get("id") if isinstance(opened, dict) else None
+    if not isinstance(rid, str) or not rid:
+        return None
+    deadline = time.monotonic() + limit
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            request("/permission/withdraw", {"id": rid})
+            return None
+        wait = min(poll, remaining)
+        answer = request("/permission/wait", {"id": rid, "wait": wait}, timeout=wait + 3)
+        if not isinstance(answer, dict) or answer.get("id") != rid:
+            return None
+        status = answer.get("status")
+        if status == "allow":
+            return {"behavior": "allow"}
+        if status == "deny":
+            return {"behavior": "deny", "message": deny_message()}
+        if status != "pending":
             return None
 
 
@@ -215,6 +295,11 @@ def main() -> None:
         if text:
             emit({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}})
         return
+    if name == "PermissionRequest":
+        decision = permission_decision(data, permission_limit())
+        if decision is not None:
+            emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
+        return
     if name == "PreToolUse":
         reason = pause_gate(pause_limit())
         if reason is not None:
@@ -245,7 +330,7 @@ if __name__ == "__main__":
     worker.start()
     event = sys.argv[1:2]
     # PreToolUse 可能要等用户点“继续”，总时限 = 暂停上限 + 余量；其余事件很快
-    worker.join(12 if event == ["SessionStart"] else (pause_limit() + 30 if event == ["PreToolUse"] else 2.5))
+    worker.join(12 if event == ["SessionStart"] else (pause_limit() + 30 if event == ["PreToolUse"] else (permission_limit() + 10 if event == ["PermissionRequest"] else 2.5)))
     try:
         sys.stdout.flush()
     except BaseException:

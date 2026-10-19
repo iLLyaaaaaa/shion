@@ -8,6 +8,7 @@
     "display_name": "诗音"
   },
   "lines": {
+    "permission_request": ["有东西要你决定哦"],
     "feedback_sent": ["已经转告啦"],
     "feedback_bad": ["收到，我会转告的"],
     "resumed": ["继续干活啦"],
@@ -83,6 +84,13 @@
     ]
   },
   "ui": {
+    "hook_deny": "用户通过诗音否决了这个操作",
+    "permission_title": "要不要同意？",
+    "permission_allow": "同意",
+    "permission_deny": "否决",
+    "permission_more": "还有 {n} 个",
+    "permission_expand": "展开",
+    "permission_collapse": "收起",
     "menu_remote": "工作遥控",
     "menu_pause": "暂停工作",
     "menu_resume": "继续工作",

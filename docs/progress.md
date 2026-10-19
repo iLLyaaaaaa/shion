@@ -7,8 +7,23 @@
 - **新版行走分帧素材已提交，爱心参数已调整**，验证结果见 2026-10-20 节；行走/跳跃、气泡仲裁与爱心的动态观感和真实桌面点穿仍 **待用户验收**。用户明确授权补测试、更新记录后 commit，不等待本轮真机验收；不 push。
 - 上一轮交互打磨的待验收清单继续保留，不能用本轮自动测试和静态截图替代。
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。本次未安装/卸载 hooks。以后装用户级之前，先卸载项目级那份，避免重复事件。
-- **v0.3 进行中**：第一部分（暂停/继续 + 反馈队列）已完成，见下方「v0.3 第一部分」；第二部分（同意/否决）未开始。
+- **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。下一步是 v0.4。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## v0.3 第二部分：同意/否决（2026-10-20）
+- **硬约束与落实**：allow 只能来自用户在诗音界面上的点击。① `remote.py:PermissionQueue.decide()` 是唯一能写入决定的入口，源码级测试断言整个包里只有 `controller.py` 的按钮回调（`_on_permission_decided`）会调用它、`server.py` 的源码里没有 `decide`；② HTTP 只有 `/permission/open|wait|withdraw`，没有任何字段会被读成决定（测试往所有接口、所有事件类型、各种形状的“同意”字段里灌，请求始终 pending）；③ hook 只有收到 `{"id": 同一个 id, "status": "allow"}`（恰好等于）才输出 allow，大小写不同、`true`、列表、id 对不上、缺字段、超时、连不上、撤回、`gone` 全部不给决定（交回 CC 自己的授权框）；④ 诗音没开：hook 连 `/permission/open` 都失败就立刻退出，无输出。
+- **新增/改动**：`remote.py:PermissionQueue`（`secrets.token_hex(16)` 的 id、最多 20 个排队、内容 ≤20000 字、allow/deny 只能取一次、25 秒没人轮询的请求过期、没人取的决定 60 秒后清掉）；`server.py` 三个路由（授权请求体上限 64 KB，其他接口仍 4 KB；`request_queue_size` 调到 64——测试里并发连接偶发 `ConnectionResetError`）；`hooks/shion_hook.py`：`permission_decision` / `describe_permission` / `deny_message`，`ensure_ascii=False` 发请求（中文计划不会膨胀 6 倍）；`hooks_config.py`：新增 PermissionRequest（matcher `*`，超时 180 秒）；`panel.py:PermissionPanel`；`controller.py` 的 `_sync_permission`（tick 里每 100ms 同步，一次显示一条、显示“还有 N 个”）。内容显示规则见 spec「同意/否决的实现要点」。
+- **面板**：不抢焦点（`WindowDoesNotAcceptFocus` + `WA_ShowWithoutActivating`），键盘一律不响应（`MouseOnlyButton` 忽略所有按键——测试里直接给按钮发空格/回车也不会同意），每条请求出现 0.6 秒内按钮灰着（防误点，换成下一条同样重新计时），内容区只读、约 6 行，长内容出现“展开/收起”，静音时面板照常弹出（只是不说那句话）。`--snapshot --panel permission|input` 新增，三语/长文本/展开都看过截图，无裁切、无方块字。
+- **验证**：完整 `.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/v03-b/t8`，**581 passed**（521 + `tests/test_permission.py` 60 项）。**真实 `claude -p`（2.1.289，haiku，隔离端口，假桌宠服务器按模式自动“点击”）**：PowerShell 写文件命令 → 请求带着完整命令和描述出现在队列里；点“同意”后文件真的被创建、模型回 RAN；点“否决”后文件没被创建、模型回 DENIED；无人决定（超时 10 秒）后文件没被创建，**没有被默认同意**（`-p` 模式下 CC 没人可问，自己拒绝）。踩坑：①`ExitPlanMode` 在 `-p` 下不会走授权，没法自动实测，留给你；②测试里面板对象被别的线程的垃圾回收销毁会让 Qt 直接 abort（偶发整个 pytest 崩溃），所以 `PetController.dispose()` 在 GUI 线程立刻销毁面板，测试的 `Env.close()` 调用它。③git bash 里用 `
+` 写进 Python heredoc 会变成真换行，改文件要用编辑工具。
+- **hooks 已重新安装到项目级** `.claude/settings.local.json`（含 PostToolUse、PermissionRequest；备份 `settings.local.json.shion-backup-*` 留在同目录，未提交）；用户级 `~/.claude/settings.json` 仍没动。
+- **待用户验收**（我看不到真实桌面和 CC 界面）：
+  - [ ] **CC 终端版和桌面端 Code 标签页**：授权请求能否被诗音面板接管；点“同意”“否决”后 CC 的反应；CC 自己的授权框会不会同时弹出（预期：hook 给了决定就不弹）；诗音面板在你同时操作 CC 时不抢键盘焦点。
+  - [ ] **ExitPlanMode 计划确认**：计划模式里让 Claude 出计划，诗音面板是否显示计划全文、“展开/收起”是否好用，点“同意”后 CC 是否真的退出计划模式（不确定 PermissionRequest 的 allow 对它是否生效，见 spec 风险）。
+  - [ ] 面板外观（终端配色、两个大按钮、“还有 N 个”）、0.6 秒防误点的手感、多个请求（子代理并行）排队、你在 CC 里自己答了之后面板是否在约 25 秒内消失。
+  - [ ] 120 秒超时后 CC 是否照常弹出自己的授权框（可把存档 `remote.permission_timeout` 临时改成 10 测试）。
+  - [ ] 面板与气泡同在诗音头顶时的叠放观感（面板在上层，可能盖住气泡；如果不好看再调）。
+- 已知取舍/风险：本机若有别的程序在诗音没开时占用 47613 端口并冒充服务器，理论上能回 allow；这需要本机已被攻破，本版不处理。PreToolUse/PostToolUse/PermissionRequest 每次多一个 python 进程（约 0.1 秒）。授权面板里的内容不受“只显示状态，不显示内容”隐私开关影响。
 
 ## v0.3 第一部分：暂停/继续 + 反馈队列（2026-10-20）
 - **新增** `shion/remote.py`（纯 Python）：`RemoteHub`，用 `Condition` 保护暂停标志，`wait_while_paused(秒)` 供服务线程长轮询（单次上限 30 秒）。服务线程只读/只等；开始暂停只能由 GUI 线程调用 `hub.pause()`。
@@ -153,7 +168,7 @@
 - [x] v0.1 审查（独立子代理，只读）+ 修复（pytest 共 210 个通过）
 - [x] v0.2 Claude Code hooks（pytest 共 287 个通过；**真机已验收（2026-10-19）**）
 - [x] v0.2.1 状态感知（pytest 共 321 个通过；**真机已验收（2026-10-19）**）
-- [ ] v0.3 Claude Code 遥控：暂停/继续 + 反馈队列已完成（待验收），同意/否决 ← 下一步
+- [x] v0.3 Claude Code 遥控（pytest 共 581 个通过；**真机验收待用户确认**）
 - [ ] v0.4 诗音的对话菜单（零食、预设对话，不调用模型）
 - [ ] v0.5 内容包
 - [ ] v1.0 发布

@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, QObject, QStandardPaths
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QStandardPaths
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
@@ -211,6 +211,47 @@ def snapshot(
         p.end()
         img = canvas
 
+    ok = img.save(out, "PNG")
+    if not ok:
+        print(f"保存失败：{out}", file=sys.stderr)
+        return 1
+    print(f"saved {out} ({img.width()}x{img.height()})")
+    del app
+    return 0
+
+
+def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
+                   more: int = 0, expand: bool = False) -> int:
+    """离屏渲染遥控面板存成 PNG（自查画面用）。同意/否决面板的按钮在 0.6 秒内是灰的，截图时按“已生效”画。"""
+    from shion.panel import ARM_DELAY, InputPanel, PermissionPanel
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    lines = Lines(lang)
+    ui = lines.ui
+    family = BubbleWindow().font_family
+    body = (400, 400, 100, 100)
+    if kind == "input":
+        panel = InputPanel(family)
+        panel.open(ui("panel_bad_title"), ui("panel_send"), ui("panel_cancel"), body)
+    else:
+        t = [0.0]
+        panel = PermissionPanel(family, clock=lambda: t[0])
+        panel.show_request(
+            "snapshot", "Bash", text, more,
+            {"title": ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
+             "more": ui("permission_more"), "expand": ui("permission_expand"),
+             "collapse": ui("permission_collapse")},
+            body,
+        )
+        if expand:
+            panel._toggle.click()
+        t[0] += ARM_DELAY + 0.1
+        panel.refresh_enabled()
+    img = panel.grab().toImage()
+    panel.hide()
+    panel.setParent(None)
+    panel.deleteLater()  # 在这里（GUI 线程）立刻销毁，别留给别的线程里的垃圾回收
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)

@@ -17,6 +17,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
     p.add_argument("--mirror", action="store_true", help="截图用：水平镜像，脚底锚点不变")
+    p.add_argument("--panel", choices=["permission", "input"], default=None,
+                   help="截图用：只画遥控面板（permission = 同意/否决，input = 有问题输入框）")
+    p.add_argument("--panel-text", default="git status", help="截图用：同意/否决面板里显示的内容")
+    p.add_argument("--panel-more", type=int, default=0, help="截图用：“还有 N 个”")
+    p.add_argument("--panel-expand", action="store_true", help="截图用：展开长内容")
     motion = p.add_mutually_exclusive_group()
     motion.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
     motion.add_argument("--walk", action="store_true", help="截图用：0 秒时开始行走，配合 --at 检查帧序列")
@@ -24,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
 
     from shion import app
 
+    if args.snapshot and args.panel:
+        return app.snapshot_panel(args.snapshot, args.panel, args.panel_text, args.lang,
+                                  args.panel_more, args.panel_expand)
     if args.snapshot:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
                             args.from_state, args.mirror, args.jump, args.walk)

@@ -52,6 +52,7 @@ class Env:
         self.ctl.tick()
 
     def close(self):
+        self.ctl.dispose()
         self.overlay.close()
         self.win.close()
 

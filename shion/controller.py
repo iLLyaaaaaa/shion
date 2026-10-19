@@ -9,7 +9,7 @@ import random
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, QPoint, QTimer, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
@@ -18,7 +18,7 @@ from shion.bubble import BubbleWindow
 from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior
 from shion.effects import HeartOverlay
 from shion.lines import Lines
-from shion.panel import InputPanel
+from shion.panel import InputPanel, PermissionPanel
 from shion.remote import RemoteHub
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
@@ -78,6 +78,7 @@ class PetController(QObject):
         self.hub = hub or RemoteHub()
         self._pause_timed_out = False
         self._input_panel: Optional[InputPanel] = None
+        self._perm_panel: Optional[PermissionPanel] = None
         self._now_fn = now_fn
         self._say_fn = say or self._bubble_say
         self._pat_session = PatSession()
@@ -138,6 +139,7 @@ class PetController(QObject):
     def tick(self) -> None:
         now = self._now()
         self._sync_pause()
+        self._sync_permission()
         self.react(self.state.tick(now))
         self.sync()
         action = self._idle.step(
@@ -216,6 +218,8 @@ class PetController(QObject):
     def _on_window_moved(self) -> None:
         if self.bubble is not None and self.bubble.isVisible():
             self.bubble.follow(self.window.body_rect())
+        if self._perm_panel is not None and self._perm_panel.isVisible():
+            self._perm_panel.follow(self.window.body_rect())
 
     # ------------------------------------------------------------ 手势
     def _on_pressed(self) -> None:
@@ -462,6 +466,47 @@ class PetController(QObject):
         key = "paused_timeout" if self._pause_timed_out else "paused_status"
         self.say(self.lines.ui(key), priority=Priority.MEDIUM, category="paused", sticky=True)
 
+    # ------------------------------------------------------------ 遥控：同意 / 否决
+    def _permission_texts(self) -> dict[str, str]:
+        ui = self.lines.ui
+        return {
+            "title": ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
+            "more": ui("permission_more"), "expand": ui("permission_expand"),
+            "collapse": ui("permission_collapse"),
+        }
+
+    def _sync_permission(self) -> None:
+        """把排队中的授权请求显示出来：一次一条，按到达顺序；没人轮询的过期请求清掉。"""
+        queue = self.hub.permissions
+        queue.expire()
+        pending = queue.pending()
+        panel = self._perm_panel
+        if not pending:
+            if panel is not None and panel.isVisible():
+                panel.hide_request()
+            return
+        if panel is None:
+            family = self.bubble.font_family if self.bubble is not None else "Consolas"
+            panel = self._perm_panel = PermissionPanel(family, clock=self.window.monotonic_time)
+            panel.decided.connect(self._on_permission_decided)
+        head = pending[0]
+        if panel.request_id != head.id:
+            first = not panel.isVisible()
+            panel.show_request(
+                head.id, head.tool, head.detail, len(pending) - 1,
+                self._permission_texts(), self.window.body_rect(),
+            )
+            if first:
+                self.say_key("permission_request")
+        else:
+            panel.set_more(len(pending) - 1)
+
+    def _on_permission_decided(self, rid: str, allow: bool) -> None:
+        """用户点了面板上的按钮——这是 allow/deny 唯一的来源。"""
+        if self.hub.permissions.decide(rid, allow):
+            log.info("授权决定：%s", "同意" if allow else "否决")
+        self._sync_permission()
+
     def feedback_good(self) -> None:
         self.react(self.state.feedback_good(self._now()))
         self.sync()
@@ -500,8 +545,20 @@ class PetController(QObject):
         self.say_key("feedback_sent")
         return "\n".join(parts)
 
+    def dispose(self) -> None:
+        """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
+        for panel in (self._perm_panel, self._input_panel):
+            if panel is not None:
+                panel.hide()
+                panel.setParent(None)
+                panel.deleteLater()
+        self._perm_panel = self._input_panel = None
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
     def quit(self) -> None:
         self.window.stop_motion()
+        if self._perm_panel is not None:
+            self._perm_panel.hide_request()
         try:
             self.scheduler.flush()  # 内部不抛异常；这里再兜一层，保证一定能退出
         except Exception:

@@ -7,6 +7,7 @@
     "display_name": "Shion"
   },
   "lines": {
+    "permission_request": ["Something needs your call!"],
     "feedback_sent": ["Passed it on!"],
     "feedback_bad": ["Got it, I'll pass that on."],
     "resumed": ["Back to work!"],
@@ -82,6 +83,13 @@
     ]
   },
   "ui": {
+    "hook_deny": "The user denied this action through Shion.",
+    "permission_title": "Approve this?",
+    "permission_allow": "Allow",
+    "permission_deny": "Deny",
+    "permission_more": "{n} more waiting",
+    "permission_expand": "Expand",
+    "permission_collapse": "Collapse",
     "menu_remote": "Work remote",
     "menu_pause": "Pause work",
     "menu_resume": "Resume work",

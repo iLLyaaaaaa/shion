@@ -199,6 +199,7 @@ claude pet/
 
 - `POST /feedback/take` → 返回 `{"text": "…"}`：取走并清空反馈队列，按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
 - `POST /pause/wait {"wait": 秒}` → `{"paused": true|false}`：没暂停立即返回；暂停中最多等 `wait` 秒（上限 30）。**只读，没有任何接口能让 HTTP 调用方开始暂停**；`prompt` 事件到达时服务线程会直接解除暂停
+- `POST /permission/open {"tool", "detail"}` → `{"id"}`（请求体上限放宽到 64 KB；排队上限 20，满了返回 503）；`POST /permission/wait {"id", "wait"}` → `{"id", "status"}`，`status` 是 `pending`/`allow`/`deny`/`gone`，`allow`/`deny` 只能取一次；`POST /permission/withdraw {"id"}` 撤回。**没有任何接口、任何字段能写入 allow/deny**，决定只来自诗音界面上的按钮（有测试往所有接口和事件类型里塞各种“同意”字段，请求始终保持 pending；另有源码级测试保证只有 controller 的按钮回调会写入决定）
 - `type = pause_timeout`（hook 等满暂停上限后发来）：诗音保持暂停标记，把气泡换成“已经停下了，在 CC 里说一声就能继续”
 - `GET /health` → `{"ok": true}`
 - 安全：带 `Origin` 头的请求（来自网页）和 `Host` 不是 `127.0.0.1` / `localhost` 的请求一律返回 403，不触发任何回调；读请求体有 5 秒超时。hook 脚本是普通 HTTP 客户端，不受影响。
@@ -254,6 +255,13 @@ claude pet/
 - 多条合并成一次送达；队列最多 5 条；送达后诗音说一句“已经转告啦”
 - 右键原有的“夸夸”菜单项并入“工作遥控 → 做得好”；原来的 `pending_praise` / `/praise/take` 已由反馈队列和 `/feedback/take` 取代（存档迁移见「持久化」）
 
+**同意 / 否决的实现要点（v0.3 第二部分）**
+- hook（PermissionRequest）：`AskUserQuestion` 不处理（那是提问不是授权）；其余工具先 `/permission/open`，再按 10 秒一段 `/permission/wait`。**只有响应是对象、`id` 对得上、`status` 恰好等于 `"allow"` 才输出 allow**；`"deny"` 输出 deny + 存档语言的理由（`ui.hook_deny`，默认“用户通过诗音否决了这个操作”）；其余一切（连不上、超时、`gone`、字段不对）都不输出任何决定。超时（存档 `remote.permission_timeout`，默认 120 秒）先撤回请求再退出。
+- 显示的内容：Bash/PowerShell 显示命令（有描述则附 `# 描述`）；Edit/Write/NotebookEdit 显示文件完整路径；WebFetch 显示网址；WebSearch 显示搜索词；ExitPlanMode 显示计划全文；其他显示参数 JSON。最多 12000 字。**隐私模式不影响授权面板**（要决定就必须看到内容）。
+- 面板（`panel.py:PermissionPanel`）：终端配色；内容区只读、约 6 行高，过长出现“展开/收起”；“还有 N 个”；“否决”“同意”两个大按钮。**不抢焦点、不响应键盘**（`WindowDoesNotAcceptFocus`，按钮子类忽略所有按键），按钮在每条请求出现后 0.6 秒内不可点。静音不影响面板，只影响那一句提示语。
+- 排队：诗音每 100 毫秒从 hub 取最早的未决请求显示；hook 超过 25 秒没来轮询的请求视为已被 CC 取消（用户在 CC 里自己答了），面板自动消失。
+- 服务端 `request_queue_size` 调到 64，并行子代理的 hook 同时连进来不会被重置。
+
 **暂停规则**
 - 点“暂停”后，Claude 在**下一次调用工具之前**停住（PreToolUse hook 等待）。正在执行的命令不会被掐断；正在写的文字会写完。诗音切到暂停状态，气泡显示“暂停中”
 - 恢复方式有两种：
@@ -298,6 +306,7 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
 - 测试用 `pytest`，放在 `tests/` 下。运行方式：`.venv\Scripts\python -m pytest -q`，只看失败的输出。
 - **调试截图模式**：`python -m shion --snapshot out.png [--state happy] [--bubble "文字"]`，离屏渲染一帧存成 PNG 后退出。`--from-state idle --state happy --at 0.06` 可检查淡化中间帧；不传 `--from-state` 时直接显示目标状态。CC 需要检查画面时，生成截图再打开看，**只看截图，不要打开 assets 里的原始素材**。
 - 截图追加 `--mirror` 检查水平镜像；`--walk --at 0/0.14/0.28/0.42` 检查四帧；`--jump --at 0.35` 检查跳跃最高点（0 秒下蹲、0.15 秒起飞、0.55 秒落地），可与状态/三语气泡参数组合。`--walk` 和 `--jump` 互斥。
+- 截图 `--panel permission|input [--panel-text 内容] [--panel-more N] [--panel-expand] [--lang ja]` 只画遥控面板。
 - **调试模式**：设置环境变量 `SHION_DEBUG=1` 时，冷落、睡眠的阈值缩短为秒级，并在控制台输出状态变化日志。
 - 程序日志写进 `%APPDATA%\Shion\shion.log`，不要大量打印到终端。
 

@@ -9,6 +9,7 @@
     "display_name": "詩音"
   },
   "lines": {
+    "permission_request": ["決めてほしいことがあるよ"],
     "feedback_sent": ["伝えておいたよ"],
     "feedback_bad": ["わかった、伝えるね"],
     "resumed": ["作業再開だよ"],
@@ -84,6 +85,13 @@
     ]
   },
   "ui": {
+    "hook_deny": "ユーザーが詩音からこの操作を拒否しました",
+    "permission_title": "許可しますか？",
+    "permission_allow": "許可",
+    "permission_deny": "拒否",
+    "permission_more": "ほか {n} 件",
+    "permission_expand": "広げる",
+    "permission_collapse": "たたむ",
     "menu_remote": "作業リモコン",
     "menu_pause": "作業を一時停止",
     "menu_resume": "作業を再開",

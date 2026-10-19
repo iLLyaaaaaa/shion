@@ -20,6 +20,7 @@ log = logging.getLogger("shion.server")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 47613
 MAX_BODY = 4096
+MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/计划全文
 REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
@@ -53,14 +54,14 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _read_json(self):
+    def _read_json(self, max_body: int = MAX_BODY):
         """返回解析后的 JSON；出错时已发送 400 并返回 None。"""
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
-        if length < 0 or length > MAX_BODY:
-            self._send(400, {"error": "请求体长度不合法或超过 4 KB"})
+        if length < 0 or length > max_body:
+            self._send(400, {"error": f"请求体长度不合法或超过 {max_body // 1024} KB"})
             return None
         try:
             raw = self.rfile.read(length)
@@ -96,6 +97,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._post_take_feedback()
         elif self.path == "/pause/wait":
             self._post_pause_wait()
+        elif self.path == "/permission/open":
+            self._post_permission_open()
+        elif self.path == "/permission/wait":
+            self._post_permission_wait()
+        elif self.path == "/permission/withdraw":
+            self._post_permission_withdraw()
         else:
             self._send(404, {"error": "not found"})
 
@@ -148,9 +155,52 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, {"paused": self.server.hub.wait_while_paused(wait)})
 
 
+    # ---- 同意 / 否决 ----
+    # 安全：这里只有“登记请求 / 等结果 / 撤回”。没有任何接口、任何字段能写入 allow 或 deny，
+    # 决定只由诗音界面上的按钮产生（写入口在 controller 的按钮回调里，本文件不碰它）。
+    def _post_permission_open(self):
+        data = self._read_json(MAX_PERMISSION_BODY)
+        if data is None:
+            return
+        tool, detail = (data.get("tool"), data.get("detail")) if isinstance(data, dict) else (None, None)
+        if not isinstance(tool, str) or not tool or not isinstance(detail, str):
+            self._send(400, {"error": "tool 和 detail 必须是字符串"})
+            return
+        rid = self.server.hub.permissions.open(tool, detail)
+        if rid is None:
+            self._send(503, {"error": "too many pending requests"})
+            return
+        self._send(200, {"id": rid})
+
+    def _post_permission_wait(self):
+        data = self._read_json()
+        if data is None:
+            return
+        rid = data.get("id") if isinstance(data, dict) else None
+        if not isinstance(rid, str):
+            self._send(400, {"error": "id 必须是字符串"})
+            return
+        wait = data.get("wait", 0)
+        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait):
+            wait = 0
+        self._send(200, {"id": rid, "status": self.server.hub.permissions.wait(rid, wait)})
+
+    def _post_permission_withdraw(self):
+        data = self._read_json()
+        if data is None:
+            return
+        rid = data.get("id") if isinstance(data, dict) else None
+        if not isinstance(rid, str):
+            self._send(400, {"error": "id 必须是字符串"})
+            return
+        self.server.hub.permissions.withdraw(rid)
+        self._send(200, {"ok": True})
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False  # 端口被占用时要报错，而不是悄悄共用
+    request_queue_size = 64  # 并行子代理的 hook 可能同时连进来，默认的 5 会被重置连接
 
     def __init__(self, addr, on_event, on_take_feedback, hub):
         super().__init__(addr, _Handler)
