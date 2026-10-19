@@ -59,6 +59,7 @@ class PetWindow(QWidget):
     drag_started = Signal()
     drag_finished = Signal()  # 松手后落地时发出
     menu_requested = Signal(QPoint)  # 全局坐标
+    moved = Signal()  # 窗口位置变了（气泡跟随用）
 
     def __init__(
         self,
@@ -143,6 +144,14 @@ class PetWindow(QWidget):
     def head_anchor(self) -> QPoint:
         """头顶中心（全局坐标），给爱心和提示定位。"""
         return self.mapToGlobal(QPoint(self.width() // 2, MARGIN_TOP + int(self._sh * 0.08)))
+
+    def body_rect(self) -> tuple[int, int, int, int]:
+        """精灵本体的屏幕矩形 (x, y, w, h)，不含留边。"""
+        return (self.x() + MARGIN_X, self.y() + MARGIN_TOP, self._sw, self._sh)
+
+    def moveEvent(self, e) -> None:
+        super().moveEvent(e)
+        self.moved.emit()
 
     def _is_head(self, pos: QPoint) -> bool:
         """鼠标是否在精灵上方 35%（按未变换的精灵坐标）。"""

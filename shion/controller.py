@@ -9,10 +9,11 @@ import random
 from datetime import datetime
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, QPoint, QRect, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QTimer, Signal
 from PySide6.QtGui import QActionGroup, QGuiApplication
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QToolTip
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
+from shion.bubble import BubbleWindow
 from shion.effects import HeartOverlay
 from shion.lines import Lines
 from shion.pet_window import PetWindow
@@ -36,6 +37,7 @@ class PetController(QObject):
         scheduler: SaveScheduler,
         lines: Optional[Lines] = None,
         overlay: Optional[HeartOverlay] = None,
+        bubble: Optional[BubbleWindow] = None,
         now_fn: Callable[[], datetime] = datetime.now,
         say: Optional[Callable[[str], None]] = None,
         autostart: bool = True,
@@ -47,8 +49,9 @@ class PetController(QObject):
         self.scheduler = scheduler
         self.lines = lines or Lines()
         self.overlay = overlay
+        self.bubble = bubble
         self._now_fn = now_fn
-        self._say_fn = say or self._tooltip_say
+        self._say_fn = say or self._bubble_say
         self._pat_count = 0
         self._rng = random.Random()
 
@@ -66,6 +69,7 @@ class PetController(QObject):
         w.drag_started.connect(self._on_drag_started)
         w.drag_finished.connect(self._on_drag_finished)
         w.menu_requested.connect(self.show_menu)
+        w.moved.connect(self._on_window_moved)
 
         self._timer = QTimer(self)
         self._timer.setInterval(TICK_MS)
@@ -106,12 +110,15 @@ class PetController(QObject):
         log.info("说：%s", text)
         self._say_fn(text)
 
-    def _tooltip_say(self, text: str) -> None:
-        # 第 5 步会换成终端风格气泡，这里先用提示框暂代
-        anchor = self.window.head_anchor()
-        QToolTip.showText(
-            QPoint(anchor.x() - 30, anchor.y() - 50), "> " + text, self.window, QRect(), 4000
-        )
+    def _bubble_say(self, text: str) -> None:
+        if self.bubble is None:
+            return
+        self.bubble.follow(self.window.body_rect())
+        self.bubble.say(text)
+
+    def _on_window_moved(self) -> None:
+        if self.bubble is not None and self.bubble.isVisible():
+            self.bubble.follow(self.window.body_rect())
 
     # ------------------------------------------------------------ 手势
     def _on_hover(self) -> None:
@@ -177,6 +184,8 @@ class PetController(QObject):
 
     def set_muted(self, muted: bool) -> None:
         self.state.save.bubble_muted = muted
+        if muted and self.bubble is not None:
+            self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
 
     def praise(self) -> None:

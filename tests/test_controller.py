@@ -265,3 +265,78 @@ def test_neglect_return_line_after_long_absence(env):
     env.advance(2 * 3600 + 60)
     env.win.clicked.emit()
     assert env.said[0] in Lines()._lines["neglect_return"]
+
+
+class FakeBubble:
+    """记录控制器对气泡的调用。"""
+
+    def __init__(self):
+        self.calls = []
+        self.visible = False
+
+    def isVisible(self):
+        return self.visible
+
+    def follow(self, body):
+        self.calls.append(("follow", body))
+
+    def say(self, text):
+        self.calls.append(("say", text))
+        self.visible = True
+
+    def dismiss(self):
+        self.calls.append(("dismiss",))
+        self.visible = False
+
+
+def make_with_bubble(tmp_path):
+    e = Env(tmp_path)
+    fb = FakeBubble()
+    e.ctl = PetController(
+        e.win, e.state, e.scheduler, lines=Lines(), overlay=e.overlay, bubble=fb,
+        now_fn=lambda: e.now, autostart=False,
+    )
+    return e, fb
+
+
+def test_default_say_goes_to_bubble_after_following_body(qapp, tmp_path):
+    e, fb = make_with_bubble(tmp_path)
+    try:
+        e.win.clicked.emit()
+        kinds = [c[0] for c in fb.calls]
+        assert kinds[:2] == ["follow", "say"]
+        assert fb.calls[0][1] == e.win.body_rect()
+        assert fb.calls[1][1] in Lines()._lines["poke"]
+    finally:
+        e.close()
+
+
+def test_muting_dismisses_visible_bubble_and_blocks_new_lines(qapp, tmp_path):
+    e, fb = make_with_bubble(tmp_path)
+    try:
+        e.win.clicked.emit()
+        assert fb.visible
+        e.ctl.set_muted(True)
+        assert ("dismiss",) in fb.calls and not fb.visible
+        n = len(fb.calls)
+        e.win.clicked.emit()
+        assert len(fb.calls) == n  # 静音后不再弹
+    finally:
+        e.close()
+
+
+def test_window_move_makes_visible_bubble_follow(qapp, tmp_path):
+    e, fb = make_with_bubble(tmp_path)
+    try:
+        e.win.show()  # 隐藏的窗口不会收到 move 事件
+        e.win.place_default()
+        e.win.clicked.emit()
+        fb.calls.clear()
+        e.win.move(e.win.x() - 50, e.win.y())
+        assert fb.calls and fb.calls[-1] == ("follow", e.win.body_rect())
+        fb.visible = False
+        fb.calls.clear()
+        e.win.move(e.win.x() - 50, e.win.y())
+        assert fb.calls == []  # 没显示时不用跟
+    finally:
+        e.close()

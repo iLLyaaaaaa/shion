@@ -3,8 +3,8 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- 下一步：**v0.1 第 5 步**（`bubble.py` 终端气泡，替换控制器里的 QToolTip 临时出口）。第 1、2、4 步代码已完成并自测，但**真机验收项还没做**（见下）
-- 之后的顺序：5 → 把 server 回调接到 Qt 信号 → 审查
+- 下一步：**把 server 回调接到 Qt 信号**，然后 v0.1 审查（调用 `reviewer` 子代理）。第 1、2、4、5 步代码已完成并自测，但**真机验收项还没做**（见下）
+- 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
 ## 已完成
@@ -15,8 +15,8 @@
 - [x] v0.1-1 骨架 / 透明置顶窗口 / 拖动下落 / `--snapshot`（pytest 共 94 个通过；**真机验收待用户**）
 - [x] v0.1-2 程序动画（`shion/animator.py`；pytest 共 121 个通过；**真机验收待用户**）
 - [x] v0.1-4 交互接入状态机（`shion/controller.py`、`effects.py`、`lines.py`、`assets/lines/zh.json`；pytest 共 151 个通过；**真机验收待用户**）
-- [ ] v0.1-5 气泡与台词 ← 下一步（台词库 zh.json / lines.py 已在第 4 步做好，只剩 bubble.py）
-- [ ] 把 server 回调接到 Qt 信号上（第 1 步之后）
+- [x] v0.1-5 气泡与台词（`shion/bubble.py`；pytest 共 173 个通过；**真机验收待用户**）
+- [ ] 把 server 回调接到 Qt 信号上 ← 下一步
 - [ ] v0.1 审查
 - [ ] v0.2 Claude Code hooks
 - [ ] v0.3 MCP
@@ -32,6 +32,20 @@
 - [ ] 高分屏（缩放 150%）下清晰度、窗口大小正常
 没能真机验证透明点穿的原因：测试时电脑处于锁屏状态（`WindowFromPoint` 返回 LockScreenBackstopFrame）。实现用的是 `setMask`（按精灵 alpha 生成遮罩），不依赖 Windows 分层窗口的自动穿透。
 
+## 第 5 步：待用户验收（同样没手动测）
+自动验证过：时间线（30ms/字、打完停留 4s、0.3s 淡出、新台词替换）、`place_bubble`（头顶居中、顶部放不下翻到脚下、左右夹进屏幕）、窗口（不抢焦点/不挡鼠标的窗口标志、打字全程大小不变、字数随时间单调增加、背景 #0A0A0A / 边框 #F58236 / 圆角 / 米白文字、到时自动隐藏）、控制器（默认出口走气泡、静音收起并不再弹、桌宠移动时气泡跟随）；`--snapshot --bubble` 截图目视检查过（中文折行、`> ` 前缀、位置）；真实运行 1.5 秒：单击后气泡出现在桌宠头顶，字体选到 Cascadia Mono。
+**需要用户在电脑前确认**：
+- [ ] 打字机速度（30ms/字）和停留（4 秒）观感合适，淡出自然
+- [ ] 气泡不抢焦点（点桌宠时别的窗口的输入焦点不丢）、不挡鼠标（气泡所在位置能点到下面的窗口）
+- [ ] 拖动桌宠时气泡跟着走；把桌宠拖到屏幕最上方，气泡翻到脚下；靠左右边缘时不出屏
+- [ ] 静音后不再弹，已显示的立刻消失；双击的状态提示不受静音影响
+- [ ] 字体显示正常（Cascadia Mono，中文回退到系统字体）
+
+## 第 5 步留给后面步骤的接口（`shion/bubble.py`）
+- `BubbleWindow(clock, autostart)`：`say(text)`、`follow(body_rect)`、`dismiss()`、`render_image(now)`、`font_family`、`timeline`、`line_count`；纯逻辑 `BubbleTimeline`、`place_bubble`、`pick_font_family`
+- `PetController(..., bubble=BubbleWindow)`：默认说话出口就是气泡；`PetWindow.body_rect()`、信号 `moved`
+- `--snapshot` 不再强制 offscreen（offscreen 平台没有任何字体，中文会变方块），用原生平台离屏渲染；`--bubble 文字` 把气泡画在头顶，`--at` 是打字进度
+
 ## 第 4 步：待用户验收（同样没手动测）
 自动验证过：窗口手势（头部悬停是张开的手、头部左右移动每 40px 一次 patted 且不会拖动、身体拖动发 drag_started/落地发 drag_finished、单击、双击顺序 clicked→double_clicked、右键发菜单信号、抓住下落中的桌宠再松手会继续落、改大小保持脚底不动）；控制器（摸头→happy+爱心+好感度、5 连戳→stop、10 连戳→dizzy、拖动含下落全程是 drag、菜单各项、静音、双击等待间隔后才显示状态、存档防抖/退出 flush/重启恢复大小、位置恢复与越界回退、睡眠唤醒台词、冷落回归台词）；真实运行 4 秒：存档和日志写到了数据目录，正常退出；爱心粒子截图看过。
 **需要用户在电脑前逐项上手玩**（`.venv\Scripts\python -m shion`；`SHION_DEBUG=1` 会缩短冷落/睡眠阈值并在控制台打日志）：
@@ -40,7 +54,7 @@
 - [ ] 身体拖动→drag 图，松手落地回 idle；重启后位置（x）和大小恢复
 - [ ] 双击：约半秒后出现「已陪伴… 今天被摸… 好感度…」提示
 - [ ] 右键菜单：夸夸 Claude（proud）、大小四档（切换后仍贴任务栏）、静音气泡、开机自启灰色、关于、退出
-- [ ] 台词目前用 **QToolTip 暂代气泡**，可能因为窗口没有焦点而不显示或位置不对——这个第 5 步会换成真气泡，先看看能不能看到就行
+- [x] 台词已在第 5 步换成真气泡（不再用 QToolTip）
 - [ ] 爱心窗口完全点不到（不挡鼠标）
 - [ ] 睡着（15 分钟无操作，或 `SHION_DEBUG=1` 下 1 分钟）后悬停会唤醒并说起床台词
 - [ ] 存档位置：`%APPDATA%\Shion\state.json`，日志：`%APPDATA%\Shion\shion.log`
@@ -100,6 +114,8 @@
 - `stop` 事件无论是否在 working 都会算一次任务完成
 
 ## 踩坑记录
+- `QT_QPA_PLATFORM=offscreen` 下没有任何字体（`QFontDatabase.families()` 为空），文字渲染成方块；要看中文截图必须用原生平台
+- 隐藏（没 show）的 QWidget 不会收到 move 事件，`moved` 信号相关测试要先 `show()`
 - `QTest.mouseDClick` 在 offscreen 下只发一个双击事件，没有按下/松开；测试里要手动补 `mouseRelease`
 - 测试里 `QMenu` 临时对象一旦被回收，里面的 `QAction` 就失效（RuntimeError），要留引用
 - `QWidget.grab()` 会被 `setMask` 裁剪，遮罩外的像素是未初始化内存（测试偶发角落有像素）；截图和测试改用 `render_frame()`

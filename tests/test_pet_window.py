@@ -383,6 +383,16 @@ def test_release_below_floor_pulls_back_onto_screen(win, qapp):
     assert win.y() + win.height() - MARGIN_BOTTOM <= avail.bottom() + 1
 
 
+def test_body_rect_and_moved_signal(win):
+    moves = []
+    win.show()  # 隐藏的窗口不会收到 move 事件
+    win.moved.connect(lambda: moves.append(1))
+    win.move(300, 200)
+    w, h = win.sprite_size
+    assert win.body_rect() == (300 + MARGIN_X, 200 + MARGIN_TOP, w, h)
+    assert moves
+
+
 def test_set_height_keeps_feet_center_and_snaps_to_floor(win):
     win.place_default()
     before = (win.x() + win.width() / 2, win.y() + win.height() - MARGIN_BOTTOM)
@@ -408,6 +418,30 @@ def test_single_instance_second_acquire_fails(qapp):
         assert c.acquire() is True
     finally:
         c.release()
+
+
+def test_snapshot_cli_bubble_adds_bubble_above_pet(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from PIL import Image
+
+    root = Path(__file__).resolve().parent.parent
+    sizes = {}
+    for name, extra in [("plain", []), ("bub", ["--bubble", "你好呀"])]:
+        out = tmp_path / f"{name}.png"
+        r = subprocess.run(
+            [sys.executable, "-m", "shion", "--snapshot", str(out), *extra],
+            cwd=root, capture_output=True, timeout=60,
+        )
+        assert r.returncode == 0, r.stderr
+        sizes[name] = Image.open(out)
+    assert sizes["bub"].height > sizes["plain"].height
+    # 顶部（气泡所在位置）有橙色边框像素（#F58236）
+    im = sizes["bub"].convert("RGBA")
+    orange = [im.getpixel((x, y)) for x in range(im.width) for y in range(30)]
+    assert any(p[3] > 100 and p[0] > 200 and 100 < p[1] < 160 and p[2] < 90 for p in orange)
 
 
 def test_snapshot_cli_writes_transparent_png_and_at_changes_frame(tmp_path):

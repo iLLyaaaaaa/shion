@@ -8,13 +8,15 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QStandardPaths
+from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from shion import state as state_mod
+from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController
 from shion.effects import HeartOverlay
-from shion.pet_window import PetWindow
+from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
 
 log = logging.getLogger("shion")
 
@@ -88,7 +90,10 @@ def run() -> int:
 
     win = PetWindow(height=data.window.get("height", 240))
     overlay = HeartOverlay()
-    controller = PetController(win, pet_state, scheduler, overlay=overlay, parent=app)
+    bubble = BubbleWindow()
+    controller = PetController(
+        win, pet_state, scheduler, overlay=overlay, bubble=bubble, parent=app
+    )
     controller.quit_requested.connect(app.quit)
     app.aboutToQuit.connect(scheduler.flush)
     controller.restore_position()
@@ -110,11 +115,11 @@ def snapshot(
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
     at：切到该状态后第几秒的那一帧（用来检查晃动、呼吸）。squash：在 0 秒触发压扁。
+    bubble：同时画出头顶的气泡；此时 at 是气泡打字的进度，at=0 表示显示完整台词。
     """
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # 不强制 offscreen：offscreen 平台没有任何字体，中文会变成方块；
+    # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
     app = QApplication.instance() or QApplication(sys.argv)
-    if bubble:
-        print("提示：气泡还没实现（第 5 步），--bubble 被忽略", file=sys.stderr)
     t = [100.0]  # 假时钟，不用真的等
     win = PetWindow(clock=lambda: t[0], autostart=False)
     win.set_state(state)
@@ -122,10 +127,34 @@ def snapshot(
         win._animator.squash(t[0], squash)
     t[0] += at
     win.advance_to(t[0])
-    ok = win.render_frame().save(out, "PNG")
+    img = win.render_frame()
+
+    if bubble:
+        bt = [100.0]
+        bw = BubbleWindow(clock=lambda: bt[0], autostart=False)
+        bw.say(bubble)
+        bt[0] += at if at > 0 else len(bubble) * CHAR_INTERVAL
+        bimg = bw.render_image(bt[0])
+        gap = GAP
+        cw = max(img.width(), bimg.width())
+        ch = bimg.height() + gap + img.height()
+        px = (cw - img.width()) // 2
+        py = bimg.height() + gap
+        sw, sh = win.sprite_size
+        body = (px + MARGIN_X, py + MARGIN_TOP, sw, sh)
+        bx, by = place_bubble(body, (bimg.width(), bimg.height()), (0, 0, cw, ch))
+        canvas = QImage(cw, ch, QImage.Format_ARGB32_Premultiplied)
+        canvas.fill(0)
+        p = QPainter(canvas)
+        p.drawImage(px, py, img)
+        p.drawImage(bx, by, bimg)
+        p.end()
+        img = canvas
+
+    ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)
         return 1
-    print(f"saved {out} ({win.width()}x{win.height()})")
+    print(f"saved {out} ({img.width()}x{img.height()})")
     del app
     return 0
