@@ -3,7 +3,8 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- **v0.1 已完成**（审查已做、意见已修）。下一步：**v0.2 Claude Code hooks**（见 spec「Claude Code hooks」）。但 v0.1 的**真机验收项还没人做**，用户回来后先按下面各节的清单一次性验收
+- **v0.1 已完成**（审查已做、意见已修），之后又做了 2.3 头身素材、三语、动画打磨与启动自我介绍（pytest 263 个通过）。下一步：**v0.2 Claude Code hooks**（见 spec「Claude Code hooks」）。但**真机验收项还没人做**，用户回来后先按下面各节的清单一次性验收
+- 2026-10-19 用 reviewer 审查了动画打磨与自我介绍两个 commit（`39b0316`、`ea6aac3`）：**没有必须修的问题**，未改代码。可选项（都没做）：①端口被占用时 `port_busy` 提示会立刻盖掉首次启动的 intro（`controller.py:132`、`app.py:136-138`）；②非首次启动的 `greeting` 台词是“Claude 来啦”，Claude 不一定在，可考虑专用 `startup` 类别；③同状态重复 `set_state` 不再重播动画，以后要重播用 `immediate=True`；④下落中改大小会重置下落速度；⑤淡化时每帧做 `toImage` 转换，卡了再缓存预乘 ndarray
 - v0.2 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
