@@ -1,0 +1,124 @@
+import json
+from datetime import datetime, timedelta
+
+from shion.state import SaveData, SaveScheduler, load, save
+
+T0 = datetime(2026, 10, 19, 12, 0, 0)
+
+
+def test_round_trip(tmp_path):
+    p = tmp_path / "state.json"
+    d = SaveData(
+        first_run=T0,
+        affection=7,
+        last_attended=T0 + timedelta(minutes=3),
+        pending_praise=2,
+        stats={"date": "2026-10-19", "pats": 4, "claude_tasks": 1},
+        window={"x": 10, "y": 20, "height": 320},
+        bubble_muted=True,
+        inject_praise=False,
+    )
+    save(p, d)
+    assert load(p) == d
+
+
+def test_missing_file_gives_defaults(tmp_path):
+    d = load(tmp_path / "nope.json")
+    assert d == SaveData()
+    assert d.affection == 0 and d.inject_praise is True
+    assert d.window["height"] == 240
+
+
+def test_corrupt_json_recovers_and_backs_up(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text("{ not json", encoding="utf-8")
+    assert load(p) == SaveData()
+    assert not p.exists()
+    assert (tmp_path / "state.json.bad").read_text(encoding="utf-8") == "{ not json"
+
+
+def test_non_object_json_treated_as_corrupt(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text("[1, 2, 3]", encoding="utf-8")
+    assert load(p) == SaveData()
+    assert (tmp_path / "state.json.bad").exists()
+
+
+def test_empty_file_treated_as_corrupt(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text("", encoding="utf-8")
+    assert load(p) == SaveData()
+
+
+def test_missing_and_wrong_type_fields_fall_back(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(
+        json.dumps({
+            "affection": "lots",
+            "pending_praise": -3,
+            "first_run": "yesterday",
+            "bubble_muted": "yes",
+            "stats": {"date": 5, "pats": "x"},
+            "window": {"x": "left", "height": 0},
+            "unknown_field": 1,
+        }),
+        encoding="utf-8",
+    )
+    d = load(p)
+    assert d.affection == 0
+    assert d.pending_praise == 0
+    assert d.first_run is None
+    assert d.bubble_muted is False
+    assert d.stats == {"date": "", "pats": 0, "claude_tasks": 0}
+    assert d.window["x"] is None and d.window["height"] == 1
+
+
+def test_partial_file_keeps_valid_fields(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"affection": 12, "inject_praise": False}), encoding="utf-8")
+    d = load(p)
+    assert d.affection == 12
+    assert d.inject_praise is False
+    assert d.window["height"] == 240
+
+
+def test_atomic_save_leaves_no_tmp_and_creates_dirs(tmp_path):
+    p = tmp_path / "sub" / "state.json"
+    save(p, SaveData(affection=1))
+    assert p.exists()
+    assert not (tmp_path / "sub" / "state.json.tmp").exists()
+    save(p, SaveData(affection=2))
+    assert load(p).affection == 2
+    assert [f.name for f in p.parent.iterdir()] == ["state.json"]
+
+
+def test_scheduler_debounce(tmp_path):
+    p = tmp_path / "state.json"
+    data = SaveData(affection=1)
+    s = SaveScheduler(p, data)
+    assert not s.due(T0)  # 没变化就不写
+
+    s.mark_dirty(T0)
+    assert not s.poll(T0 + timedelta(seconds=1.9))
+    assert not p.exists()
+
+    s.mark_dirty(T0 + timedelta(seconds=1.9))  # 又变化：重新计时
+    assert not s.poll(T0 + timedelta(seconds=3.0))
+    assert s.poll(T0 + timedelta(seconds=3.9))
+    assert load(p).affection == 1
+    assert not s.dirty
+    assert not s.poll(T0 + timedelta(seconds=10))  # 写过就不再写
+
+
+def test_scheduler_flush_writes_immediately(tmp_path):
+    p = tmp_path / "state.json"
+    s = SaveScheduler(p, SaveData(affection=5))
+    s.mark_dirty(T0)
+    s.flush()
+    assert load(p).affection == 5
+
+
+def test_scheduler_flush_noop_when_clean(tmp_path):
+    p = tmp_path / "state.json"
+    SaveScheduler(p, SaveData()).flush()
+    assert not p.exists()
