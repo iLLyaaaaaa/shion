@@ -64,6 +64,16 @@
     "intro": [
       "Nice to meet you! I'm Shion — I live on your desktop now.",
       "I'm Shion~ Let's get along!"
+    ],
+    "tool_error": [
+      "Ouch… an error!",
+      "Uh-oh, something went wrong",
+      "Th-that failed?"
+    ],
+    "nudge": [
+      "Claude's waiting for you~",
+      "It finished a while ago!",
+      "Come take a look~"
     ]
   },
   "ui": {
@@ -80,6 +90,22 @@
     "span_hours": "{hours}h {minutes}m",
     "span_minutes": "{minutes}m",
     "status": "Together for {span} · Pats today: {pats} · Claude tasks done: {tasks} · Affection: {affection}",
-    "port_busy": "Local port {port} is in use — Claude integration is unavailable for now."
+    "port_busy": "Local port {port} is in use — Claude integration is unavailable for now.",
+    "act_read": "Reading {target}…",
+    "act_edit": "Editing {target}…",
+    "act_write": "Writing {target}…",
+    "act_bash": "Running a command…",
+    "act_search": "Searching {target}…",
+    "act_web": "Looking up {target}…",
+    "act_agent": "Called a helper: {target}",
+    "act_other": "Working on something…",
+    "act_private": "Working…",
+    "done_summary": "Done: {text}",
+    "recent_header": "Recent:",
+    "menu_privacy": "Status only (hide details)",
+    "act_error": "Error: {target}",
+    "act_done": "Finished",
+    "act_start": "Started a session",
+    "act_error_plain": "Error"
   }
 }

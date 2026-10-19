@@ -421,6 +421,12 @@ class PetWindow(QWidget):
         self.menu_requested.emit(e.globalPos())
 
     # ---- 下落 ----
+    def bounce(self) -> None:
+        """跳一下（催你回来用）：复用点击的压扁回弹。"""
+        now = self._clock()
+        self._animator.squash(now, "click")
+        self._refresh(now)
+
     def start_fall(self) -> None:
         avail = self._screen_avail(self.geometry().center())
         x, floor_y = landing_geometry(

@@ -26,6 +26,7 @@ FONT_CANDIDATES = ("Cascadia Mono", "Consolas")
 FONT_PX = 13
 PREFIX = "> "
 PAD_X, PAD_Y = 9, 6
+LINE_SEP = "\u2028"  # QTextLayout 只把它当强制换行
 MAX_TEXT_W = 240  # 正文最大宽度（不含前缀和内边距）
 GAP = 6  # 气泡和精灵之间的空隙
 
@@ -168,6 +169,7 @@ class BubbleWindow(QWidget):
 
     def say(self, text: str) -> None:
         """开始说一句；正在说的会被直接替换。"""
+        text = text.replace("\r\n", "\n").replace("\n", LINE_SEP)  # 让换行真的换行（下标对得上）
         self._timeline.start(self._clock(), text)
         self._layout(text)
         self._place()
@@ -257,7 +259,7 @@ class BubbleWindow(QWidget):
             base = y0 + ln.y + ln.ascent
             p.drawText(QPointF(x0, base), PREFIX.rstrip())  # 每行开头都有 "> "
             if n > 0:
-                p.drawText(QPointF(x0 + self._prefix_w, base), text[ln.start : ln.start + n])
+                p.drawText(QPointF(x0 + self._prefix_w, base), text[ln.start : ln.start + n].replace(LINE_SEP, ""))
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)

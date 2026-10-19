@@ -6,13 +6,14 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
+from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
 from shion.effects import HeartOverlay
 from shion.lines import Lines
@@ -44,6 +45,7 @@ def pick_screen_rect(rects, x, y, w, h):
 VERSION = "0.1"
 TICK_MS = 100
 PAT_SAY_EVERY = 4  # 摸头每 4 次说一句话
+ACTIVITY_REPEAT = timedelta(seconds=3)  # 同一句“在干什么”这么久内不重复弹
 
 
 class PetController(QObject):
@@ -73,6 +75,8 @@ class PetController(QObject):
         self._say_fn = say or self._bubble_say
         self._pat_count = 0
         self._rng = random.Random()
+        self.activity = ActivityLog()
+        self._last_activity_say: Optional[tuple[str, datetime]] = None
 
         # 双击显示状态：等一个双击间隔，期间没有新的点击才显示
         self.status_delay_ms = QApplication.doubleClickInterval() if QApplication.instance() else 500
@@ -113,7 +117,7 @@ class PetController(QObject):
 
     def tick(self) -> None:
         now = self._now()
-        self.state.tick(now)
+        self.react(self.state.tick(now))
         self.sync()
         self.scheduler.poll(now)
 
@@ -121,6 +125,8 @@ class PetController(QObject):
         for r in reactions:
             if r.kind == "say":
                 self.say_key(r.key)
+            elif r.kind == "nudge":
+                self.window.bounce()
 
     def say_key(self, key: str) -> None:
         if self.state.save.bubble_muted:
@@ -132,6 +138,11 @@ class PetController(QObject):
     def greet_startup(self, first_start: bool) -> None:
         """首次介绍自己；以后每次启动有 10% 概率再介绍，遵守静音设置。"""
         self.say_key("intro" if first_start or self._rng.random() < 0.10 else "greeting")
+
+    def say_text(self, text: str) -> None:
+        """说一句现成的文字（遵守静音）。"""
+        if not self.state.save.bubble_muted:
+            self.say(text)
 
     def say(self, text: str) -> None:
         log.info("说：%s", text)
@@ -251,6 +262,11 @@ class PetController(QObject):
             self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
 
+    def set_privacy(self, private: bool) -> None:
+        self.state.save.privacy_mode = private
+        self.activity.clear()  # 之前记下的文件名等不会在切换后冒出来
+        self.scheduler.mark_dirty(self._now())
+
     def set_muted(self, muted: bool) -> None:
         self.state.save.bubble_muted = muted
         if muted and self.bubble is not None:
@@ -260,9 +276,35 @@ class PetController(QObject):
     # ------------------------------------------------------------ 来自 Claude 的事件
     def handle_event(self, etype: str, detail: Optional[str] = None) -> None:
         """处理本地 HTTP 服务转来的事件（必须在 GUI 线程调用，见 bridge.py）。"""
-        log.info("收到事件：%s %r", etype, detail)
-        self.react(self.state.claude_event(etype, detail, self._now()))
+        private = self.state.save.privacy_mode
+        log.info("收到事件：%s %r", etype, None if private else detail)
+        now = self._now()
+        ui = self.lines.ui
+        entry = make_entry(etype, detail, now)
+        self.activity.add(entry)
+        reactions = self.state.claude_event(etype, detail, now)
+        greeted = any(r.key in ("wake", "neglect_return") for r in reactions)  # 这句别被盖掉
+        if etype == "working" and parse_working(detail):
+            # 用“在读 x.py……”代替随机的“Claude 在努力中”
+            reactions = [r for r in reactions if r.key != "claude_working"]
+            self.react(reactions)
+            if not greeted:
+                self._say_activity(describe(entry, ui, private), now)
+        elif etype == "stop" and entry is not None and entry.target and not private:
+            reactions = [r for r in reactions if r.key != "claude_done"]
+            self.react(reactions)
+            if not greeted:
+                self.say_text(ui("done_summary", text=entry.target))
+        else:
+            self.react(reactions)
         self.sync()
+
+    def _say_activity(self, text: str, now: datetime) -> None:
+        last = self._last_activity_say
+        if last and last[0] == text and now - last[1] < ACTIVITY_REPEAT:
+            return
+        self._last_activity_say = (text, now)
+        self.say_text(text)
 
     def take_praise(self) -> int:
         """取走待夸奖计数（给 /praise/take 用）。"""
@@ -301,7 +343,11 @@ class PetController(QObject):
         )
 
     def _show_status(self) -> None:
-        self.say(self.status_text())
+        text = self.status_text()
+        recent = self.activity.recent_lines(self.lines.ui, self.state.save.privacy_mode)
+        if recent:
+            text += "\n" + self.lines.ui("recent_header") + "\n" + "\n".join(recent)
+        self.say(text)
 
     # ------------------------------------------------------------ 菜单
     def build_menu(self) -> QMenu:
@@ -324,6 +370,11 @@ class PetController(QObject):
         mute.setCheckable(True)
         mute.setChecked(self.state.save.bubble_muted)
         mute.triggered.connect(self.set_muted)
+
+        privacy = menu.addAction(ui("menu_privacy"))
+        privacy.setCheckable(True)
+        privacy.setChecked(self.state.save.privacy_mode)
+        privacy.triggered.connect(self.set_privacy)
 
         lang_menu = menu.addMenu(ui("menu_language"))
         lang_group = QActionGroup(lang_menu)

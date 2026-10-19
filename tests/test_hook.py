@@ -38,13 +38,78 @@ def run_hook(name, port, data_dir, stdin=b"{}"):
 
 @pytest.mark.parametrize(
     "name,etype",
-    [("PreToolUse", "working"), ("Stop", "stop"), ("Notification", "notification")],
+    [("Notification", "notification"), ("PostToolUseFailure", "tool_error")],
 )
 def test_forward_events(env, name, etype):
     srv, events, _, tmp = env
     r = run_hook(name, srv.port, tmp)
     assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
     assert events == [(etype, None)]
+
+
+def load_hook():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("shion_hook_mod", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_describe_tool():
+    h = load_hook()
+    assert h.describe_tool("Read", {"file_path": r"D:\a b\state.py"}) == {"tool": "read", "target": "state.py"}
+    assert h.describe_tool("Edit", {"file_path": "src/x/bubble.py", "old_string": "秘密"}) == {"tool": "edit", "target": "bubble.py"}
+    assert h.describe_tool("Write", {"file_path": "a.txt", "content": "秘密"})["target"] == "a.txt"
+    assert h.describe_tool("Bash", {"command": "rm -rf secret"}) == {"tool": "bash", "target": ""}
+    assert h.describe_tool("Grep", {"pattern": "x" * 50})["target"] == "x" * 19 + "…"
+    assert h.describe_tool("WebFetch", {"url": "https://x.com/a?token=1"}) == {"tool": "web", "target": "x.com"}
+    assert h.describe_tool("Agent", {"description": "查日志"}) == {"tool": "agent", "target": "查日志"}
+    assert h.describe_tool("Weird", None) == {"tool": "other", "target": ""}
+    assert h.describe_tool("Read", "not a dict") == {"tool": "read", "target": ""}
+
+
+def test_first_sentence():
+    h = load_hook()
+    assert h.first_sentence("## 做完啦！改了3个文件。\n其他") == "做完啦"
+    assert h.first_sentence("Done. All good") == "Done"
+    assert h.first_sentence("\n\n**好**的，已经处理完毕") == "好的，已经处理完毕"
+    assert h.first_sentence("v1.2 ok") == "v1.2 ok"
+    long = h.first_sentence("很长" * 50)
+    assert len(long) == 40 and long.endswith("…")
+    assert h.first_sentence(None) == "" and h.first_sentence("   \n ") == ""
+
+
+def test_pretooluse_sends_json_detail(env):
+    srv, events, _, tmp = env
+    payload = json.dumps({"tool_name": "Read", "tool_input": {"file_path": "C:/p/state.py"}}).encode()
+    r = run_hook("PreToolUse", srv.port, tmp, stdin=payload)
+    assert r.returncode == 0 and r.stdout == b""
+    assert events[0][0] == "working"
+    assert json.loads(events[0][1]) == {"tool": "read", "target": "state.py"}
+
+
+def test_pretooluse_bad_stdin_still_sends_working(env):
+    srv, events, _, tmp = env
+    run_hook("PreToolUse", srv.port, tmp, stdin=b"not json")
+    assert events[0][0] == "working" and json.loads(events[0][1])["tool"] == "other"
+
+
+def test_stop_sends_first_sentence(env):
+    srv, events, _, tmp = env
+    payload = json.dumps({"last_assistant_message": "## 改好了。后面还有很多"}, ensure_ascii=False).encode("utf-8")
+    run_hook("Stop", srv.port, tmp, stdin=payload)
+    assert events == [("stop", "改好了")]
+    events.clear()
+    run_hook("Stop", srv.port, tmp, stdin=b"{}")
+    assert events == [("stop", None)]
+
+
+def test_tool_error_sends_tool_name_but_not_interrupts(env):
+    srv, events, _, tmp = env
+    run_hook("PostToolUseFailure", srv.port, tmp, stdin=json.dumps({"tool_name": "Bash", "error": "Exit code 1"}).encode())
+    run_hook("PostToolUseFailure", srv.port, tmp, stdin=json.dumps({"tool_name": "Bash", "is_interrupt": True}).encode())
+    assert events == [("tool_error", "Bash")]
 
 
 def test_session_start_forwards_and_prints_nothing(env):
@@ -147,3 +212,12 @@ def test_hanging_server_returns_quickly(tmp_path):
         assert time.monotonic() - t0 < 5
     finally:
         s.close()
+
+
+def test_first_sentence_keeps_underscores():
+    assert load_hook().first_sentence("读取 does_not_exist.md 失败") == "读取 does_not_exist.md 失败"
+
+
+def test_describe_tool_caps_target_length():
+    h = load_hook()
+    assert len(h.describe_tool("Read", {"file_path": "a/" + "x" * 500})["target"]) == 60

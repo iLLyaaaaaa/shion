@@ -361,3 +361,54 @@ def test_debug_config_shortens_thresholds():
     p._last_activity = T0 + sec(45)
     assert p.current(T0 + sec(45)) == "neglect2"
     assert p.current(T0 + sec(45 + 61)) == "sleep"
+
+
+# ---- v0.2.1 ----
+
+def test_tool_error_dizzy_for_2s_and_line(pet):
+    r = pet.claude_event("tool_error", "Bash", T0)
+    assert "tool_error" in keys(r)
+    assert pet.current(T0) == "dizzy"
+    assert pet.current(T0 + sec(1.9)) == "dizzy"
+    assert pet.current(T0 + sec(2.1)) == "idle"
+
+
+def test_nudge_after_5min_max_twice(pet):
+    pet.claude_event("stop", None, T0)
+    assert pet.tick(T0 + sec(299)) == []
+    r = pet.tick(T0 + sec(300))
+    assert [x.kind for x in r] == ["say", "nudge"] and r[0].key == "nudge"
+    assert pet.tick(T0 + sec(301)) == []  # 下一次要再隔 5 分钟
+    assert pet.tick(T0 + sec(600)) != []
+    assert pet.tick(T0 + sec(900)) == []  # 最多 2 次
+
+
+@pytest.mark.parametrize("etype", ["prompt", "working", "session_start"])
+def test_nudge_reset_by_new_activity(pet, etype):
+    pet.claude_event("stop", None, T0)
+    pet.claude_event(etype, None, T0 + sec(100))
+    assert pet.tick(T0 + sec(1000)) == []
+
+
+def test_no_nudge_without_stop_or_when_asleep(pet):
+    assert pet.tick(T0 + sec(1000)) == []
+    p = PetState(SaveData(), T0, Config(nudge_after=timedelta(minutes=20)))
+    p.claude_event("stop", None, T0)
+    assert p.tick(T0 + timedelta(minutes=20)) == []  # 15 分钟无活动已睡着
+
+
+def test_privacy_mode_roundtrip():
+    d = SaveData()
+    d.privacy_mode = True
+    assert SaveData.from_dict(d.to_dict()).privacy_mode is True
+    assert SaveData.from_dict({"privacy_mode": "x"}).privacy_mode is False
+
+
+def test_nudge_cancelled_by_attention_and_wake(pet):
+    pet.claude_event("stop", None, T0)
+    pet.pat(T0 + sec(100))  # 用户理会了：不再催
+    assert pet.tick(T0 + sec(1000)) == []
+    p = PetState(SaveData(), T0)
+    p.claude_event("stop", None, T0)
+    p.interact(T0 + timedelta(minutes=16))  # 睡着后被唤醒：不会立刻冒出催促
+    assert p.tick(T0 + timedelta(minutes=16, seconds=1)) == []

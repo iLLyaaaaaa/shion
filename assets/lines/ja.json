@@ -66,6 +66,16 @@
     "intro": [
       "はじめまして！詩音だよ。今日からあなたのデスクトップに住むね。",
       "詩音っていいます～これからよろしくね！"
+    ],
+    "tool_error": [
+      "うぅ……エラーだよ",
+      "あれ、どこかおかしい",
+      "し、失敗しちゃった？"
+    ],
+    "nudge": [
+      "Claude が待ってるよ～",
+      "終わってからだいぶ経つよ！",
+      "見に来てあげて～"
     ]
   },
   "ui": {
@@ -82,6 +92,22 @@
     "span_hours": "{hours}時間{minutes}分",
     "span_minutes": "{minutes}分",
     "status": "一緒に過ごした時間 {span} · 今日なでられた回数 {pats} · Claude の完了タスク {tasks} · 好感度 {affection}",
-    "port_busy": "ローカルポート {port} が使用中のため、Claude との連携は一時的に使えません"
+    "port_busy": "ローカルポート {port} が使用中のため、Claude との連携は一時的に使えません",
+    "act_read": "{target} を読んでるよ……",
+    "act_edit": "{target} を直してるよ……",
+    "act_write": "{target} を書いてるよ……",
+    "act_bash": "コマンド実行中……",
+    "act_search": "{target} を探してるよ……",
+    "act_web": "{target} を調べてるよ……",
+    "act_agent": "お手伝いさんを呼んだ：{target}",
+    "act_other": "作業中……",
+    "act_private": "作業中……",
+    "done_summary": "できた：{text}",
+    "recent_header": "最近：",
+    "menu_privacy": "状態だけ表示（内容は隠す）",
+    "act_error": "エラー：{target}",
+    "act_done": "完了",
+    "act_start": "セッション開始",
+    "act_error_plain": "エラー"
   }
 }

@@ -3,11 +3,23 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- **v0.2 Claude Code hooks 已实现**（pytest 共 **287** 个通过，reviewer 已审、必须修的已修），见下面「v0.2」一节。**待用户验收**真机项；验收通过后用 `tools/install_hooks.py` 装到用户级，再按 v0.2.1 → v0.3 → v0.4 → v0.5 → v1.0 的顺序继续（v0.2.1 不依赖真机验收，可以先做）
+- **v0.2.1 状态感知已实现**（pytest 共 **321** 个通过，reviewer 已审、必须修的已修），见下面「v0.2.1」一节，**待用户验收**真机项。v0.2 hooks 同样待真机验收。验收通过后用 `tools/install_hooks.py` 装到用户级（**先卸载项目级那份**），再按 v0.3 → v0.4 → v0.5 → v1.0 继续
+- 当前 hooks 只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过
 - v0.1 及之后的素材/三语/动画打磨都已完成，真机验收清单仍在下面各节，用户回来后一次性验收
 - 2026-10-19 用 reviewer 审查了动画打磨与自我介绍两个 commit（`39b0316`、`ea6aac3`）：**没有必须修的问题**，未改代码。可选项（都没做）：①端口被占用时 `port_busy` 提示会立刻盖掉首次启动的 intro（`controller.py:132`、`app.py:136-138`）；②非首次启动的 `greeting` 台词是“Claude 来啦”，Claude 不一定在，可考虑专用 `startup` 类别；③同状态重复 `set_state` 不再重播动画，以后要重播用 `immediate=True`；④下落中改大小会重置下落速度；⑤淡化时每帧做 `toImage` 转换，卡了再缓存预乘 ndarray
 - v0.2 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
+
+## v0.2.1：状态感知（2026-10-19，用户外出，只做自动化验证）
+- **hook 命令改成 exec 形式**：`"command": "<.venv>/Scripts/python.exe", "args": ["<项目>/hooks/shion_hook.py", "<事件>"]`，绝对路径、不经过 shell，路径带空格也不用引号，PowerShell/bash 都不受影响，不再依赖 PATH 里的 python。已在 Claude Code 2.1.289 上用真实 `claude -p` 实测可用。`_is_shion` 同时识别旧的引号/`python "…"` 格式，重装会替换、卸载会删。新增订阅 `PostToolUseFailure`。
+- **hook 脚本**：PreToolUse 发 `working`，detail 是 JSON `{"tool": 类别, "target": 简短目标}`（文件只取文件名、搜索词/Agent 描述 ≤20 字、网址只取域名、目标最长 60 字，**Bash 不带命令内容**）；Stop 发 `stop`，detail 是回复第一句（≤40 字）；PostToolUseFailure 发 `tool_error`（用户中断的不发）。
+- **偏离 spec**：spec 写的是读 `transcript_path`，改用官方文档推荐的 stdin 字段 `last_assistant_message`（官方说 Stop 时 transcript 不保证已含最后一条）。
+- **桌宠侧**：新增 `shion/activity.py`（最近 20 条、显示 5 条，内存里，不进存档）；working 带描述时气泡说“在读 x.py……”等（同一句 3 秒内不重复，替代随机的 claude_working）；stop 带第一句时说“做完啦：…”；tool_error → dizzy 2 秒 + 台词；Claude 停下 5 分钟（debug 下 20 秒）没新消息 → 提醒并跳一下（`PetWindow.bounce`），最多 2 次，用户理会/睡醒/Claude 重新开始都会取消；双击状态下面多出“最近：”和 5 条记录；右键新增「只显示状态，不显示内容」（存档 `privacy_mode`，打开后不显示也不记日志文件名/搜索词/回复，切换时清空记录）。三语台词/界面文字都已加。
+- 气泡 `\n` 现在真的换行（内部用 U+2028，绘制时去掉），之前换行符会被当成一个字符挤在一行。
+- 验证：pytest 321 个通过（新增 hook 纯函数/子进程、状态机、控制器、activity、安装卸载测试）；真实 `claude -p` 端到端（隔离端口和数据目录）日志里依次出现 `working {"tool":"read","target":"progress.md"}`、“在读 progress.md……”、`tool_error 'Read'` → dizzy、`stop '读取失败：…'` → “做完啦：…”、20 秒后催促；用 `--snapshot` 看过长状态气泡（多行、最近 5 条）不越界。
+- **待用户验收**：①工具描述气泡会不会太吵（可调 `ACTIVITY_REPEAT`）；②“做完啦：……”转述是否通顺；③出错时晕一下的观感；④5 分钟后跳一下提醒是否合适；⑤双击看最近记录；⑥隐私开关；⑦桌面端 Code 标签页里是否同样生效（只在终端 `claude -p` 测过）。
+- 审查可选项（没做）：隐私模式只控制**显示和日志**，不控制传输——hook 不知道桌宠是否隐私模式，文件名/搜索词/回复第一句仍会发到本机 127.0.0.1；静音时催你回来仍会跳一下但不说话；`server.py` 的 `main()` 调试入口会 print detail（只在调试用）。
+- 踩坑：Python 里用 heredoc 写含 `\n`、`\\` 的源码时转义会被二次处理，改这类代码要用编辑工具直接改文件再跑测试。
 
 ## v0.2：Claude Code hooks（2026-10-19，用户外出，只做自动化验证）
 - 新增 `hooks/shion_hook.py`（只用标准库）：5 个事件映射到 session_start/prompt/working/stop/notification；UserPromptSubmit 调 `/praise/take`，count>0 且存档 `inject_praise` 不为 false 时用 UTF-8 字节写出那句表扬；SessionStart 在 `/health` 不通时用 `.venv\Scripts\pythonw.exe -m shion` 脱离父进程拉起桌宠并最多等 3 秒。任何情况返回 0、stderr 为空；请求不走系统代理、单次超时 0.5 秒，另有总时限兜底（普通事件 2.5 秒、SessionStart 12 秒）。
@@ -67,8 +79,8 @@
 - [x] 把 server 回调接到 Qt 信号上（`shion/bridge.py`、`app.run()` 启动服务；pytest 共 189 个通过；真机用 curl 验收待用户）
 - [x] v0.1 审查（独立子代理，只读）+ 修复（pytest 共 210 个通过）
 - [x] v0.2 Claude Code hooks（pytest 共 287 个通过；**真机验收待用户**）
-- [ ] v0.2.1 状态感知 ← 下一步
-- [ ] v0.3 Claude Code 遥控（同意/否决、做得好/有问题、暂停/继续）
+- [x] v0.2.1 状态感知（pytest 共 321 个通过；**真机验收待用户**）
+- [ ] v0.3 Claude Code 遥控（同意/否决、做得好/有问题、暂停/继续）← 下一步
 - [ ] v0.4 诗音的对话菜单（零食、预设对话，不调用模型）
 - [ ] v0.5 内容包
 - [ ] v1.0 发布

@@ -44,6 +44,11 @@ class Config:
     done_for: timedelta = timedelta(seconds=3)
     proud_for: timedelta = timedelta(seconds=3)
     react_for: timedelta = timedelta(seconds=3)
+    tool_error_for: timedelta = timedelta(seconds=2)
+
+    # 催你回来：Claude 停下后这么久没有新消息就提醒，最多提醒 nudge_max 次
+    nudge_after: timedelta = timedelta(minutes=5)
+    nudge_max: int = 2
 
     # 连戳 / 戳到爆
     stop_clicks: int = 5
@@ -63,6 +68,7 @@ class Config:
             neglect2=timedelta(seconds=40),
             sleep_idle=timedelta(seconds=60),
             working_timeout=timedelta(seconds=20),
+            nudge_after=timedelta(seconds=20),
         )
 
     def temp_duration(self, name: str) -> timedelta:
@@ -112,6 +118,7 @@ class SaveData:
     window: dict = field(default_factory=lambda: dict(DEFAULT_WINDOW))
     bubble_muted: bool = False
     inject_praise: bool = True
+    privacy_mode: bool = False  # 只显示状态，不显示文件名/命令/回复内容
     language: Optional[str] = None  # None = 还没选过，首次启动时跟随系统语言
 
     def to_dict(self) -> dict:
@@ -124,6 +131,7 @@ class SaveData:
             "window": dict(self.window),
             "bubble_muted": self.bubble_muted,
             "inject_praise": self.inject_praise,
+            "privacy_mode": self.privacy_mode,
             "language": self.language,
         }
 
@@ -139,6 +147,7 @@ class SaveData:
         d.pending_praise = _int(raw.get("pending_praise"), 0)
         d.bubble_muted = _bool(raw.get("bubble_muted"), False)
         d.inject_praise = _bool(raw.get("inject_praise"), True)
+        d.privacy_mode = _bool(raw.get("privacy_mode"), False)
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
 
@@ -267,6 +276,8 @@ class PetState:
         self._dragging = False
         self._temp: Optional[tuple[str, datetime]] = None  # (状态名, 到期时间)
         self._working_until: Optional[datetime] = None
+        self._stopped_at: Optional[datetime] = None  # Claude 停下的时间（催你回来用）
+        self._nudges = 0
         self._last_activity = now  # 最近一次鼠标交互或 Claude 事件（用于睡眠）
         self._woken_date = None  # 今天夜里是否已被叫醒过
         self._clicks: deque[datetime] = deque()
@@ -297,14 +308,27 @@ class PetState:
 
     # ------------------------------------------------------------ 输入
 
-    def tick(self, now: datetime) -> None:
-        """定时调用：清理到期的临时状态和 working，日期翻天时清零统计。"""
+    def tick(self, now: datetime) -> list[Reaction]:
+        """定时调用：清理到期的临时状态和 working，日期翻天时清零统计；返回“催你回来”等主动反应。"""
         self._roll_stats(now)
         if self._temp and now >= self._temp[1]:
             self._temp = None
         if self._working_until and now >= self._working_until:
             self._working_until = None
+        reactions: list[Reaction] = []
+        cfg = self.config
+        if (
+            self._stopped_at is not None
+            and self._nudges < cfg.nudge_max
+            and now - self._stopped_at >= cfg.nudge_after
+            and not self._is_asleep(now)
+        ):
+            self._nudges += 1
+            self._stopped_at = now  # 下一次提醒再隔一个 nudge_after
+            reactions.append(_say("nudge"))
+            reactions.append(Reaction("nudge", ""))
         self._log_state(now)
+        return reactions
 
     def interact(self, now: datetime) -> list[Reaction]:
         """悬停、双击、右键等：只负责唤醒，不算“被理会”。（拖动算，见 drag_start）"""
@@ -385,7 +409,7 @@ class PetState:
 
     def claude_event(self, etype: str, detail: Optional[str], now: datetime) -> list[Reaction]:
         """处理本地 HTTP 服务转来的事件。未知类型直接忽略。"""
-        if etype not in ("session_start", "prompt", "working", "stop", "notification", "react"):
+        if etype not in ("session_start", "prompt", "working", "stop", "notification", "react", "tool_error"):
             log.info("忽略未知事件：%r", etype)
             return []
         if etype == "react" and detail not in TEMP_STATES:
@@ -393,6 +417,8 @@ class PetState:
             return []
 
         reactions = self._touch(now, attend=True)
+        if etype in ("session_start", "prompt", "working"):
+            self._stopped_at, self._nudges = None, 0  # Claude 又开始干活了，不用催
         if etype == "session_start":
             reactions.append(_say("greeting"))
         elif etype == "working":
@@ -401,10 +427,14 @@ class PetState:
             self._working_until = now + self.config.working_timeout  # 有新事件就续期
         elif etype == "stop":
             self._working_until = None
+            self._stopped_at, self._nudges = now, 0
             self.save.stats["claude_tasks"] += 1
             self._set_temp("done", now)
             self._changed(now)
             reactions.append(_say("claude_done"))
+        elif etype == "tool_error":
+            self._temp = ("dizzy", now + self.config.tool_error_for)
+            reactions.append(_say("tool_error"))
         elif etype == "notification":
             reactions.append(_say("claude_waiting"))
         elif etype == "react":
@@ -426,6 +456,8 @@ class PetState:
         if attend:
             self.save.last_attended = now
             self._changed(now)
+        if attend or was_asleep:
+            self._stopped_at, self._nudges = None, 0  # 用户回来了，不用再催
 
         if attend and prev_level == 2:
             return [_say("neglect_return")]

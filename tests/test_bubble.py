@@ -232,3 +232,10 @@ def test_set_font_fallback_adds_only_installed_families(bub, monkeypatch):
     assert fams[0] == bub.font_family and "Yu Gothic UI" in fams and "No Such Font XYZ" not in fams
     bub.say("日本語のテスト")  # 切换后能正常排版
     assert bub.line_count >= 1
+
+
+def test_newline_breaks_line_and_is_not_drawn(bub):
+    bub.say("第一行\n第二行\n第三行")
+    assert bub.line_count == 3
+    img = bub.render_image(now=bub._clock() + 5)  # 打完字之后
+    assert img.width() > 0

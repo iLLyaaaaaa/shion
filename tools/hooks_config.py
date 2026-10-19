@@ -10,25 +10,27 @@ from pathlib import Path
 
 MARKER = "shion_hook.py"
 ROOT = Path(__file__).resolve().parent.parent
-EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Stop", "Notification"]
+EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUseFailure", "Stop", "Notification"]
 TIMEOUTS = {"SessionStart": 15}
 DEFAULT_TIMEOUT = 5
 
 
-def default_command_prefix(root: Path = ROOT) -> str:
-    """命令必须以不带引号的词开头：Claude Code 在 Windows 上可能用 PowerShell 执行 hook，
-    以 "路径" 开头会被当成字符串而解析失败。hook 脚本只用标准库，所以直接用 PATH 里的 python。"""
-    hook = (root / "hooks" / MARKER).as_posix()
-    if any(c in hook for c in '$`"'):
-        raise ValueError(f"项目路径含 $、反引号或引号，PowerShell 下命令会出错：{hook}")
-    found = shutil.which("python")
-    if not found or "windowsapps" in found.lower():
-        raise ValueError("PATH 里没有可用的 python（或只有 Microsoft Store 占位程序），hook 命令会失败")
-    return f'python "{hook}"'
+def default_python(root: Path = ROOT) -> str:
+    """hook 用项目 .venv 里的 python 的绝对路径（exec 形式：不经过 shell，路径带空格也不用引号）。"""
+    exe = root / ".venv" / "Scripts" / "python.exe"
+    if not exe.exists():
+        raise ValueError(f"找不到 {exe}，请先建好 .venv")
+    return exe.as_posix()
+
+
+def default_hook_script(root: Path = ROOT) -> str:
+    return (root / "hooks" / MARKER).as_posix()
 
 
 def _is_shion(hook) -> bool:
-    return isinstance(hook, dict) and MARKER in str(hook.get("command", ""))
+    if not isinstance(hook, dict):
+        return False
+    return MARKER in str(hook.get("command", "")) or MARKER in " ".join(map(str, hook.get("args") or []))
 
 
 def remove(settings: dict) -> dict:
@@ -61,7 +63,7 @@ def remove(settings: dict) -> dict:
     return out
 
 
-def merge(settings: dict, command_prefix: str) -> dict:
+def merge(settings: dict, python: str, script: str) -> dict:
     """返回加入 Shion hooks 的新 settings：先清掉旧的 Shion 条目，再追加，保留其他配置。"""
     out = remove(settings)
     hooks = out.setdefault("hooks", {})
@@ -70,7 +72,8 @@ def merge(settings: dict, command_prefix: str) -> dict:
     for event in EVENTS:
         entry = {
             "type": "command",
-            "command": f"{command_prefix} {event}",
+            "command": python,
+            "args": [script, event],
             "timeout": TIMEOUTS.get(event, DEFAULT_TIMEOUT),
         }
         group = {"hooks": [entry]}
@@ -106,14 +109,14 @@ def save_with_backup(path: Path, data: dict) -> Path | None:
     return backup
 
 
-def run(action: str, settings_path: str | None, prefix: str | None = None) -> int:
+def run(action: str, settings_path: str | None, python: str | None = None, script: str | None = None) -> int:
     path = Path(settings_path) if settings_path else Path.home() / ".claude" / "settings.json"
     if action == "uninstall" and not path.exists():
         print(f"没有需要卸载的：{path} 不存在")
         return 0
     try:
         current = load(path)
-        new = merge(current, prefix or default_command_prefix()) if action == "install" else remove(current)
+        new = merge(current, python or default_python(), script or default_hook_script()) if action == "install" else remove(current)
         if new == current and path.exists():
             print(f"没有变化，未改动：{path}")
             return 0

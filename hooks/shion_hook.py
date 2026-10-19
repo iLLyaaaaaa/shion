@@ -8,8 +8,10 @@ import os
 import subprocess
 import sys
 import threading
+import re
 import time
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 
 TIMEOUT = 0.5
@@ -17,6 +19,7 @@ EVENTS = {
     "SessionStart": "session_start",
     "UserPromptSubmit": "prompt",
     "PreToolUse": "working",
+    "PostToolUseFailure": "tool_error",
     "Stop": "stop",
     "Notification": "notification",
 }
@@ -77,18 +80,86 @@ def ensure_running() -> None:
             return
 
 
-def main() -> None:
+MAX_DETAIL = 1000
+TOOL_KIND = {
+    "Read": "read", "NotebookRead": "read",
+    "Edit": "edit", "MultiEdit": "edit", "NotebookEdit": "edit",
+    "Write": "write",
+    "Bash": "bash", "PowerShell": "bash",
+    "Grep": "search", "Glob": "search",
+    "WebFetch": "web", "WebSearch": "web",
+    "Agent": "agent", "Task": "agent",
+}
+
+
+def _short(text, limit: int) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def describe_tool(tool_name, tool_input) -> dict:
+    """把工具调用概括成 {"tool": 类别, "target": 简短目标}。不包含命令内容，文件只取文件名。"""
+    kind = TOOL_KIND.get(tool_name, "other")
+    ti = tool_input if isinstance(tool_input, dict) else {}
+    target = ""
+    if kind in ("read", "edit", "write"):
+        path = ti.get("file_path") or ti.get("notebook_path") or ""
+        target = _short(re.split(r"[\\/]", str(path))[-1], 60) if path else ""
+    elif kind == "search":
+        target = _short(ti.get("pattern") or "", 20)
+    elif kind == "web":
+        target = _short(urlparse(str(ti.get("url") or "")).hostname or ti.get("query") or "", 60)
+    elif kind == "agent":
+        target = _short(ti.get("description") or "", 20)
+    return {"tool": kind, "target": target}
+
+
+def first_sentence(text, limit: int = 40) -> str:
+    """取回复的第一句：去掉 markdown 符号，按句号/换行切，过长截断。"""
+    if not isinstance(text, str):
+        return ""
+    for line in text.splitlines():
+        line = re.sub(r"[#*>`]+", "", line).strip(" -\t")
+        if not line:
+            continue
+        m = re.search(r"[。！？!?]|\.(?=\s|$)", line)
+        sentence = line[: m.start()] if m else line
+        return _short(sentence.strip(), limit)
+    return ""
+
+
+def read_input() -> dict:
     try:
-        sys.stdin.buffer.read()
+        raw = sys.stdin.buffer.read()
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:
-        pass
+        return {}
+
+
+def build_detail(name: str, data: dict):
+    """各事件发给桌宠的 detail（字符串或 None）。"""
+    if name == "PreToolUse":
+        return json.dumps(describe_tool(data.get("tool_name"), data.get("tool_input")), ensure_ascii=False)
+    if name == "Stop":
+        return first_sentence(data.get("last_assistant_message")) or None
+    if name == "PostToolUseFailure":
+        return _short(data.get("tool_name") or "", 40) or None
+    return None
+
+
+def main() -> None:
+    data = read_input()
     name = sys.argv[1] if len(sys.argv) > 1 else ""
     etype = EVENTS.get(name)
     if etype is None:
         return
+    if name == "PostToolUseFailure" and data.get("is_interrupt"):
+        return
     if name == "SessionStart":
         ensure_running()
-    request("/event", {"type": etype})
+    detail = build_detail(name, data)
+    request("/event", {"type": etype} if detail is None else {"type": etype, "detail": detail[:MAX_DETAIL]})
     if name == "UserPromptSubmit":
         result = request("/praise/take", {})
         count = result.get("count", 0) if isinstance(result, dict) else 0

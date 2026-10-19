@@ -156,7 +156,7 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["夸夸 Claude", "大小", "静音气泡", "语言", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["夸夸 Claude", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
@@ -568,3 +568,115 @@ def test_switch_language_dismisses_bubble_and_sets_fonts(env):
     env.ctl.set_language("ja")
     assert fb.dismissed == 1
     assert fb.fallback == env.ctl.lines.font_fallback and fb.fallback
+
+
+# ---- v0.2.1 状态感知 ----
+
+def work(tool, target=""):
+    import json
+    return json.dumps({"tool": tool, "target": target}, ensure_ascii=False)
+
+
+def test_working_detail_says_what_claude_is_doing(env):
+    env.ctl.handle_event("working", work("read", "state.py"))
+    assert env.said == ["在读 state.py……"]
+    assert env.win.sprite_name == "working"
+
+
+def test_same_activity_not_repeated_within_3s(env):
+    env.ctl.handle_event("working", work("read", "state.py"))
+    env.advance(1)
+    env.ctl.handle_event("working", work("read", "state.py"))
+    assert env.said == ["在读 state.py……"]
+    env.advance(3)
+    env.ctl.handle_event("working", work("read", "state.py"))
+    assert env.said == ["在读 state.py……"] * 2
+    env.ctl.handle_event("working", work("edit", "a.py"))
+    assert env.said[-1] == "在改 a.py……"
+
+
+def test_working_without_detail_keeps_old_line(env):
+    env.ctl.handle_event("working", None)
+    assert len(env.said) == 1 and env.said[0] in ("Claude 在努力中……", "嘘，别打扰它")
+
+
+def test_privacy_mode_hides_target_and_summary(env):
+    env.ctl.set_privacy(True)
+    assert env.data.privacy_mode is True
+    env.ctl.handle_event("working", work("read", "secret.py"))
+    env.ctl.handle_event("stop", "我把密码改好了")
+    assert env.said[0] == "在忙……"
+    assert not any("secret" in t or "密码" in t for t in env.said)
+    env.ctl._show_status()
+    assert not any("secret" in t or "密码" in t for t in env.said)
+
+
+def test_stop_summary_replaces_done_line(env):
+    env.ctl.handle_event("stop", "改好了三个文件")
+    assert env.said == ["做完啦：改好了三个文件"]
+    assert env.win.sprite_name == "done"
+
+
+def test_stop_without_summary_uses_random_line(env):
+    env.ctl.handle_event("stop", None)
+    assert env.said and not env.said[0].startswith("做完啦：")
+
+
+def test_muted_suppresses_activity_and_summary(env):
+    env.ctl.set_muted(True)
+    env.ctl.handle_event("working", work("bash"))
+    env.ctl.handle_event("stop", "好了")
+    assert env.said == []
+
+
+def test_tool_error_makes_dizzy_2s(env):
+    env.ctl.handle_event("tool_error", "Bash")
+    assert env.win.sprite_name == "dizzy"
+    assert len(env.said) == 1
+    env.advance(2.1)
+    assert env.win.sprite_name != "dizzy"
+
+
+def test_double_click_status_lists_recent_activity(env):
+    env.ctl.handle_event("session_start", None)
+    env.ctl.handle_event("working", work("edit", "bubble.py"))
+    env.ctl.handle_event("stop", "好了")
+    env.said.clear()
+    env.ctl._show_status()
+    text = env.said[0]
+    assert "最近：" in text
+    assert "12:00 在改 bubble.py……" in text and "12:00 做完啦：好了" in text
+    assert text.index("做完啦") < text.index("在改")  # 新的在前
+
+
+def test_nudge_bounces_and_speaks(env):
+    env.ctl.handle_event("stop", None)
+    env.said.clear()
+    bounced = []
+    env.win.bounce = lambda: bounced.append(1)
+    env.advance(301)
+    assert bounced == [1] and len(env.said) == 1
+
+
+def test_menu_privacy_toggle_saves(env):
+    menu = env.ctl.build_menu()
+    act = find_action(menu, "只显示状态，不显示内容")
+    assert act.isCheckable() and not act.isChecked()
+    act.trigger()
+    assert env.data.privacy_mode is True
+
+
+def test_wake_line_not_overwritten_by_activity(env):
+    env.advance(16 * 60)  # 睡着
+    env.said.clear()
+    env.ctl.handle_event("working", work("read", "a.py"))
+    assert len(env.said) == 1 and "a.py" not in env.said[0]
+
+
+def test_privacy_toggle_clears_recent_activity(env):
+    env.ctl.set_privacy(True)
+    env.ctl.handle_event("working", work("read", "secret.py"))
+    env.ctl.set_privacy(False)
+    env.said.clear()
+    env.ctl._show_status()
+    assert "secret" not in env.said[0]

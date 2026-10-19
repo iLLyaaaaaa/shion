@@ -65,6 +65,16 @@
     "intro": [
       "初次见面！我是诗音，从今天起就住在你的桌面上啦。",
       "我叫诗音～以后请多关照！"
+    ],
+    "tool_error": [
+      "呜……出错了",
+      "诶，好像哪里不对",
+      "出、出错了？"
+    ],
+    "nudge": [
+      "Claude 好像在等你呢",
+      "它做完好一会儿啦～",
+      "回来看看它嘛"
     ]
   },
   "ui": {
@@ -81,6 +91,22 @@
     "span_hours": "{hours} 小时 {minutes} 分钟",
     "span_minutes": "{minutes} 分钟",
     "status": "已陪伴 {span} · 今天被摸 {pats} 次 · Claude 完成了 {tasks} 个任务 · 好感度 {affection}",
-    "port_busy": "本地端口 {port} 被占用了，Claude 联动暂时不可用"
+    "port_busy": "本地端口 {port} 被占用了，Claude 联动暂时不可用",
+    "act_read": "在读 {target}……",
+    "act_edit": "在改 {target}……",
+    "act_write": "在写 {target}……",
+    "act_bash": "在跑命令……",
+    "act_search": "在找 {target}……",
+    "act_web": "在上网查 {target}……",
+    "act_agent": "叫了个小帮手：{target}",
+    "act_other": "在忙……",
+    "act_private": "在忙……",
+    "done_summary": "做完啦：{text}",
+    "recent_header": "最近：",
+    "menu_privacy": "只显示状态，不显示内容",
+    "act_error": "出错了：{target}",
+    "act_done": "做完了",
+    "act_start": "开始了新对话",
+    "act_error_plain": "出错了"
   }
 }
