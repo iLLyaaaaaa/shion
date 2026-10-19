@@ -19,6 +19,7 @@ from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavi
 from shion.effects import HeartOverlay
 from shion.lines import Lines
 from shion.pet_window import PetWindow
+from shion.speech import PatSession, Priority, SpeechGate, speech_kind
 from shion.state import ACTIVITY_LEVELS, EXPRESSIONS, PetState, Reaction, SaveScheduler
 
 log = logging.getLogger("shion.controller")
@@ -45,7 +46,6 @@ def pick_screen_rect(rects, x, y, w, h):
     return None
 VERSION = "0.1"
 TICK_MS = 100
-PAT_SAY_EVERY = 4  # 摸头每 4 次说一句话
 ACTIVITY_REPEAT = timedelta(seconds=3)  # 同一句“在干什么”这么久内不重复弹
 
 
@@ -74,7 +74,8 @@ class PetController(QObject):
         self.bubble = bubble
         self._now_fn = now_fn
         self._say_fn = say or self._bubble_say
-        self._pat_count = 0
+        self._pat_session = PatSession()
+        self._speech = SpeechGate()
         self._rng = random.Random()
         self._idle = IdleBehavior()
         self._menu_open = False
@@ -153,36 +154,45 @@ class PetController(QObject):
             self.say_key("idle_talk")
         self.scheduler.poll(now)
 
-    def react(self, reactions: list[Reaction]) -> None:
+    def react(self, reactions: list[Reaction], *, category: str | None = None) -> None:
         for r in reactions:
             if r.kind == "say":
-                self.say_key(r.key)
+                self.say_key(r.key, category=category)
             elif r.kind == "nudge":
                 if (not self.state.save.fixed_expression and not self.state.is_working(self._now())
                         and self.state.current(self._now()) != "sleep"
                         and self.state.save.activity_level != "quiet"):
                     self.window.bounce()
 
-    def say_key(self, key: str) -> None:
+    def say_key(self, key: str, *, category: str | None = None) -> bool:
         if self.state.save.bubble_muted:
-            return
+            return False
+        priority, default_category = speech_kind(key)
+        category = category if priority == Priority.LOW and category else default_category
+        if not self._speech.allows(self.window.monotonic_time(), priority, category):
+            return False
         text = self.lines.pick(key)
-        if text:
-            self.say(text)
+        return self.say(text, priority=priority, category=category) if text else False
 
     def greet_startup(self, first_start: bool, from_hook: bool = False) -> None:
         """首次介绍自己；普通重启用 startup，hook 拉起留给 session_start 问候。"""
         if first_start or not from_hook:
             self.say_key("intro" if first_start else "startup")
 
-    def say_text(self, text: str) -> None:
+    def say_text(self, text: str, *, priority: Priority = Priority.LOW,
+                 category: str = "claude_working") -> bool:
         """说一句现成的文字（遵守静音）。"""
         if not self.state.save.bubble_muted:
-            self.say(text)
+            return self.say(text, priority=priority, category=category)
+        return False
 
-    def say(self, text: str) -> None:
+    def say(self, text: str, *, priority: Priority = Priority.MEDIUM,
+            category: str = "status") -> bool:
+        if not self._speech.start(self.window.monotonic_time(), text, priority, category):
+            return False
         log.info("说：%s", text)
         self._say_fn(text)
+        return True
 
     def _bubble_say(self, text: str) -> None:
         if self.bubble is None:
@@ -207,10 +217,10 @@ class PetController(QObject):
         self._on_pressed()
         self._status_timer.stop()
         reactions = self.state.pat(self._now())
-        self._pat_count += 1
-        if not reactions and self._pat_count % PAT_SAY_EVERY == 1:
+        due = self._pat_session.feed(self.window.monotonic_time())
+        if not reactions and due:
             reactions = [Reaction("say", "pat")]
-        self.react(reactions)
+        self.react(reactions, category="pat")
         if self.overlay is not None:
             self.overlay.burst(self.window.head_anchor())
         self.sync()
@@ -219,7 +229,7 @@ class PetController(QObject):
         self.window.stop_motion()
         self._on_pressed()
         self._status_timer.stop()
-        self.react(self.state.click(self._now()))
+        self.react(self.state.click(self._now()), category="poke")
         self.sync()
 
     def _on_double_click(self) -> None:
@@ -231,11 +241,11 @@ class PetController(QObject):
         self.window.stop_motion()
         self._on_pressed()
         self._status_timer.stop()
-        self.react(self.state.drag_start(self._now()))
+        self.react(self.state.drag_start(self._now()), category="drag")
         self.sync()
 
     def _on_drag_finished(self) -> None:
-        self.react(self.state.drag_end(self._now(), shaken=self.window.consume_shaken()))
+        self.react(self.state.drag_end(self._now(), shaken=self.window.consume_shaken()), category="drag")
         self.save_position()
         self.sync()
 
@@ -303,6 +313,7 @@ class PetController(QObject):
         """切换语言，立即生效并存档：之后的台词、菜单、状态文字都用新语言，旧气泡收起。"""
         self.lines.set_language(code)
         self.state.save.language = self.lines.lang
+        self._speech.dismiss()
         if self.bubble is not None:
             self.bubble.set_font_fallback(self.lines.font_fallback)
             self.bubble.dismiss()
@@ -315,6 +326,8 @@ class PetController(QObject):
 
     def set_muted(self, muted: bool) -> None:
         self.state.save.bubble_muted = muted
+        if muted:
+            self._speech.dismiss()
         if muted and self.bubble is not None:
             self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
@@ -368,8 +381,8 @@ class PetController(QObject):
         elif etype == "stop" and entry is not None and entry.target and not private:
             reactions = [r for r in reactions if r.key != "claude_done"]
             self.react(reactions)
-            if not greeted:
-                self.say_text(ui("done_summary", text=entry.target))
+            self.say_text(ui("done_summary", text=entry.target),
+                          priority=Priority.HIGH, category="claude_done")
         else:
             self.react(reactions)
         self.sync()
@@ -378,8 +391,8 @@ class PetController(QObject):
         last = self._last_activity_say
         if last and last[0] == text and now - last[1] < ACTIVITY_REPEAT:
             return
-        self._last_activity_say = (text, now)
-        self.say_text(text)
+        if self.say_text(text):
+            self._last_activity_say = (text, now)
 
     def take_praise(self) -> int:
         """取走待夸奖计数（给 /praise/take 用）。"""

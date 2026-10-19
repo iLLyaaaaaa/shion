@@ -15,9 +15,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-CHAR_INTERVAL = 0.030  # 每 30ms 出一个字
-HOLD = 4.0  # 全部显示后停留
-FADE = 0.3  # 淡出时长
+from shion.speech import CHAR_INTERVAL, HOLD, FADE
 
 BG = QColor("#0A0A0A")
 BORDER = QColor("#F58236")

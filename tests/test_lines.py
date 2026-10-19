@@ -67,6 +67,13 @@ def test_shipped_languages_are_zh_en_ja_with_zh_first():
     assert dict(langs)["en"] == "English"
 
 
+def test_english_expression_and_action_menu_labels():
+    lines = Lines("en")
+    assert [lines.ui(key) for key in (
+        "expression_stop", "expression_neglect2", "menu_auto_expression", "action_cross"
+    )] == ["Flustered", "Teary", "Auto expressions", "Walk to the other side"]
+
+
 # ---- 切换与回退 ----
 def test_set_language_switches_lines_ui_and_fonts():
     lines = Lines()

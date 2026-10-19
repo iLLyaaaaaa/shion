@@ -17,13 +17,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
     p.add_argument("--mirror", action="store_true", help="截图用：水平镜像，脚底锚点不变")
-    p.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
+    motion = p.add_mutually_exclusive_group()
+    motion.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
+    motion.add_argument("--walk", action="store_true", help="截图用：0 秒时开始行走，配合 --at 检查帧序列")
     args = p.parse_args(argv)
 
     from shion import app
 
     if args.snapshot:
-        return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang, args.from_state, args.mirror, args.jump)
+        return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
+                            args.from_state, args.mirror, args.jump, args.walk)
     return app.run()
 
 

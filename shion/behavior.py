@@ -20,8 +20,16 @@ WALK_SPEED = 80.0
 WALK_MIN_LEG = 40.0
 WALK_HOP_HEIGHT = 10.0
 WALK_HOP_PERIOD = 0.45
-JUMP_HEIGHT = 18.0
-JUMP_DURATION = 0.5
+WALK_FRAME_SECONDS = 0.140
+WALK_REFERENCE_SPEED = 80.0
+WALK_BOB_HEIGHT = 3.0
+WALK_BOB_FRAMES = 2  # 两帧一步，起伏随步频变化
+JUMP_CROUCH_DURATION = 0.15
+JUMP_AIR_DURATION = 0.4
+JUMP_HEIGHT = 40.0
+JUMP_DURATION = JUMP_CROUCH_DURATION + JUMP_AIR_DURATION
+LEGACY_JUMP_HEIGHT = 18.0
+LEGACY_JUMP_DURATION = 0.5
 
 
 class ShakeTracker:
@@ -85,12 +93,14 @@ class Walk:
                  cross: bool = False, rng: random.Random | None = None):
         rng = rng or random.Random()
         self.start = now
+        self.speed = WALK_SPEED
+        self.frame_seconds = WALK_FRAME_SECONDS * WALK_REFERENCE_SPEED / self.speed
         self.lo, self.hi = lo, max(lo, hi)
         x = max(self.lo, min(x, self.hi))
         self.points = [(0.0, x)]
         if cross:
             target = self.lo if x >= (self.lo + self.hi) / 2 else self.hi
-            self.duration = abs(target - x) / WALK_SPEED
+            self.duration = abs(target - x) / self.speed
             self.points.append((self.duration, target))
         else:
             self.duration = WALK_DURATION
@@ -99,7 +109,7 @@ class Walk:
                 target = rng.uniform(self.lo, self.hi)
                 if abs(target - x) < WALK_MIN_LEG:
                     target = self.lo if x >= (self.lo + self.hi) / 2 else self.hi
-                leg = abs(target - x) / WALK_SPEED
+                leg = abs(target - x) / self.speed
                 end = min(t + leg, self.duration)
                 x += (target - x) * ((end - t) / leg)
                 self.points.append((end, x))

@@ -246,7 +246,8 @@ def test_real_drag_reversals_trigger_dizzy_only_after_landing(env):
     assert w.sprite_name == "drag"
     env.advance(0.5)
     assert not w.is_falling and w.sprite_name == "dizzy"
-    assert env.said[-1] in env.ctl.lines._lines["dizzy"]
+    assert len(env.said) == 1 and env.said[-1] in env.ctl.lines._lines["drag"]
+    # 落地表情不受气泡冷却影响，晃晕台词不会抢掉刚说的拖动台词。
     env.advance(2.5)
     assert w.sprite_name == "idle"
 

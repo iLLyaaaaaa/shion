@@ -108,7 +108,8 @@ def test_random_poke_reaction_reaches_window_and_dialogue(env, monkeypatch):
         env.win.clicked.emit()
         env.advance(0.3)
     assert env.win.sprite_name == "dizzy"
-    assert any(t in Lines()._lines["dizzy"] for t in env.said)
+    assert len(env.said) == 1 and env.said[0] in Lines()._lines["poke"]
+    # 表情照常变化，低优先级的新台词不能盖掉刚出现的戳台词。
     env.advance(3.1)
     assert env.win.sprite_name == "idle"
 
@@ -580,7 +581,7 @@ def test_working_detail_says_what_claude_is_doing(env):
     assert env.win.sprite_name == "working"
 
 
-def test_same_activity_not_repeated_within_3s(env):
+def test_working_activity_obeys_low_category_cooldown(env):
     env.ctl.handle_event("working", work("read", "state.py"))
     env.advance(1)
     env.ctl.handle_event("working", work("read", "state.py"))
@@ -588,6 +589,9 @@ def test_same_activity_not_repeated_within_3s(env):
     env.advance(3)
     env.ctl.handle_event("working", work("read", "state.py"))
     assert env.said == ["在读 state.py……"] * 2
+    env.ctl.handle_event("working", work("edit", "a.py"))
+    assert env.said == ["在读 state.py……"] * 2
+    env.advance(4)
     env.ctl.handle_event("working", work("edit", "a.py"))
     assert env.said[-1] == "在改 a.py……"
 
@@ -639,6 +643,7 @@ def test_double_click_status_lists_recent_activity(env):
     env.ctl.handle_event("working", work("edit", "bubble.py"))
     env.ctl.handle_event("stop", "好了")
     env.said.clear()
+    env.advance(10)  # 中优先级的状态查询要等完成提示结束。
     env.ctl._show_status()
     text = env.said[0]
     assert "最近：" in text

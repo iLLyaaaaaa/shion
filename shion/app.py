@@ -21,6 +21,7 @@ from shion.effects import HeartOverlay
 from shion.lines import Lines, available_languages, resolve_language
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
 from shion.server import DEFAULT_PORT, ShionServer
+from shion.speech import Priority
 
 log = logging.getLogger("shion")
 
@@ -135,7 +136,7 @@ def run() -> int:
     log.info("Shion 启动，存档：%s", save_path)
     controller.greet_startup(first_start, from_hook=os.environ.get("SHION_LAUNCHED_BY_HOOK") == "1")
     if not server_ok:
-        controller.say(lines.ui("port_busy", port=port))
+        controller.say(lines.ui("port_busy", port=port), priority=Priority.HIGH, category="port_error")
     code = app.exec()
     scheduler.flush()
     guard.release()
@@ -152,6 +153,7 @@ def snapshot(
     from_state: str | None = None,
     mirror: bool = False,
     jump: bool = False,
+    walk: bool = False,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -169,12 +171,17 @@ def snapshot(
         win.set_state(state)
     if squash:
         win._animator.squash(t[0], squash)
-    if mirror:
-        win.face(-1)
     if jump:
         win.jump()
+    elif walk:
+        win.place_default()
+        win.walk(cross=True)
     t[0] += at
     win.advance_to(t[0])
+    if mirror:
+        win.face(-1)
+    elif walk:
+        win.face(1)
     img = win.render_frame()
 
     if bubble:
@@ -186,11 +193,13 @@ def snapshot(
         bimg = bw.render_image(bt[0])
         gap = GAP
         cw = max(img.width(), bimg.width())
-        ch = bimg.height() + gap + img.height()
         px = (cw - img.width()) // 2
-        py = bimg.height() + gap
+        # 气泡可占用画布顶部留边；腾空时留足空间，避免遮到头顶。
+        body_top = MARGIN_TOP - round(win._jump_offset)
+        py = max(0, bimg.height() + gap - body_top)
+        ch = bimg.height() + gap + img.height()
         sw, sh = win.sprite_size
-        body = (px + MARGIN_X, py + MARGIN_TOP, sw, sh)
+        body = (px + MARGIN_X, py + body_top, sw, sh)
         bx, by = place_bubble(body, (bimg.width(), bimg.height()), (0, 0, cw, ch))
         canvas = QImage(cw, ch, QImage.Format_ARGB32_Premultiplied)
         canvas.fill(0)

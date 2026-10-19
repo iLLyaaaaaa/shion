@@ -19,13 +19,21 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget
 
 from shion.animator import Animator, Frame
-from shion.behavior import JUMP_DURATION, JUMP_HEIGHT, ShakeTracker, Walk
+from shion.behavior import (
+    JUMP_AIR_DURATION, JUMP_CROUCH_DURATION, JUMP_DURATION, JUMP_HEIGHT,
+    LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT, WALK_BOB_FRAMES, WALK_BOB_HEIGHT,
+    ShakeTracker, Walk,
+)
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
 STATES = [
     "idle", "blink", "happy", "proud", "stop", "dizzy",
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
 ]
+SEQUENCES = {
+    "walk": tuple(f"walk_{i}" for i in range(1, 5)),
+    "jump": ("jump_1", "jump_2"),
+}
 
 DEFAULT_HEIGHT = 200
 HEAD_FRAC = 0.45  # 精灵上方多少比例算头部（摸头判定区）
@@ -86,6 +94,7 @@ class PetWindow(QWidget):
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
         self._mirrored_pixmaps: dict[str, QPixmap] = {}
+        self._sequences: dict[str, tuple[str, ...]] = {}
         self._sw = 0  # 精灵逻辑宽高
         self._sh = 0
         self._load_sprites()
@@ -119,6 +128,7 @@ class PetWindow(QWidget):
         self._walk: Walk | None = None
         self._walk_floor = 0
         self._jump_start: float | None = None
+        self._jump_framed = False
         self._automatic_jump = False
         self._jump_offset = 0.0
         self._facing = 1  # 原图朝向；+1 向右，-1 为镜像
@@ -189,18 +199,36 @@ class PetWindow(QWidget):
     def _load_sprites(self) -> None:
         screen = QGuiApplication.primaryScreen()
         dpr = screen.devicePixelRatio() if screen else 1.0
-        for name in STATES:
-            src = QPixmap(str(SPRITE_DIR / f"{name}.png"))
-            if src.isNull():
-                raise FileNotFoundError(SPRITE_DIR / f"{name}.png")
+        self._pixmaps.clear()
+        self._mirrored_pixmaps.clear()
+        self._sequences.clear()
+
+        def cache(name: str, src: QPixmap) -> None:
             pix = src.scaledToHeight(round(self._height * dpr), Qt.SmoothTransformation)
             pix.setDevicePixelRatio(dpr)
             self._pixmaps[name] = pix
             mirrored = pix.transformed(QTransform().scale(-1, 1), Qt.FastTransformation)
             mirrored.setDevicePixelRatio(dpr)
             self._mirrored_pixmaps[name] = mirrored
-            self._sw = round(pix.width() / dpr)
-            self._sh = round(pix.height() / dpr)
+
+        canvas = None
+        for name in STATES:
+            src = QPixmap(str(SPRITE_DIR / f"{name}.png"))
+            if src.isNull():
+                raise FileNotFoundError(SPRITE_DIR / f"{name}.png")
+            cache(name, src)
+            if name == "idle":
+                canvas = src.size()
+                self._sw = round(self._pixmaps[name].width() / dpr)
+                self._sh = round(self._pixmaps[name].height() / dpr)
+        for group, names in SEQUENCES.items():
+            sources = [QPixmap(str(SPRITE_DIR / f"{name}.png")) for name in names]
+            # 可选帧必须整组齐全且同画布；缺图或坏图沿用原来的程序动画。
+            if any(src.isNull() or src.size() != canvas for src in sources):
+                continue
+            for name, src in zip(names, sources):
+                cache(name, src)
+            self._sequences[group] = names
 
     @property
     def sprite_size(self) -> tuple[int, int]:
@@ -306,6 +334,11 @@ class PetWindow(QWidget):
 
     def _refresh(self, now: float) -> None:
         f = self._animator.frame(now)
+        if self._walk is not None and "walk" in self._sequences:
+            f = Frame(self._sequence_sprite("walk", now - self._walk.start, self._walk.frame_seconds))
+        elif self._jump_start is not None and self._jump_framed:
+            elapsed = max(0.0, now - self._jump_start)
+            f = Frame(self._sequences["jump"][0 if elapsed + 1e-9 < JUMP_CROUCH_DURATION else 1])
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
         f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
         if (f == self._frame and self._mask_key is not None
@@ -317,6 +350,11 @@ class PetWindow(QWidget):
         if self._mask_key != old_key:
             self.setMask(region)
         self.update()
+
+    def _sequence_sprite(self, group: str, elapsed: float, frame_seconds: float) -> str:
+        frames = self._sequences[group]
+        index = int(max(0.0, elapsed) / frame_seconds + 1e-9) % len(frames)
+        return frames[index]
 
     # ---- 位置 ----
     def _screen_avail(self, at: QPoint | None = None) -> QRect:
@@ -348,15 +386,27 @@ class PetWindow(QWidget):
             self._facing = direction
             self.move(round(x), self._walk_floor)
             self._jump_offset = jump
+            if "walk" in self._sequences and not finished:
+                elapsed = max(0.0, now - self._walk.start)
+                period = self._walk.frame_seconds * WALK_BOB_FRAMES
+                self._jump_offset = WALK_BOB_HEIGHT * abs(math.sin(math.pi * elapsed / period))
             if finished:
                 self._walk = None
                 self._jump_offset = 0.0
                 self.motion_finished.emit()
         elif self._jump_start is not None:
-            p = (now - self._jump_start) / JUMP_DURATION
-            self._jump_offset = JUMP_HEIGHT * math.sin(math.pi * max(0.0, p)) if p < 1 else 0.0
-            if p >= 1:
+            duration = JUMP_DURATION if self._jump_framed else LEGACY_JUMP_DURATION
+            crouch = JUMP_CROUCH_DURATION if self._jump_framed else 0.0
+            air = JUMP_AIR_DURATION if self._jump_framed else LEGACY_JUMP_DURATION
+            height = JUMP_HEIGHT if self._jump_framed else LEGACY_JUMP_HEIGHT
+            elapsed = max(0.0, now - self._jump_start)
+            p = max(0.0, min(1.0, (elapsed - crouch) / air))
+            self._jump_offset = height * math.sin(math.pi * p)
+            if elapsed + 1e-9 >= duration:
+                if self._jump_framed:
+                    self._animator.squash(self._jump_start + duration, "land")
                 self._jump_start = None
+                self._jump_offset = 0.0
         if self._dragging and dt > 0:
             vx = (self.x() - self._last_drag_x) / dt
             self._last_drag_x = self.x()
@@ -502,7 +552,9 @@ class PetWindow(QWidget):
             return
         self.stop_motion()
         self._automatic_jump = automatic
+        self._jump_framed = "jump" in self._sequences
         self._jump_start = self._clock()
+        self.advance_to(self._jump_start)
 
     def walk(self, *, cross: bool = False, rng=None) -> None:
         if self._dragging or self._falling:
