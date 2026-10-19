@@ -10,6 +10,8 @@ from PySide6.QtCore import QPoint, QPointF, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
+from shion.animator import ease_out
+
 LIFETIME = 1.0  # 秒
 RISE = 70.0  # px
 ORANGE = QColor("#F58236")
@@ -53,7 +55,8 @@ class Particles:
             t = (now - p.born) / LIFETIME
             if not 0 <= t < 1:
                 continue
-            out.append((p.x0 + p.drift * t, -RISE * t, p.size, 1.0 - t * t))
+            eased = ease_out(t)
+            out.append((p.x0 + p.drift * eased, -RISE * eased, p.size, 1.0 - t * t))
         return out
 
 
@@ -72,7 +75,7 @@ class HeartOverlay(QWidget):
 
     SIZE = 160
 
-    def __init__(self, clock: Callable[[], float] = time.monotonic, autostart: bool = True):
+    def __init__(self, clock: Callable[[], float] = time.perf_counter, autostart: bool = True):
         super().__init__()
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -85,6 +88,7 @@ class HeartOverlay(QWidget):
         self._particles = Particles()
         self._anchor = QPoint(0, 0)  # 出生点（全局坐标）
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self.tick)
         self._autostart = autostart

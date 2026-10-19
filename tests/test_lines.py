@@ -11,11 +11,19 @@ from shion.lines import (
 NEEDED = {
     "poke", "stop", "dizzy", "drag", "wake", "neglect_return", "praise_menu",
     "claude_working", "claude_done", "pat", "greeting", "claude_waiting",
+    "intro",
 }
 
 
 def test_zh_json_has_every_key_the_state_machine_uses():
     assert NEEDED <= Lines().keys()
+
+
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+def test_every_language_has_nonempty_introductions(lang):
+    raw = json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))
+    assert raw["lines"]["intro"]
+    assert Lines(lang).pick("intro") in raw["lines"]["intro"]
 
 
 def test_pick_never_repeats_consecutively():

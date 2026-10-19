@@ -73,6 +73,11 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
         procs.append(p1)
         assert wait_for(lambda: http(port, "GET", "/health") == {"ok": True}), log_text(log1)
 
+        from shion.lines import Lines
+
+        introductions = [line for lang in ("zh", "en", "ja") for line in Lines(lang)._lines["intro"]]
+        assert wait_for(lambda: any(line in log_text(log1) for line in introductions)), log_text(log1)
+
         assert http(port, "POST", "/event", {"type": "working"}) == {"ok": True}
         assert wait_for(lambda: "→ working" in log_text(log1)), log_text(log1)
         http(port, "POST", "/event", {"type": "stop"})

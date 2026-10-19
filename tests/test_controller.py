@@ -81,6 +81,26 @@ def test_pat_occasionally_says_a_pat_line(env):
     assert len(env.said) < 5  # 不是每次都说
 
 
+@pytest.mark.parametrize("first,roll,key", [(True, 0.99, "intro"), (False, 0.099, "intro"), (False, 0.10, "greeting"), (False, 0.99, "greeting")])
+def test_startup_intro_probability_and_first_launch(env, monkeypatch, first, roll, key):
+    monkeypatch.setattr(env.ctl._rng, "random", lambda: roll)
+    env.ctl.greet_startup(first)
+    assert len(env.said) == 1
+    assert env.said[0] in env.ctl.lines._lines[key]
+
+
+def test_startup_greeting_respects_mute(env):
+    env.data.bubble_muted = True
+    env.ctl.greet_startup(True)
+    env.ctl.greet_startup(False)
+    assert env.said == []
+
+
+def test_controller_timers_are_precise(env):
+    assert env.ctl._timer.timerType() == Qt.PreciseTimer
+    assert env.ctl._status_timer.timerType() == Qt.PreciseTimer
+
+
 def test_five_clicks_in_3s_is_stop_ten_in_5s_is_dizzy(env):
     for _ in range(5):
         env.win.clicked.emit()

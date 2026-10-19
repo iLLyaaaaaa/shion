@@ -9,7 +9,7 @@ import random
 from datetime import datetime
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, QPoint, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
@@ -77,6 +77,7 @@ class PetController(QObject):
         # 双击显示状态：等一个双击间隔，期间没有新的点击才显示
         self.status_delay_ms = QApplication.doubleClickInterval() if QApplication.instance() else 500
         self._status_timer = QTimer(self)
+        self._status_timer.setTimerType(Qt.PreciseTimer)
         self._status_timer.setSingleShot(True)
         self._status_timer.timeout.connect(self._show_status)
 
@@ -93,6 +94,7 @@ class PetController(QObject):
         self._watch_screens()
 
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(TICK_MS)
         self._timer.timeout.connect(self.tick)
         self.sync()
@@ -126,6 +128,10 @@ class PetController(QObject):
         text = self.lines.pick(key)
         if text:
             self.say(text)
+
+    def greet_startup(self, first_start: bool) -> None:
+        """首次介绍自己；以后每次启动有 10% 概率再介绍，遵守静音设置。"""
+        self.say_key("intro" if first_start or self._rng.random() < 0.10 else "greeting")
 
     def say(self, text: str) -> None:
         log.info("说：%s", text)

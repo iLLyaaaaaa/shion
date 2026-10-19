@@ -93,6 +93,7 @@ def run() -> int:
     directory = data_dir()
     setup_logging(directory, debug)
     save_path = directory / "state.json"
+    first_start = not save_path.exists()
 
     now = datetime.now()
     data = state_mod.load(save_path)
@@ -132,6 +133,7 @@ def run() -> int:
     controller.restore_position()
     win.show()
     log.info("Shion 启动，存档：%s", save_path)
+    controller.greet_startup(first_start)
     if not server_ok:
         controller.say(lines.ui("port_busy", port=port))
     code = app.exec()
@@ -147,18 +149,22 @@ def snapshot(
     at: float = 0.0,
     squash: str | None = None,
     lang: str = "zh",
+    from_state: str | None = None,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
     at：切到该状态后第几秒的那一帧（用来检查晃动、呼吸）。squash：在 0 秒触发压扁。
     bubble：同时画出头顶的气泡；此时 at 是气泡打字的进度，at=0 表示显示完整台词。
+    from_state：从指定精灵淡化到 state，用 at 检查过渡的中间帧。
     """
     # 不强制 offscreen：offscreen 平台没有任何字体，中文会变成方块；
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
     app = QApplication.instance() or QApplication(sys.argv)
     t = [100.0]  # 假时钟，不用真的等
     win = PetWindow(clock=lambda: t[0], autostart=False)
-    win.set_state(state)
+    win.set_state(from_state or state, animate=False)
+    if from_state:
+        win.set_state(state)
     if squash:
         win._animator.squash(t[0], squash)
     t[0] += at

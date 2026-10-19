@@ -29,3 +29,18 @@ def test_expired_particles_are_removed():
 
 def test_heart_path_has_area():
     assert heart_path(18).boundingRect().width() > 10
+
+
+def test_particle_motion_eases_out_and_skips_expired_frames():
+    p = Particles(random.Random(1))
+    p.spawn(0, 1)
+    y0 = p.items(0)[0][1]
+    y1 = p.items(0.25)[0][1]
+    y2 = p.items(0.5)[0][1]
+    assert abs(y1 - y0) > abs(y2 - y1)  # 开始快，结尾慢
+    direct = p.items(0.75)
+    for i in range(45):
+        p.update(i / 60)
+    assert p.items(0.75) == direct
+    p.update(2)
+    assert not p.active

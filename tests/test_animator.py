@@ -178,3 +178,77 @@ def test_effects_stack():
     f = a.frame(0.075)
     assert f.angle > 2.0  # 晃动仍在
     assert f.sy < 1.0  # 压扁同时生效
+
+
+def test_switch_fades_for_120ms_and_squashes_then_settles():
+    a = make("working")
+    a.set_state("done", 1.0)
+    assert dict(a.frame(1.0).layers) == {"working": 1.0}
+    mid = a.frame(1.06)
+    weights = dict(mid.layers)
+    assert 0 < weights["working"] < weights["done"] < 1
+    assert sum(weights.values()) == pytest.approx(1)
+    assert 0.96 < mid.sy < 1
+    assert mid.sx > 1
+    assert a.frame(1.12).layers == (("done", 1.0),)
+    assert a.frame(1.19).sy > 1  # 轻微回弹
+    assert a.frame(1.25).sy == 1
+
+
+def test_interrupted_switch_keeps_current_blend_and_same_state_does_not_restart():
+    a = make("working")
+    a.set_state("done", 1)
+    before = dict(a.frame(1.04).layers)
+    a.set_state("happy", 1.04)
+    assert dict(a.frame(1.04).layers) == pytest.approx(before)
+    a.set_state("happy", 1.10)
+    assert a.frame(1.17).layers == (("happy", 1.0),)
+
+
+def test_switch_eases_from_current_angle_without_snapping():
+    a = make("dizzy")
+    before = a.frame(0.225)
+    assert before.angle == pytest.approx(5)
+    a.set_state("working", 0.225)
+    assert a.frame(0.225).angle == before.angle
+    assert 0 < a.frame(0.285).angle < before.angle
+    assert a.frame(0.35).angle == 0
+
+
+def test_idle_gestures_are_small_scheduled_and_stop_outside_idle():
+    a = make()
+    first = a._next_idle
+    assert A.IDLE_MIN <= first <= A.IDLE_MAX
+    angles = [a.frame(first + i * 0.01).angle for i in range(121)]
+    assert max(abs(x) for x in angles) > 0.5
+    assert max(abs(x) for x in angles) <= 1.8
+    assert angles[0] == pytest.approx(0) and angles[-1] == pytest.approx(0)
+    assert A.IDLE_MIN <= a._next_idle - first <= A.IDLE_MAX
+    a.set_state("working", first + 2)
+    assert a.frame(first + 20).angle == 0
+
+
+def test_animation_result_does_not_depend_on_dropped_frames():
+    dense, sparse = make(seed=88), make(seed=88)
+    for i in range(1200):
+        dense.frame(i / 60)
+    f1, f2 = dense.frame(20.0), sparse.frame(20.0)
+    assert f1 == f2
+    for a in (dense, sparse):
+        a.set_state("done", 20)
+    for i in range(1, 8):
+        dense.frame(20 + i / 60)
+    assert dense.frame(20.5) == sparse.frame(20.5)
+
+
+def test_tilt_ease_out_depends_on_elapsed_time_not_frame_count():
+    dense, sparse = make("drag"), make("drag")
+    for a in (dense, sparse):
+        a.set_drag(True, 0)
+        a.feed_velocity(400, 0)
+    for i in range(1, 31):
+        dense.frame(i / 60)
+    assert dense.frame(0.5).angle == pytest.approx(sparse.frame(0.5).angle)
+    for a in (dense, sparse):
+        a.set_drag(False, 0.5)
+    assert dense.frame(3).angle == sparse.frame(3).angle == 0

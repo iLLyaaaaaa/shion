@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -88,6 +88,74 @@ def test_unknown_sprite_rejected(win):
         win.set_state("nope")
 
 
+def test_animation_timers_use_precise_timer(qapp, fwin):
+    from shion.bubble import BubbleWindow
+    from shion.effects import HeartOverlay
+
+    bubble, hearts = BubbleWindow(autostart=False), HeartOverlay(autostart=False)
+    try:
+        for obj in (fwin, bubble, hearts):
+            assert obj._timer.timerType() == Qt.PreciseTimer
+    finally:
+        bubble.close()
+        hearts.close()
+
+
+def test_crossfade_preserves_opaque_overlap_and_mixes_colors(fwin):
+    fwin._pixmaps["idle"].fill(QColor("red"))
+    fwin._pixmaps["working"].fill(QColor("blue"))
+    fwin.set_state("working")
+    at(fwin, 0.06)
+    color = fwin.render_frame().pixelColor(fwin.width() // 2, fwin.height() // 2)
+    assert color.alpha() == 255  # 两张不透明图交叉淡化不应出现透明闪烁
+    assert 0 < color.red() < color.blue() < 255
+    at(fwin, 0.07)
+    assert fwin.frame.layers == (("working", 1.0),)
+
+
+@pytest.mark.parametrize("state", ["drag", "sleep", "neglect2", "working", "proud"])
+def test_transition_mask_covers_both_sprites_without_covering_empty_corners(fwin, state):
+    fwin.set_state(state)
+    at(fwin, 0.04)
+    a, mask = alpha_of(fwin), fwin.mask()
+    ys, xs = np.where(a > 64)
+    assert all(mask.contains(QPoint(int(x), int(y))) for x, y in zip(xs, ys))
+    assert not mask.contains(QPoint(0, 0))
+    at(fwin, 0.09)
+    assert fwin.frame.layers == ((state, 1.0),)
+
+
+def test_mask_cache_reuses_geometry_when_only_blend_weights_change(fwin):
+    from shion.animator import Frame
+
+    first = fwin._mask_for(Frame("working", layers=(("idle", 0.8), ("working", 0.2))))
+    count = len(fwin._mask_cache)
+    second = fwin._mask_for(Frame("working", layers=(("idle", 0.2), ("working", 0.8))))
+    assert first == second
+    assert len(fwin._mask_cache) == count
+
+
+def test_fall_distance_and_landing_do_not_depend_on_frame_count(qapp):
+    windows = [PetWindow(clock=lambda: 100.0, autostart=False) for _ in range(2)]
+    try:
+        for w in windows:
+            w.set_state("working", animate=False)  # 排除 idle 呼吸，单独检查下落
+            w.move(100, 0)
+            w.start_fall()
+        for i in range(1, 13):
+            windows[0].advance_to(100.0 + i / 60)
+        windows[1].advance_to(100.2)
+        assert windows[0].y() == windows[1].y() == 48
+        for w in windows:
+            w.advance_to(105.0)  # 卡顿后一步赶到落地及压扁结束的位置
+            assert not w.is_falling
+            assert w.y() == w._fall_floor
+            assert w.frame.sy == 1
+    finally:
+        for w in windows:
+            w.close()
+
+
 def test_transparent_corners_are_masked_out(win):
     """透明像素不在 mask 里 = 点击穿透。"""
     m = win.mask()
@@ -122,7 +190,7 @@ def feet_x(a):
 
 def test_anchor_idle_breath_does_not_float(fwin):
     fwin.set_state("happy")  # happy 有晃动，先用无晃动的 neglect2 做基准
-    fwin.set_state("neglect1")  # 只有呼吸
+    fwin.set_state("neglect1", animate=False)  # 单独检查呼吸，交叉淡化另有测试
     base = feet_metrics(alpha_of(fwin))
     for _ in range(30):
         at(fwin, 0.1)  # 走过整整一个 3 秒呼吸周期
@@ -470,6 +538,17 @@ def test_snapshot_cli_bubble_adds_bubble_above_pet(tmp_path):
     im = sizes["bub"].convert("RGBA")
     orange = [im.getpixel((x, y)) for x in range(im.width) for y in range(30)]
     assert any(p[3] > 100 and p[0] > 200 and 100 < p[1] < 160 and p[2] < 90 for p in orange)
+
+
+def test_snapshot_can_capture_transition_without_changing_plain_state_snapshots(qapp, tmp_path):
+    from shion.app import snapshot
+
+    paths = [tmp_path / f"frame-{i}.png" for i in range(3)]
+    assert snapshot(str(paths[0]), "working") == 0
+    assert snapshot(str(paths[1]), "working", from_state="idle", at=0) == 0
+    assert snapshot(str(paths[2]), "working", from_state="idle", at=0.06) == 0
+    images = [QImage(str(p)) for p in paths]
+    assert images[0] != images[1] and images[1] != images[2] and images[2] != images[0]
 
 
 def test_snapshot_cli_writes_transparent_png_and_at_changes_frame(tmp_path):

@@ -116,7 +116,7 @@ class _Line:
 
 
 class BubbleWindow(QWidget):
-    def __init__(self, clock: Callable[[], float] = time.monotonic, autostart: bool = True):
+    def __init__(self, clock: Callable[[], float] = time.perf_counter, autostart: bool = True):
         super().__init__()
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -141,6 +141,7 @@ class BubbleWindow(QWidget):
         self._prefix_w = QFontMetricsF(self._font).horizontalAdvance(PREFIX)
 
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._tick)
 

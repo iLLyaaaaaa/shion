@@ -17,10 +17,14 @@ BLINK_MIN, BLINK_MAX = 3.0, 6.0
 BLINK_DURATION = 0.120
 DOUBLE_BLINK_CHANCE = 0.15
 DOUBLE_BLINK_GAP = 0.150  # 第一次眨眼结束到第二次开始
+TRANSITION = 0.120
+IDLE_MIN, IDLE_MAX = 6.0, 15.0
+IDLE_DURATION = 1.2
 
 SQUASH = {  # kind -> (时长 s, 最扁 sy)
     "click": (0.20, 0.92),
     "land": (0.25, 0.88),
+    "switch": (0.24, 0.97),
 }
 
 SWAY = {  # 状态 -> (幅度 度, 周期 s)
@@ -39,6 +43,18 @@ class Frame:
     sx: float = 1.0
     sy: float = 1.0
     angle: float = 0.0  # 度，顺时针为正
+    layers: tuple[tuple[str, float], ...] = ()  # 交叉淡化的图片及权重（总和为 1）
+
+
+def ease_out(t: float) -> float:
+    """三次 ease-out；所有调用都按经过的秒数归一化，不累计帧数。"""
+    t = max(0.0, min(1.0, t))
+    return 1.0 - (1.0 - t) ** 3
+
+
+def smooth_step(t: float) -> float:
+    t = max(0.0, min(1.0, t))
+    return t * t * (3.0 - 2.0 * t)
 
 
 def squash_scale(kind: str, elapsed: float) -> float:
@@ -61,6 +77,7 @@ def squash_scale(kind: str, elapsed: float) -> float:
 class Animator:
     def __init__(self, rng: random.Random | None = None):
         self._rng = rng or random.Random()
+        self._idle_rng = random.Random(self._rng.getrandbits(64))
         self._state = "idle"
         self._t0 = 0.0
         # 眨眼：下一次眨眼开始的时间；以及当前眨眼区间（可能有第二次）
@@ -74,17 +91,36 @@ class Animator:
         self._tilt = 0.0
         self._tilt_target = 0.0
         self._tilt_t = 0.0
+        self._initialized = False
+        self._from_layers: tuple[tuple[str, float], ...] = ()
+        self._from_pose: Frame | None = None
+        self._next_idle = math.inf
+        self._idle_start = math.inf
+        self._idle_kind = "tilt"
+        self._idle_sign = 1
 
     # ---- 状态 ----
     @property
     def state(self) -> str:
         return self._state
 
-    def set_state(self, name: str, now: float) -> None:
+    def set_state(self, name: str, now: float, *, immediate: bool = False) -> None:
+        if self._initialized and name == self._state and not immediate:
+            return
+        previous = self.frame(now) if self._initialized and not immediate else None
+        self._from_layers = (previous.layers or ((previous.sprite, 1.0),)) if previous else ()
+        self._from_pose = previous
         self._state = name
         self._t0 = now
         self._blinks = []
         self._schedule_blink(now)
+        self._next_idle = now + self._idle_rng.uniform(IDLE_MIN, IDLE_MAX)
+        self._idle_start = math.inf
+        if previous:
+            self.squash(now, "switch")
+        elif immediate:
+            self._squash_kind = None
+        self._initialized = True
 
     def _schedule_blink(self, now: float) -> None:
         self._next_blink = now + self._rng.uniform(BLINK_MIN, BLINK_MAX)
@@ -97,7 +133,9 @@ class Animator:
         self._squash_t0 = now
 
     # ---- 倾斜 ----
-    def set_drag(self, dragging: bool) -> None:
+    def set_drag(self, dragging: bool, now: float | None = None) -> None:
+        if now is not None:
+            self._update_tilt(now)
         self._dragging = dragging
         if not dragging:
             self._tilt_target = 0.0
@@ -106,6 +144,7 @@ class Animator:
         """拖动时每帧喂入水平速度（px/s）。向右拖 → 身体向左倾（顺时针为正，所以取负）。"""
         if not self._dragging:
             return
+        self._update_tilt(now)
         self._tilt_target = max(-TILT_MAX, min(TILT_MAX, -vx * TILT_GAIN))
 
     def _update_tilt(self, now: float) -> None:
@@ -121,7 +160,8 @@ class Animator:
     def _blinking(self, now: float) -> bool:
         if self._state != "idle":
             return False
-        if not self._blinks and now >= self._next_blink:
+        # 消费错过的事件，用预定时刻排下一次，掉帧不会推迟整条时间线。
+        while now >= self._next_blink:
             start = self._next_blink
             end = start + BLINK_DURATION
             self._blinks = [(start, end)]
@@ -131,11 +171,43 @@ class Animator:
             last_end = self._blinks[-1][1]
             self._schedule_blink(last_end)
         if self._blinks:
-            if now >= self._blinks[-1][1]:
+            if now >= self._blinks[-1][1] + TRANSITION:
                 self._blinks = []
             else:
                 return any(a <= now < b for a, b in self._blinks)
         return False
+
+    def _layers(self, now: float) -> tuple[tuple[str, float], ...]:
+        current = {self._state: 1.0}
+        if self._state == "idle":
+            for start, end in self._blinks:
+                if start <= now < end + TRANSITION:
+                    alpha = ease_out((now - start) / TRANSITION) if now < end else 1.0 - ease_out((now - end) / TRANSITION)
+                    current = {"idle": 1.0 - alpha, "blink": alpha}
+                    break
+        mix = ease_out((now - self._t0) / TRANSITION) if self._from_layers else 1.0
+        weights: dict[str, float] = {}
+        for sprite, weight in self._from_layers:
+            weights[sprite] = weights.get(sprite, 0.0) + weight * (1.0 - mix)
+        for sprite, weight in current.items():
+            weights[sprite] = weights.get(sprite, 0.0) + weight * mix
+        return tuple((sprite, weight) for sprite, weight in weights.items() if weight > 1e-9)
+
+    def _idle_angle(self, now: float) -> float:
+        if self._state != "idle":
+            return 0.0
+        while now >= self._next_idle:
+            self._idle_start = self._next_idle
+            self._idle_kind = self._idle_rng.choice(("tilt", "sway"))
+            self._idle_sign = self._idle_rng.choice((-1, 1))
+            self._next_idle += self._idle_rng.uniform(IDLE_MIN, IDLE_MAX)
+        p = (now - self._idle_start) / IDLE_DURATION
+        if not 0 <= p < 1:
+            return 0.0
+        if self._idle_kind == "tilt":
+            envelope = smooth_step(p / 0.35) if p < 0.35 else 1.0 - smooth_step((p - 0.35) / 0.65)
+            return self._idle_sign * 1.8 * envelope
+        return self._idle_sign * 1.5 * math.sin(2 * math.pi * p) * math.sin(math.pi * p) ** 2
 
     # ---- 合成 ----
     def frame(self, now: float) -> Frame:
@@ -151,6 +223,15 @@ class Animator:
         if self._state in SWAY:
             amp, period = SWAY[self._state]
             angle += amp * math.sin(2 * math.pi * (now - self._t0) / period)
+        angle += self._idle_angle(now)
+
+        self._update_tilt(now)
+        angle += self._tilt
+        if self._from_pose is not None:
+            mix = ease_out((now - self._t0) / TRANSITION)
+            sx = self._from_pose.sx + (sx - self._from_pose.sx) * mix
+            sy = self._from_pose.sy + (sy - self._from_pose.sy) * mix
+            angle = self._from_pose.angle + (angle - self._from_pose.angle) * mix
 
         if self._squash_kind is not None:
             dur = SQUASH[self._squash_kind][0]
@@ -162,6 +243,4 @@ class Animator:
                 sy *= s
                 sx *= 1.0 / math.sqrt(s)
 
-        self._update_tilt(now)
-        angle += self._tilt
-        return Frame(sprite, sx, sy, angle)
+        return Frame(sprite, sx, sy, angle, self._layers(now))

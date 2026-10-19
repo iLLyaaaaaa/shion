@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import math
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
 from PySide6.QtCore import QPoint, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QBitmap, QGuiApplication, QImage, QPainter, QPixmap, QRegion, QTransform,
@@ -66,7 +68,7 @@ class PetWindow(QWidget):
     def __init__(
         self,
         height: int = DEFAULT_HEIGHT,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float] = time.perf_counter,
         autostart: bool = True,
     ):
         super().__init__()
@@ -106,9 +108,12 @@ class PetWindow(QWidget):
         self._vy = 0.0
         self._fy = 0.0  # 下落时的浮点 y
         self._fall_floor = 0
+        self._fall_start = 0.0
+        self._fall_y0 = 0.0
         self._last_tick = self._clock()
 
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(FRAME_MS)
         self._timer.timeout.connect(self._on_timer)
 
@@ -129,6 +134,8 @@ class PetWindow(QWidget):
         self.move(round(feet_x - self.width() / 2), round(feet_y - self.height() + MARGIN_BOTTOM))
         self._mask_cache.clear()
         self._mask_key = None
+        if self._falling:
+            self.start_fall()  # 改大小后重算落点，仍按真实经过的秒数下落
         self._refresh(self._clock())
 
     @property
@@ -184,11 +191,11 @@ class PetWindow(QWidget):
     def sprite_size(self) -> tuple[int, int]:
         return self._sw, self._sh
 
-    def set_state(self, name: str) -> None:
+    def set_state(self, name: str, *, animate: bool = True) -> None:
         if name not in STATES:
             raise ValueError(f"未知精灵：{name}")
         now = self._clock()
-        self._animator.set_state(name, now)
+        self._animator.set_state(name, now, immediate=not animate)
         self._refresh(now)
 
     @property
@@ -207,10 +214,31 @@ class PetWindow(QWidget):
 
     # ---- 绘制 ----
     def _draw_sprite(self, p: QPainter, f: Frame) -> None:
+        p.save()
         p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM)  # 脚底中心
         p.rotate(f.angle)
         p.scale(f.sx, f.sy)
-        p.drawPixmap(-self._sw // 2, -self._sh, self._pixmaps[f.sprite])
+        layers = f.layers or ((f.sprite, 1.0),)
+        if all(weight == 1.0 for _, weight in layers):
+            for name, _ in layers:
+                p.drawPixmap(-self._sw // 2, -self._sh, self._pixmaps[name])
+        else:
+            # 在预乘 RGBA 上加权，避免 SourceOver 使重叠身体闪透。
+            # numpy 是项目现有依赖；整数权重总和固定，保持不透明像素 alpha=255。
+            pix = self._pixmaps[f.sprite]
+            accum = np.zeros((pix.height(), pix.width() * 4), dtype=np.uint32)
+            remaining = 65536
+            for index, (name, weight) in enumerate(layers):
+                iw = remaining if index == len(layers) - 1 else min(remaining, round(weight * 65536))
+                remaining -= iw
+                src = self._pixmaps[name].toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
+                pixels = np.frombuffer(src.constBits(), dtype=np.uint8).reshape(src.height(), src.bytesPerLine())
+                accum += pixels.astype(np.uint32) * iw
+            pixels = ((accum + 32768) >> 16).astype(np.uint8)
+            mix = QImage(pixels.data, pix.width(), pix.height(), pix.width() * 4, QImage.Format_ARGB32_Premultiplied).copy()
+            mix.setDevicePixelRatio(pix.devicePixelRatio())
+            p.drawImage(-self._sw // 2, -self._sh, mix)
+        p.restore()
 
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
@@ -229,26 +257,29 @@ class PetWindow(QWidget):
 
     def _mask_for(self, f: Frame) -> QRegion:
         """遮罩 = 当前画出的不透明像素向外扩 MASK_GROW px。只有遮罩里的地方响应鼠标。"""
-        key = (f.sprite, round(f.angle), round(f.sx, 2), round(f.sy, 2))
+        names = tuple(sorted(name for name, weight in f.layers or ((f.sprite, 1.0),) if weight > 0))
+        key = (names, round(f.angle), round(f.sx, 2), round(f.sy, 2))
         if key == self._mask_key:
             return self._mask_cache[key]
         region = self._mask_cache.get(key)
         if region is None:
-            q = Frame(f.sprite, key[2], key[3], float(key[1]))
+            q = Frame(f.sprite, key[2], key[3], float(key[1]), tuple((name, 1.0) for name in names))
             img = QImage(self.size(), QImage.Format_ARGB32_Premultiplied)
             img.fill(0)
             p = QPainter(img)
             p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+            self._draw_sprite(p, q)
+            p.end()
+            # 保留每个非透明像素，避免 alpha 抖动阈值吃掉细小半透明轮廓。
+            base = QRegion(QBitmap.fromImage(img.createMaskFromColor(0, Qt.MaskInColor)))
+            region = QRegion(base)
             g = MASK_GROW
-            for dx, dy in ((0, 0), (g, 0), (-g, 0), (0, g), (0, -g),
+            # 只绘制一次，把位图区域平移合并；避免每次遮罩重画 13 次精灵。
+            for dx, dy in ((g, 0), (-g, 0), (0, g), (0, -g),
                            (g, g), (-g, g), (g, -g), (-g, -g),
                            (g // 2, 0), (-g // 2, 0), (0, g // 2), (0, -g // 2)):
-                p.save()
-                p.translate(dx, dy)
-                self._draw_sprite(p, q)
-                p.restore()
-            p.end()
-            region = QRegion(QBitmap.fromImage(img.createAlphaMask()))
+                region |= base.translated(dx, dy)
+            region &= QRegion(self.rect())
             if len(self._mask_cache) >= MASK_CACHE_MAX:
                 self._mask_cache.clear()
             self._mask_cache[key] = region
@@ -258,7 +289,7 @@ class PetWindow(QWidget):
     def _refresh(self, now: float) -> None:
         f = self._animator.frame(now)
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
-        f = Frame(f.sprite, round(f.sx, 3), round(f.sy, 3), round(f.angle, 2))
+        f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
         if f == self._frame and self._mask_key is not None:
             return
         self._frame = f
@@ -288,14 +319,14 @@ class PetWindow(QWidget):
 
     def advance_to(self, now: float) -> None:
         """推进一帧：拖动速度、下落、动画。定时器和测试/截图都走这里。"""
-        dt = max(0.0, min(now - self._last_tick, 0.05))
+        dt = max(0.0, now - self._last_tick)
         self._last_tick = now
         if self._dragging and dt > 0:
             vx = (self.x() - self._last_drag_x) / dt
             self._last_drag_x = self.x()
             self._animator.feed_velocity(vx, now)
         if self._falling:
-            self._fall_step(dt, now)
+            self._fall_step(now)
         self._refresh(now)
 
     # ---- 鼠标 ----
@@ -344,7 +375,7 @@ class PetWindow(QWidget):
         if not self._dragging:
             self._dragging = True
             now = self._clock()
-            self._animator.set_drag(True)
+            self._animator.set_drag(True, now)
             self._last_drag_x = self.x()
             self._last_tick = now
             self.setCursor(Qt.ClosedHandCursor)
@@ -372,7 +403,7 @@ class PetWindow(QWidget):
         self._pat_mode = False
         self._double = False
         self._caught_fall = False
-        self._animator.set_drag(False)
+        self._animator.set_drag(False, self._clock())
         self._update_hover_cursor(e.position().toPoint())
         now = self._clock()
         if was_dragging:
@@ -401,22 +432,27 @@ class PetWindow(QWidget):
         self._vy = 0.0
         self._falling = True
         self._last_tick = self._clock()
+        self._fall_start = self._last_tick
+        self._fall_y0 = self._fy
         self.advance_to(self._last_tick)
 
     def _stop_fall(self) -> None:
         self._falling = False
 
-    def _fall_step(self, dt: float, now: float) -> None:
-        self._vy += GRAVITY * dt
-        self._fy += self._vy * dt
+    def _fall_step(self, now: float) -> None:
+        elapsed = max(0.0, now - self._fall_start)
+        # 重力的二次加速曲线：解析求位置，不因掉帧截断 dt 而变慢。
+        self._vy = GRAVITY * elapsed
+        self._fy = self._fall_y0 + 0.5 * GRAVITY * elapsed ** 2
         if self._fy >= self._fall_floor:
             self._fy = float(self._fall_floor)
             self.move(self.x(), self._fall_floor)
             self._stop_fall()
-            self._animator.squash(now, "land")
+            landed_at = self._fall_start + math.sqrt(max(0.0, 2 * (self._fall_floor - self._fall_y0) / GRAVITY))
             if self._drag_active:
                 self._drag_active = False
                 self.drag_finished.emit()
+            self._animator.squash(landed_at, "land")
             return
         self.move(self.x(), round(self._fy))
 
