@@ -209,3 +209,16 @@ def test_follow_places_above_body_on_screen(bub):
 
 def test_font_family_is_a_known_candidate_or_fixed_fallback(bub):
     assert bub.font_family
+
+
+def test_every_wrapped_line_starts_with_a_prefix(bub):
+    bub.say("哇啊啊——放我下来！这是一句比较长的台词用来测试折行效果，再加一些字让它变成三行以上的文本")
+    assert bub.line_count >= 3
+    img = rgba(bub.render_image(50.0 + 2.0))  # 全部打完（还没开始淡出）
+    x0 = 1 + B.PAD_X
+    y0 = 1 + B.PAD_Y
+    for i, ln in enumerate(bub._lines):
+        top = int(y0 + ln.y)
+        region = img[top : top + 12, x0 : x0 + int(bub._prefix_w) - 2]
+        fg = ((region[:, :, 0] > 200) & (region[:, :, 1] > 190) & (region[:, :, 3] > 200)).sum()
+        assert fg > 0, f"第 {i} 行开头没有 > 前缀"

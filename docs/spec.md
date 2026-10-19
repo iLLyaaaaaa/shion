@@ -162,6 +162,7 @@ claude pet/
 
 - `POST /praise/take` → 返回 `{"count": N}`，并把 `pending_praise` 清零（读取和清零是同一个原子操作）
 - `GET /health` → `{"ok": true}`
+- 安全：带 `Origin` 头的请求（来自网页）和 `Host` 不是 `127.0.0.1` / `localhost` 的请求一律返回 403，不触发任何回调；读请求体有 5 秒超时。hook 脚本和 MCP 服务器是普通 HTTP 客户端，不受影响。
 
 ## Claude Code hooks（v0.2）
 

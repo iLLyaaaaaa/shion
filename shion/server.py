@@ -17,11 +17,14 @@ log = logging.getLogger("shion.server")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 47613
 MAX_BODY = 4096
+REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
 class _Handler(BaseHTTPRequestHandler):
     server: "_Server"
     protocol_version = "HTTP/1.0"
+    timeout = REQUEST_TIMEOUT
 
     def log_message(self, format, *args):  # noqa: A002
         log.debug("%s - %s", self.address_string(), format % args)
@@ -34,6 +37,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _allowed(self) -> bool:
+        """拒绝来自网页的请求：带 Origin 头（浏览器跨域请求）或 Host 不是本机（DNS 重绑定）。
+
+        Claude Code 的 hook 和 MCP 服务器都是普通 HTTP 客户端，不带 Origin。
+        """
+        host = self.headers.get("Host")
+        if self.headers.get("Origin") is not None or (
+            host is not None and host.rsplit(":", 1)[0] not in ALLOWED_HOSTS and host not in ALLOWED_HOSTS
+        ):
+            self._send(403, {"error": "forbidden"})
+            return False
+        return True
+
     def _read_json(self):
         """返回解析后的 JSON；出错时已发送 400 并返回 None。"""
         try:
@@ -44,18 +60,33 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "请求体长度不合法或超过 4 KB"})
             return None
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            raw = self.rfile.read(length)
+        except OSError:  # 读超时或连接被掐断
+            self._send_quietly(408, {"error": "读取请求体超时"})
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             self._send(400, {"error": "请求体不是合法 JSON"})
             return None
 
+    def _send_quietly(self, status: int, payload: dict) -> None:
+        try:
+            self._send(status, payload)
+        except OSError:
+            pass
+
     def do_GET(self):
+        if not self._allowed():
+            return
         if self.path == "/health":
             self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._allowed():
+            return
         if self.path == "/event":
             self._post_event()
         elif self.path == "/praise/take":

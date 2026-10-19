@@ -377,10 +377,31 @@ def test_catching_a_falling_pet_and_letting_go_resumes_fall(fwin):
 
 def test_release_below_floor_pulls_back_onto_screen(win, qapp):
     avail = QGuiApplication.primaryScreen().availableGeometry()
+    floor_y = avail.bottom() + 1 - win.height() + MARGIN_BOTTOM
     win.move(avail.left() + 50, avail.bottom() + 200)  # 拖到屏幕外
     win.start_fall()
-    QTest.qWait(50)
-    assert win.y() + win.height() - MARGIN_BOTTOM <= avail.bottom() + 1
+    assert win.y() <= floor_y  # 立刻被拉回屏内，不是慢慢落下来的
+    deadline = time.monotonic() + 3
+    while win.is_falling and time.monotonic() < deadline:
+        QTest.qWait(20)
+    assert not win.is_falling
+    assert win.y() == floor_y
+
+
+def test_diagonal_jitter_under_6px_is_a_click_over_6px_is_a_drag(win):
+    r = Rec(win)
+    win.place_default()
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
+    QTest.mouseMove(win, BODY + QPoint(4, 4))  # 欧氏距离 5.66
+    assert not win.is_dragging
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(4, 4))
+    assert r.log == ["clicked"]
+    r.log.clear()
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
+    QTest.mouseMove(win, BODY + QPoint(5, 5))  # 欧氏距离 7.07
+    assert win.is_dragging
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(5, 5))
+    assert r.count("drag_started") == 1
 
 
 def test_body_rect_and_moved_signal(win):

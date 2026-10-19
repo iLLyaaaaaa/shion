@@ -19,8 +19,12 @@ TAKE_TIMEOUT = 2.0  # 秒
 
 
 class _PraiseRequest:
+    """服务线程和 GUI 线程之间的一次夸奖请求。lock 保证“取数”和“取消”二选一。"""
+
     def __init__(self) -> None:
+        self.lock = threading.Lock()
         self.done = threading.Event()
+        self.cancelled = False
         self.count = 0
 
 
@@ -43,16 +47,20 @@ class ServerBridge(QObject):
     def on_take_praise(self) -> int:
         req = _PraiseRequest()
         self.praise_requested.emit(req)
-        if not req.done.wait(self._take_timeout):
-            raise TimeoutError("GUI 线程没有及时处理夸奖请求")
-        return req.count
+        req.done.wait(self._take_timeout)
+        with req.lock:
+            if req.done.is_set():  # 刚好在超时的瞬间处理完了：结果有效
+                return req.count
+            req.cancelled = True  # 之后 GUI 线程才处理到它时，不能再取数（否则计数就丢了）
+        raise TimeoutError("GUI 线程没有及时处理夸奖请求")
 
     # ---- 在 GUI 线程里执行 ----
     def _handle_event(self, etype: str, detail) -> None:
         self._controller.handle_event(etype, detail)
 
     def _handle_praise(self, req: _PraiseRequest) -> None:
-        try:
+        with req.lock:
+            if req.cancelled:
+                return
             req.count = self._controller.take_praise()
-        finally:
             req.done.set()

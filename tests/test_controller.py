@@ -11,7 +11,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from shion import state as S
-from shion.controller import PetController
+from shion.controller import PetController, pick_screen_rect
 from shion.effects import HeartOverlay
 from shion.lines import Lines
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
@@ -401,3 +401,93 @@ def test_take_praise_returns_and_clears(env):
         env.win.patted.emit()
     assert env.ctl.take_praise() == 3
     assert env.ctl.take_praise() == 0
+
+
+# ---------------------------------------------------------------- 审查修复
+def test_quit_still_emits_when_saving_fails(qapp, tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x")
+    e = Env(tmp_path)
+    try:
+        e.scheduler.path = blocker / "state.json"  # 写盘必然失败
+        e.win.patted.emit()
+        got = []
+        e.ctl.quit_requested.connect(lambda: got.append(1))
+        e.ctl.quit()
+        assert got == [1]
+        assert e.scheduler.dirty  # 没写成，但没有崩
+    finally:
+        e.close()
+
+
+MAIN = (0, 0, 1920, 1040)
+RIGHT = (1920, 0, 1920, 1040)
+UPPER = (0, -1080, 1920, 1040)  # 竖排：副屏在主屏上方
+
+
+def test_pick_screen_rect_side_by_side():
+    rects = [MAIN, RIGHT]
+    assert pick_screen_rect(rects, 2500, 900, 248, 254) == RIGHT  # 存档在右边那块屏上
+    assert pick_screen_rect(rects, 300, 900, 248, 254) == MAIN
+
+
+def test_pick_screen_rect_stacked_uses_y_to_choose():
+    rects = [MAIN, UPPER]
+    # 同样的 x，靠 y 区分是主屏还是上方的屏
+    assert pick_screen_rect(rects, 300, 800, 248, 254) == MAIN
+    assert pick_screen_rect(rects, 300, -300, 248, 254) == UPPER
+    # 旧存档没有 y：按 x 找到第一块
+    assert pick_screen_rect(rects, 300, None, 248, 254) == MAIN
+
+
+def test_pick_screen_rect_no_match_returns_none():
+    assert pick_screen_rect([MAIN], 5000, 900, 248, 254) is None  # 副屏被拔了
+    assert pick_screen_rect([], 100, 100, 248, 254) is None
+
+
+def test_place_on_secondary_screen_feet_on_its_floor(env):
+    env.win.place_on(RIGHT, 2500)
+    from shion.pet_window import MARGIN_BOTTOM
+
+    assert env.win.x() == 2500
+    assert env.win.y() + env.win.height() - MARGIN_BOTTOM == RIGHT[1] + RIGHT[3]
+    env.win.place_on(RIGHT, 99999)  # x 被夹进这块屏
+    assert env.win.x() + env.win.width() - 64 <= RIGHT[0] + RIGHT[2]
+    env.win.place_on(UPPER, 100)  # 竖排的上方屏：y 为负也正确
+    assert env.win.y() + env.win.height() - MARGIN_BOTTOM == UPPER[1] + UPPER[3]
+
+
+def test_restore_position_picks_saved_screen_via_fake_rects(env, monkeypatch):
+    monkeypatch.setattr(env.ctl, "_screen_rects", lambda: [MAIN, RIGHT])
+    env.data.window["x"], env.data.window["y"] = 2500, 800
+    env.ctl.restore_position()
+    assert env.win.x() == 2500 and env.win.x() >= RIGHT[0]  # 留在副屏，没有跳回主屏
+    env.data.window["x"], env.data.window["y"] = 9000, 800  # 存档的屏已不存在
+    env.ctl.restore_position()
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    assert avail.left() <= env.win.x() <= avail.right()
+
+
+def test_relocate_returns_to_default_when_window_is_off_all_screens(env):
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    env.win.move(avail.right() + 5000, avail.top())  # 副屏被拔：窗口还在不存在的屏幕上
+    env.ctl.relocate()
+    assert avail.left() <= env.win.x() <= avail.right()
+    assert env.win.y() + env.win.height() - 6 == avail.bottom() + 1
+
+
+def test_relocate_resnaps_to_floor_when_taskbar_changes(env):
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    env.win.place_default()
+    env.win.move(env.win.x(), env.win.y() - 80)  # 比如任务栏变矮后，窗口悬空了
+    env.ctl.relocate()
+    assert env.win.y() + env.win.height() - 6 == avail.bottom() + 1
+
+
+def test_relocate_does_nothing_while_dragging_or_falling(env):
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    env.win.move(avail.left() + 50, avail.top())
+    env.win.start_fall()
+    y = env.win.y()
+    env.ctl.relocate()
+    assert env.win.y() == y

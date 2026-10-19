@@ -21,6 +21,8 @@ class Lines:
         except (OSError, ValueError) as e:
             log.warning("读取台词失败：%s", e)
             raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
         self._lines: dict[str, list[str]] = {
             k: [s for s in v if isinstance(s, str)]
             for k, v in raw.items()

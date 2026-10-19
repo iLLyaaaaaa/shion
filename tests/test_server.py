@@ -146,3 +146,67 @@ def test_stop_and_port_in_use():
     a.stop()  # 重复 stop 不报错
     with pytest.raises(OSError):
         urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+
+
+# ---- 审查修复：网页请求 / 慢连接 ----
+def raw_request(srv, headers: dict, path="/event", body=b'{"type": "stop"}', method="POST"):
+    import http.client
+
+    c = http.client.HTTPConnection("127.0.0.1", srv.port, timeout=3)
+    try:
+        c.putrequest(method, path, skip_host=True)
+        for k, v in headers.items():
+            c.putheader(k, v)
+        c.putheader("Content-Length", str(len(body)))
+        c.endheaders(body)
+        r = c.getresponse()
+        return r.status, r.read()
+    finally:
+        c.close()
+
+
+def test_origin_header_is_rejected_and_callback_not_called(env):
+    srv, events, _ = env
+    status, _ = raw_request(srv, {"Host": f"127.0.0.1:{srv.port}", "Origin": "https://evil.example"})
+    assert status == 403
+    status, _ = raw_request(srv, {"Host": f"127.0.0.1:{srv.port}", "Origin": "null"}, "/health", b"", "GET")
+    assert status == 403
+    assert events == []
+
+
+def test_foreign_host_header_is_rejected(env):
+    srv, events, _ = env
+    assert raw_request(srv, {"Host": "evil.example"})[0] == 403
+    assert raw_request(srv, {"Host": f"evil.example:{srv.port}"})[0] == 403
+    assert events == []
+
+
+def test_localhost_and_127_hosts_are_accepted(env):
+    srv, events, _ = env
+    assert raw_request(srv, {"Host": f"127.0.0.1:{srv.port}"})[0] == 200
+    assert raw_request(srv, {"Host": f"localhost:{srv.port}"})[0] == 200
+    assert len(events) == 2
+
+
+CRLF = bytes([13, 10])
+
+
+def test_incomplete_body_times_out_instead_of_hanging(monkeypatch):
+    import socket
+
+    from shion import server as server_mod
+
+    monkeypatch.setattr(server_mod._Handler, "timeout", 0.3)
+    srv = ShionServer(lambda t, d: None, lambda: 0, port=0)
+    srv.start()
+    try:
+        s = socket.create_connection(("127.0.0.1", srv.port), timeout=3)
+        s.sendall(b"POST /event HTTP/1.0" + CRLF + b"Host: 127.0.0.1" + CRLF + b"Content-Length: 100" + CRLF + CRLF + b'{"ty')
+        t0 = time.monotonic()
+        data = s.recv(4096)  # 服务端超时后回 408 并关闭连接
+        assert time.monotonic() - t0 < 2.0
+        assert b"408" in data or data == b""
+        s.close()
+        assert req(srv, "/health") == (200, {"ok": True})  # 服务仍然可用
+    finally:
+        srv.stop()

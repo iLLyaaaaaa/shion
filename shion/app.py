@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import sys
 from datetime import datetime
@@ -59,12 +60,20 @@ def data_dir() -> Path:
 
 
 def setup_logging(directory: Path, debug: bool) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
+    """日志写进数据目录（1 MB 轮转，保留 2 份）。目录不可写时不能让桌宠起不来，只往 stderr 写。"""
     root = logging.getLogger("shion")
     root.setLevel(logging.DEBUG if debug else logging.INFO)
-    fh = logging.FileHandler(directory / "shion.log", encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-    root.addHandler(fh)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        fh = RotatingFileHandler(
+            directory / "shion.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+        )
+        fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        root.addHandler(fh)
+    except OSError as e:
+        root.addHandler(logging.StreamHandler())
+        root.warning("无法写日志文件（%s），改为只输出到 stderr", e)
+        return
     if debug:
         root.addHandler(logging.StreamHandler())
 

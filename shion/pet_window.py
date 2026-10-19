@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 from typing import Callable
@@ -140,6 +141,12 @@ class PetWindow(QWidget):
             avail, self.width(), self.height(), self.x(), MARGIN_X, MARGIN_BOTTOM
         )
         self.move(x, y)
+
+    def place_on(self, avail: tuple[int, int, int, int], x: int) -> None:
+        """放到指定屏幕的可用区域里：x 夹进屏内，脚底贴那块屏的底边。"""
+        r = QRect(*avail)
+        nx, ny = landing_geometry(r, self.width(), self.height(), x, MARGIN_X, MARGIN_BOTTOM)
+        self.move(nx, ny)
 
     def head_anchor(self) -> QPoint:
         """头顶中心（全局坐标），给爱心和提示定位。"""
@@ -324,7 +331,8 @@ class PetWindow(QWidget):
             return
         gp = e.globalPosition().toPoint()
         if not self._moved:
-            if (gp - self._press_global).manhattanLength() <= DRAG_THRESHOLD:
+            d = gp - self._press_global
+            if math.hypot(d.x(), d.y()) <= DRAG_THRESHOLD:
                 if self._pat_mode:
                     self._pat_step(gp)
                 return

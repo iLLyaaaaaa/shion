@@ -20,6 +20,9 @@ log = logging.getLogger("shion.state")
 # 有持续时间的临时状态（同时也是 react 事件允许的表情名）
 TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
 
+MIN_HEIGHT, MAX_HEIGHT = 120, 600  # 存档里的显示高度范围（右键菜单只提供 180~400）
+SAVE_RETRY = timedelta(seconds=30)  # 写盘失败后多久再试
+
 DEFAULT_WINDOW = {"x": None, "y": None, "height": 240}  # x/y 为 None 表示用默认位置（右下角）
 
 
@@ -150,7 +153,8 @@ class SaveData:
                 v = window.get(key)
                 if isinstance(v, int) and not isinstance(v, bool):
                     d.window[key] = v
-            d.window["height"] = _int(window.get("height"), DEFAULT_WINDOW["height"], minimum=1)
+            h = _int(window.get("height"), DEFAULT_WINDOW["height"], minimum=1)
+            d.window["height"] = max(MIN_HEIGHT, min(h, MAX_HEIGHT))
         return d
 
 
@@ -189,32 +193,57 @@ def save(path: Path, data: SaveData) -> None:
 
 
 class SaveScheduler:
-    """防抖写盘：最后一次变化 2 秒后才写。界面层用 QTimer 定期调 poll，退出时调 flush。"""
+    """防抖写盘：最后一次变化 2 秒后才写。界面层用 QTimer 定期调 poll，退出时调 flush。
 
-    def __init__(self, path: Path, data: SaveData, delay: timedelta = timedelta(seconds=2)):
+    写盘失败（目录只读、被占用、杀软拦截……）不会抛异常：记日志，保持 dirty，
+    过 ``retry`` 之后再试，不会每个 tick 都重试。
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        data: SaveData,
+        delay: timedelta = timedelta(seconds=2),
+        retry: timedelta = SAVE_RETRY,
+    ):
         self.path = Path(path)
         self.data = data
         self.delay = delay
+        self.retry = retry
         self.dirty = False
         self._last_change: Optional[datetime] = None
+        self._retry_at: Optional[datetime] = None
 
     def mark_dirty(self, now: datetime) -> None:
         self.dirty = True
         self._last_change = now
 
     def due(self, now: datetime) -> bool:
-        return self.dirty and self._last_change is not None and now - self._last_change >= self.delay
+        if not self.dirty or self._last_change is None:
+            return False
+        if self._retry_at is not None and now < self._retry_at:
+            return False
+        return now - self._last_change >= self.delay
 
     def poll(self, now: datetime) -> bool:
         if self.due(now):
-            self.flush()
-            return True
+            return self.flush(now)
         return False
 
-    def flush(self) -> None:
-        if self.dirty:
+    def flush(self, now: Optional[datetime] = None) -> bool:
+        """立即写盘。成功返回 True；失败返回 False（不抛异常，dirty 保持）。"""
+        if not self.dirty:
+            return True
+        try:
             save(self.path, self.data)
-            self.dirty = False
+        except OSError as e:
+            log.warning("写存档失败（%s），%s 秒后重试", e, int(self.retry.total_seconds()))
+            if now is not None:
+                self._retry_at = now + self.retry
+            return False
+        self.dirty = False
+        self._retry_at = None
+        return True
 
 
 # ---------------------------------------------------------------- 状态机
@@ -342,12 +371,12 @@ class PetState:
         self._log_state(now)
         return reactions
 
-    def take_praise(self) -> int:
-        """读取并清零待夸奖计数（给 /praise/take 用）。"""
+    def take_praise(self, now: Optional[datetime] = None) -> int:
+        """读取并清零待夸奖计数（给 /praise/take 用）。now 用来给存档防抖计时。"""
         count = self.save.pending_praise
         if count:
             self.save.pending_praise = 0
-            self._changed(self._last_activity)
+            self._changed(now or self._last_activity)
         return count
 
     def claude_event(self, etype: str, detail: Optional[str], now: datetime) -> list[Reaction]:

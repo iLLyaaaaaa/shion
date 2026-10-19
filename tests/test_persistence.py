@@ -70,7 +70,7 @@ def test_missing_and_wrong_type_fields_fall_back(tmp_path):
     assert d.first_run is None
     assert d.bubble_muted is False
     assert d.stats == {"date": "", "pats": 0, "claude_tasks": 0}
-    assert d.window["x"] is None and d.window["height"] == 1
+    assert d.window["x"] is None and d.window["height"] == 120  # 0 被限制到下限
 
 
 def test_partial_file_keeps_valid_fields(tmp_path):
@@ -122,3 +122,51 @@ def test_scheduler_flush_noop_when_clean(tmp_path):
     p = tmp_path / "state.json"
     SaveScheduler(p, SaveData()).flush()
     assert not p.exists()
+
+
+# ---- 审查修复 ----
+def test_height_is_clamped_to_sane_range():
+    assert SaveData.from_dict({"window": {"height": 99999}}).window["height"] == 600
+    assert SaveData.from_dict({"window": {"height": 1}}).window["height"] == 120
+    assert SaveData.from_dict({"window": {"height": 320}}).window["height"] == 320
+
+
+def make_broken(tmp_path):
+    """存档路径的父目录其实是个文件：写盘必然抛 OSError。"""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x")
+    return blocker / "state.json"
+
+
+def test_flush_failure_does_not_raise_and_keeps_dirty(tmp_path):
+    s = SaveScheduler(make_broken(tmp_path), SaveData())
+    s.mark_dirty(T0)
+    assert s.flush(T0 + timedelta(seconds=3)) is False
+    assert s.dirty is True
+    assert s.flush() is False  # 退出时的无参 flush 也不抛
+
+
+def test_failed_save_is_retried_only_after_backoff_then_succeeds(tmp_path):
+    path = make_broken(tmp_path)
+    s = SaveScheduler(path, SaveData())
+    s.mark_dirty(T0)
+    t = T0 + timedelta(seconds=3)
+    assert s.poll(t) is False  # 到点，写失败
+    assert not s.due(t + timedelta(seconds=10))  # 退避中：不会每个 tick 都重试
+    assert not s.poll(t + timedelta(seconds=29))
+    # 目录恢复可写（把挡路的文件换成目录）
+    path.parent.unlink()
+    path.parent.mkdir()
+    assert s.poll(t + timedelta(seconds=31)) is True
+    assert s.dirty is False and path.exists()
+
+
+def test_take_praise_uses_given_time_for_debounce():
+    from shion.state import PetState
+
+    dirty = []
+    st = PetState(SaveData(pending_praise=2), T0, on_change=dirty.append)
+    dirty.clear()
+    later = T0 + timedelta(hours=1)
+    assert st.take_praise(later) == 2
+    assert dirty == [later]

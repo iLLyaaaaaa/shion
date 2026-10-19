@@ -3,8 +3,8 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- 下一步：**v0.1 审查**（调用 `reviewer` 子代理，对照 spec 检查整个 v0.1）。第 1、2、4、5 步代码已完成并自测，但**真机验收项还没做**（见下）
-- 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
+- **v0.1 已完成**（审查已做、意见已修）。下一步：**v0.2 Claude Code hooks**（见 spec「Claude Code hooks」）。但 v0.1 的**真机验收项还没人做**，用户回来后先按下面各节的清单一次性验收
+- v0.2 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
 ## 已完成
@@ -17,8 +17,8 @@
 - [x] v0.1-4 交互接入状态机（`shion/controller.py`、`effects.py`、`lines.py`、`assets/lines/zh.json`；pytest 共 151 个通过；**真机验收待用户**）
 - [x] v0.1-5 气泡与台词（`shion/bubble.py`；pytest 共 173 个通过；**真机验收待用户**）
 - [x] 把 server 回调接到 Qt 信号上（`shion/bridge.py`、`app.run()` 启动服务；pytest 共 189 个通过；真机用 curl 验收待用户）
-- [ ] v0.1 审查 ← 下一步
-- [ ] v0.2 Claude Code hooks
+- [x] v0.1 审查（独立子代理，只读）+ 修复（pytest 共 210 个通过）
+- [ ] v0.2 Claude Code hooks ← 下一步
 - [ ] v0.3 MCP
 - [ ] v1.0 发布
 
@@ -31,6 +31,17 @@
 - [ ] 再开第二个 `python -m shion` 会直接退出，不出现第二只
 - [ ] 高分屏（缩放 150%）下清晰度、窗口大小正常
 没能真机验证透明点穿的原因：测试时电脑处于锁屏状态（`WindowFromPoint` 返回 LockScreenBackstopFrame）。实现用的是 `setMask`（按精灵 alpha 生成遮罩），不依赖 Windows 分层窗口的自动穿透。
+
+## v0.1 审查结论与修复
+审查（项目里的 `reviewer` 子代理本会话没注册，改用 general-purpose 子代理加载同样的审查要求）逐项核对了 spec 的数值、判定、状态机、协议和线程模型，**没发现规格错误，线程模型没问题**。修掉的问题：
+- 写存档失败（目录只读/被占用）不再抛异常：`SaveScheduler.flush` 记日志、保持 dirty、30 秒退避重试；`controller.quit()` 保证一定能退出；`setup_logging` 目录不可写时只输出到 stderr、不影响启动；日志改为 1 MB 轮转
+- 副屏恢复：之前存档在副屏的桌宠每次启动都跳回主屏。现在用存档的 x、y 选屏（`pick_screen_rect`），`PetWindow.place_on` 直接按那块屏的可用区域贴底；拔掉副屏/改分辨率/任务栏变化时 `relocate()` 会把桌宠放回屏内
+- 单击/拖动阈值改成欧氏距离（对角 4+4=5.7px 仍是单击）
+- 存档里的高度限制在 120～600
+- `/praise/take` 超时后不会再丢计数（请求对象带取消标志）
+- 服务端加固：拒绝带 `Origin` 头的请求（网页脚本无法伪造事件）和 `Host` 不是本机的请求（防 DNS 重绑定），读请求有 5 秒超时。**hook 脚本和 MCP 服务器必须是普通 HTTP 客户端、不带 Origin，Host 用 127.0.0.1 或 localhost**
+- 气泡折行后每一行都有 `> ` 前缀；`take_praise(now)` 用传入时间做防抖；`lines.py` 容错；一个近乎恒真的测试改写
+**已知遗留（没修，影响很小）**：气泡停留期间仍每 16ms 刷新（画面不变，CPU 极小）；下落过程中改大小，落地位置会偏一点（不到 1 秒的窗口）；混合 DPI 的副屏上精灵只按主屏 DPR 缩放，可能略糊；子进程冒烟测试依赖真实时间（最长约 20 秒超时）。修完后没有再跑一遍审查，每处修复都有针对性测试。
 
 ## 服务接入 Qt：待用户验收（同样没手动测）
 自动验证过：控制器 `handle_event`（working 续期与 2 分钟超时、stop→done+计数+台词、greeting、notification、react、未知类型/表情忽略、静音时仍改状态）；真 HTTP 服务 + 假时钟控制器（处理函数确实在主线程执行、20 个并发事件全部处理、非法请求 400 且不改状态、`/praise/take` 计数正确且 20 个并发请求总数恰好等于待夸奖数、GUI 不泵事件时超时返回 500）；子进程冒烟：真的启动 `python -m shion`，HTTP 发 working/stop 后日志出现状态变化，第二个实例抢同一端口时不崩溃并记录“HTTP 服务启动失败”。

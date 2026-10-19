@@ -241,13 +241,14 @@ class BubbleWindow(QWidget):
         shown = self._timeline.visible_chars(now)
         x0 = 1 + PAD_X
         y0 = 1 + PAD_Y
-        if self._lines:
-            p.drawText(QPointF(x0, y0 + self._lines[0].ascent), PREFIX.rstrip())
-        for ln in self._lines:
+        for i, ln in enumerate(self._lines):
             n = min(ln.length, shown - ln.start)
-            if n <= 0:
-                break
-            p.drawText(QPointF(x0 + self._prefix_w, y0 + ln.y + ln.ascent), text[ln.start : ln.start + n])
+            if n <= 0 and i > 0:
+                break  # 这一行还没轮到
+            base = y0 + ln.y + ln.ascent
+            p.drawText(QPointF(x0, base), PREFIX.rstrip())  # 每行开头都有 "> "
+            if n > 0:
+                p.drawText(QPointF(x0 + self._prefix_w, base), text[ln.start : ln.start + n])
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)

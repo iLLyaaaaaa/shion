@@ -22,6 +22,25 @@ from shion.state import PetState, Reaction, SaveScheduler
 log = logging.getLogger("shion.controller")
 
 SIZES = (180, 240, 320, 400)
+
+
+def pick_screen_rect(rects, x, y, w, h):
+    """按存档里的窗口位置 (x, y, w, h) 选该放在哪块屏上，返回那块屏的可用区域；都不匹配返回 None。
+
+    优先包含窗口中心点的屏；没有 y（旧存档）或没找到，就看哪块屏的横向范围包含窗口中心 x。
+    """
+    cx = x + w // 2
+    if y is not None:
+        cy = y + h // 2
+        for r in rects:
+            rx, ry, rw, rh = r
+            if rx <= cx < rx + rw and ry <= cy < ry + rh:
+                return r
+    for r in rects:
+        rx, _, rw, _ = r
+        if rx <= cx < rx + rw:
+            return r
+    return None
 VERSION = "0.1"
 TICK_MS = 100
 PAT_SAY_EVERY = 4  # 摸头每 4 次说一句话
@@ -70,6 +89,8 @@ class PetController(QObject):
         w.drag_finished.connect(self._on_drag_finished)
         w.menu_requested.connect(self.show_menu)
         w.moved.connect(self._on_window_moved)
+
+        self._watch_screens()
 
         self._timer = QTimer(self)
         self._timer.setInterval(TICK_MS)
@@ -162,18 +183,51 @@ class PetController(QObject):
         self.state.save.window["y"] = self.window.y()
         self.scheduler.mark_dirty(self._now())
 
+    def _screen_rects(self):
+        out = []
+        for screen in QGuiApplication.screens():
+            g = screen.availableGeometry()
+            out.append((g.x(), g.y(), g.width(), g.height()))
+        return out
+
     def restore_position(self) -> None:
-        """按存档恢复 x；不在任何屏幕上就用默认右下角。y 总是贴底。"""
-        x = self.state.save.window.get("x")
+        """按存档恢复位置：放回原来那块屏、脚底贴它的底边；找不到就用默认右下角。"""
+        save = self.state.save.window
+        x, y = save.get("x"), save.get("y")
         if isinstance(x, int):
-            center_x = x + self.window.width() // 2
-            for screen in QGuiApplication.screens():
-                g = screen.availableGeometry()
-                if g.left() <= center_x <= g.right():
-                    self.window.move(x, g.bottom())
-                    self.window.snap_to_floor()
-                    return
+            rect = pick_screen_rect(
+                self._screen_rects(), x, y if isinstance(y, int) else None,
+                self.window.width(), self.window.height(),
+            )
+            if rect is not None:
+                self.window.place_on(rect, x)
+                return
         self.window.place_default()
+
+    # ---- 屏幕变化（分辨率、任务栏、拔插副屏）----
+    def _watch_screens(self) -> None:
+        app = QGuiApplication.instance()
+        if app is None:
+            return
+        for screen in QGuiApplication.screens():
+            screen.availableGeometryChanged.connect(self.relocate)
+        app.screenAdded.connect(self._on_screen_added)
+        app.screenRemoved.connect(self.relocate)
+
+    def _on_screen_added(self, screen) -> None:
+        screen.availableGeometryChanged.connect(self.relocate)
+        self.relocate()
+
+    def relocate(self, *_args) -> None:
+        """窗口跑出所有屏幕就回默认位置，否则重新贴底。拖动/下落中不动。"""
+        if self.window.is_dragging or self.window.is_falling:
+            return
+        x, y, w, h = self.window.body_rect()
+        cx, cy = x + w // 2, y + h // 2
+        if any(rx <= cx < rx + rw and ry <= cy < ry + rh for rx, ry, rw, rh in self._screen_rects()):
+            self.window.snap_to_floor()
+        else:
+            self.window.place_default()
 
     def set_size(self, height: int) -> None:
         self.window.set_height(height)
@@ -196,15 +250,19 @@ class PetController(QObject):
 
     def take_praise(self) -> int:
         """取走待夸奖计数（给 /praise/take 用）。"""
-        return self.state.take_praise()
+        return self.state.take_praise(self._now())
 
     def praise(self) -> None:
         self.react(self.state.praise_claude(self._now()))
         self.sync()
 
     def quit(self) -> None:
-        self.scheduler.flush()
-        self.quit_requested.emit()
+        try:
+            self.scheduler.flush()  # 内部不抛异常；这里再兜一层，保证一定能退出
+        except Exception:
+            log.exception("退出时写存档失败")
+        finally:
+            self.quit_requested.emit()
 
     # ------------------------------------------------------------ 双击状态
     def status_text(self, now: Optional[datetime] = None) -> str:

@@ -90,3 +90,20 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
         for p in procs:
             p.kill()
             p.wait(timeout=10)
+
+
+def test_setup_logging_survives_unwritable_directory(tmp_path):
+    import logging
+
+    from shion.app import setup_logging
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x")
+    root = logging.getLogger("shion")
+    old = list(root.handlers)
+    try:
+        setup_logging(blocker / "sub", debug=False)  # 目录建不出来：不能抛
+    finally:
+        for h in list(root.handlers):
+            if h not in old:
+                root.removeHandler(h)

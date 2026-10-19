@@ -147,3 +147,20 @@ def test_praise_take_times_out_with_500_when_gui_thread_not_pumping(qapp, tmp_pa
         assert fut.result()[0] == 500
     finally:
         r.close()
+
+
+def test_praise_request_that_timed_out_does_not_lose_the_count(qapp, tmp_path):
+    """超时后 GUI 线程才处理到那个请求：不能把计数取走（否则调用方没拿到、计数还丢了）。"""
+    r = Rig(tmp_path, take_timeout=0.2)
+    try:
+        for _ in range(3):
+            r.env.win.patted.emit()
+        fut = r.pool.submit(r.request, "POST", "/praise/take", {})
+        fut.result(timeout=5)  # GUI 线程没泵事件 → 超时 500
+        assert fut.result()[0] == 500
+        r.pump(100)  # 现在才处理排队的请求：已取消，不取数
+        assert r.env.data.pending_praise == 3
+        r.bridge._take_timeout = 2.0
+        assert r.call("POST", "/praise/take", {}) == (200, {"count": 3})
+    finally:
+        r.close()
