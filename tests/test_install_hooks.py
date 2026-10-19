@@ -42,6 +42,8 @@ def test_merge_into_empty():
     assert (PY, (SCRIPT, "PostToolUseFailure")) in shion_cmds(out)
     assert all("command" in h and "args" in h for g in out["hooks"].values() for x in g for h in x["hooks"])
     assert out["hooks"]["PreToolUse"][0]["matcher"] == "*"
+    assert out["hooks"]["PostToolUse"][0]["matcher"] == "*"
+    assert out["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == 1900  # 比暂停上限长
     assert out["hooks"]["SessionStart"][0]["hooks"][0]["timeout"] == 15
 
 
@@ -50,7 +52,7 @@ def test_merge_keeps_user_config_and_is_idempotent():
     once = hc.merge(USER, PY, SCRIPT)
     assert USER == original  # 不改入参
     assert once["model"] == "opusplan"
-    assert once["hooks"]["PostToolUse"] == USER["hooks"]["PostToolUse"]
+    assert once["hooks"]["PostToolUse"][0] == USER["hooks"]["PostToolUse"][0]
     assert once["hooks"]["Stop"][0] == USER["hooks"]["Stop"][0]
     assert once["hooks"]["PreToolUse"][0] == USER["hooks"]["PreToolUse"][0]
     twice = hc.merge(once, PY, SCRIPT)

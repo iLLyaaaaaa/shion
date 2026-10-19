@@ -80,9 +80,9 @@ claude pet/
 | 拎起晃动 | 水平方向反转，反向摆幅 >40px 确认一次；任意 2 秒内至少 3 次 | 记住晃晕直到落地，下落仍是 drag；落地后 dizzy 2.5 秒并说 dizzy 台词。小幅抖动、一直向同侧移动不计数，每轮拖动独立 |
 | 松手 | — | 带重力下落到脚底贴住屏幕可用区域的底边（不能越出屏幕），落地时压扁一下；恢复固定/自动状态，达到晃晕阈值时先显示 dizzy 2.5 秒（固定表情仍优先） |
 | 双击 | — | 气泡显示状态：已陪伴多久、今天被摸了几次、Claude 今天完成了几个任务 |
-| 右键 | — | 做得好 ／ 表情 ／ 活跃度 ／ 动作 ／ 大小 ／ 静音气泡 ／ 只显示状态，不显示内容 ／ 语言 ／ 开机自启（v1.0）／ 关于 ／ 退出 |
+| 右键 | — | 工作遥控（暂停/继续 ／ 做得好 ／ 有问题……）／ 表情 ／ 活跃度 ／ 动作 ／ 大小 ／ 静音气泡 ／ 只显示状态，不显示内容 ／ 语言 ／ 开机自启（v1.0）／ 关于 ／ 退出 |
 
-- **做得好**：右键这项才增加 `pending_praise`，好感度 +3、proud；多次记录在下一次 UserPromptSubmit 合并成一句表扬。
+- **工作遥控**（见 v0.3）：“做得好”好感度 +3、proud，并加入反馈队列；“有问题……”弹出一行输入框（可留空）；“暂停工作/继续工作”按当前状态二选一。
 - **表情**：开心 happy、得意 proud、害羞挡手 stop、晕乎乎 dizzy、工作中 working、完成啦 done、睡觉 sleep、发呆 idle、委屈 neglect2；不提供 blink、drag、neglect1。默认临时显示 5 秒；勾选“固定当前表情”后保存并保持，之后选新表情仍固定；“恢复自动”解除。固定期间台词、统计、Claude 状态照常处理；拖动/下落仍为 drag，落地恢复固定表情。双击状态显示“表情已固定”。
 - **活跃度**：安静 / 普通（默认）/ 活泼，写入存档。普通每 8～20 秒、活泼每 4～10 秒随机做一件原地动作：镜像转身、镜像朝向鼠标、原地小跳（与菜单跳跃共用下述帧动画）、开心或发呆 2 秒、自言自语 `idle_talk`（10% 抽取概率、至少间隔 60 秒）。安静关闭待机动作；Claude 实际工作中、表情固定、睡着、拖动/下落、按住鼠标或打开菜单期间暂停，恢复后重新等待、不补播。自动动作不刷新睡眠/被理会时间。
 - **动作**：散步一会儿（沿当前屏幕任务栏上沿随机走 10 秒）、走到屏幕另一边（当前屏幕对侧）、跳一跳、转个身。步速 80px/s，两种行走均循环 `walk_1~4`，向右用原图、向左镜像；80px/s 时每帧 140ms，步速改变时帧时长反比变化，每两帧一步同步上下起伏 3px。缺图时保留原状态图＋10px / 0.45 秒起伏。边界限制精灵在屏内；左键按下立即中断，随后照常戳/摸/拖。走完或中断保存新位置；跳和转身最终位置不变。
@@ -126,11 +126,12 @@ claude pet/
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "first_run": "2026-10-19T20:00:00",
   "affection": 0,
   "last_attended": "ISO 时间",
-  "pending_praise": 0,
+  "feedback_queue": [{"kind": "good", "text": ""}],
+  "remote": {"pause_timeout": 1800, "permission_timeout": 120},
   "stats": {"date": "2026-10-19", "pats": 0, "claude_tasks": 0},
   "window": {"x": 0, "y": 0, "height": 200},
   "bubble_muted": false,
@@ -143,7 +144,7 @@ claude pet/
 ```
 
 状态变化后延迟 2 秒写盘（防抖），退出时立即写。写文件时先写临时文件再替换，防止写到一半损坏。
-旧存档没有 `schema_version` 时按 v1 处理：因无法分辨待表扬来自摸头还是菜单，升级仅清空一次旧 `pending_praise`，其余数据保留；v2 之后的菜单表扬重启仍保留。缺失/非法的表情和活跃度恢复默认值。
+旧存档没有 `schema_version` 时按 v1 处理：因无法分辨待表扬来自摸头还是菜单，升级丢弃旧 `pending_praise`，其余数据保留；v2 的 `pending_praise`（都来自菜单）迁移成反馈队列里等量的“做得好”（最多 5 条）；v3 起不再写 `pending_praise`。`feedback_queue` 最多 5 条，每条 `kind` 为 `good`/`bad`，`text` 单行最多 200 字；`remote` 的秒数会被限制在安全范围内（暂停 60～1880，授权 10～170），hook 脚本直接读它。缺失/非法的表情和活跃度恢复默认值。
 
 ## 对话气泡（bubble.py）
 
@@ -196,7 +197,9 @@ claude pet/
 | `notification` | Notification hook | 气泡提示“Claude 在等你确认哦”（只有终端版会触发） |
 | `react` | 预留（目前没有调用方） | `detail` 是表情名，临时切换到该表情 3 秒 |
 
-- `POST /praise/take` → 返回 `{"count": N}`，并把 `pending_praise` 清零（读取和清零是同一个原子操作）
+- `POST /feedback/take` → 返回 `{"text": "…"}`：取走并清空反馈队列，按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
+- `POST /pause/wait {"wait": 秒}` → `{"paused": true|false}`：没暂停立即返回；暂停中最多等 `wait` 秒（上限 30）。**只读，没有任何接口能让 HTTP 调用方开始暂停**；`prompt` 事件到达时服务线程会直接解除暂停
+- `type = pause_timeout`（hook 等满暂停上限后发来）：诗音保持暂停标记，把气泡换成“已经停下了，在 CC 里说一声就能继续”
 - `GET /health` → `{"ok": true}`
 - 安全：带 `Origin` 头的请求（来自网页）和 `Host` 不是 `127.0.0.1` / `localhost` 的请求一律返回 403，不触发任何回调；读请求体有 5 秒超时。hook 脚本是普通 HTTP 客户端，不受影响。
 
@@ -206,8 +209,9 @@ claude pet/
 
 - 只用标准库（`urllib.request`），**超时 0.5 秒**。桌宠没运行或请求失败时**静默退出、返回码为 0**，绝不能影响 Claude Code 的正常使用。
 - 从 stdin 读取 hook 输入的 JSON（可以不用，但必须读完）。
-- `UserPromptSubmit`：先发送 `prompt` 事件，再调用 `/praise/take`。如果 `count > 0` 且配置里 `inject_praise` 为 true，向 stdout 打印一行上下文：
-  `[诗音] 用户觉得你刚才做得很好。`（按存档语言使用中/英/日对应文本，多次合并成一句，不写次数；摸头不产生表扬）
+- `UserPromptSubmit`：先发送 `prompt` 事件，再调用 `/feedback/take`；返回的文字非空就原样打印到 stdout（`[诗音] 用户觉得你刚才做得很好。` 等，按存档语言使用中/英/日；多次“做得好”合成一句，不写次数；摸头不产生反馈）
+- `PostToolUse`：调用 `/feedback/take`，非空则输出 `hookSpecificOutput.additionalContext`（Claude 工作中即可收到反馈）
+- `PreToolUse`：先问 `/pause/wait`；暂停中就按 25 秒一段一直等，直到继续或 `prompt` 解除；诗音没开、连不上、返回内容不对一律放行；等满暂停上限（默认 30 分钟）输出 `permissionDecision: deny`（理由“用户暂停了工作，请停下并等待用户指示”）并发 `pause_timeout`
 - `SessionStart`：如果 `/health` 不通，就启动桌宠（`.venv\Scripts\pythonw.exe -m shion`，脱离父进程，不弹出控制台窗口），然后发送 `session_start` 事件。
 - 其他事件（`PreToolUse` 发 `working`、`Stop`、`Notification`）只负责转发。
 - 配置写进**用户级** `~/.claude/settings.json` 的 `hooks` 字段，这样终端和桌面端的 Code 标签页都会加载。写之前先备份原文件，**合并而不是覆盖**用户已有的配置。另外写一个 `tools/install_hooks.py`（安装）和 `tools/uninstall_hooks.py`（卸载）。
@@ -248,7 +252,7 @@ claude pet/
   - Claude 正在工作：下一次 **PostToolUse** 的 `additionalContext`（官方说明：放在工具结果旁边，Claude 下一轮会读到，不作为聊天消息显示）
   - Claude 空闲：下一次 **UserPromptSubmit** 时附加
 - 多条合并成一次送达；队列最多 5 条；送达后诗音说一句“已经转告啦”
-- 右键原有的“夸夸”菜单项并入“做得好”；原来的 `pending_praise` / `/praise/take` 由反馈队列取代（保留兼容或迁移，测试要覆盖）
+- 右键原有的“夸夸”菜单项并入“工作遥控 → 做得好”；原来的 `pending_praise` / `/praise/take` 已由反馈队列和 `/feedback/take` 取代（存档迁移见「持久化」）
 
 **暂停规则**
 - 点“暂停”后，Claude 在**下一次调用工具之前**停住（PreToolUse hook 等待）。正在执行的命令不会被掐断；正在写的文字会写完。诗音切到暂停状态，气泡显示“暂停中”

@@ -19,6 +19,7 @@ from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController
 from shion.effects import HeartOverlay
 from shion.lines import Lines, available_languages, resolve_language
+from shion.remote import RemoteHub
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
 from shion.server import DEFAULT_PORT, ShionServer
 from shion.speech import Priority
@@ -110,8 +111,9 @@ def run() -> int:
     )
     lines = Lines(lang)
     bubble.set_font_fallback(lines.font_fallback)
+    hub = RemoteHub()
     controller = PetController(
-        win, pet_state, scheduler, lines=lines, overlay=overlay, bubble=bubble, parent=app
+        win, pet_state, scheduler, lines=lines, overlay=overlay, bubble=bubble, hub=hub, parent=app
     )
     if data.language != lines.lang:  # 首次启动：把跟随系统得到的语言记进存档
         data.language = lines.lang
@@ -121,7 +123,7 @@ def run() -> int:
     # 本地 HTTP 服务：回调在服务线程里，经 ServerBridge 切回 GUI 线程
     bridge = ServerBridge(controller, parent=app)
     port = int(os.environ.get("SHION_PORT") or DEFAULT_PORT)
-    server = ShionServer(bridge.on_event, bridge.on_take_praise, port=port)
+    server = ShionServer(bridge.on_event, bridge.on_take_feedback, port=port, hub=hub)
     server_ok = True
     try:
         server.start()

@@ -21,7 +21,10 @@ log = logging.getLogger("shion.state")
 TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
 EXPRESSIONS = ("happy", "proud", "stop", "dizzy", "working", "done", "sleep", "idle", "neglect2")
 ACTIVITY_LEVELS = ("quiet", "normal", "lively")
-SAVE_VERSION = 2  # v1 的 pending_praise 混有摸头记录，升级时清空一次
+SAVE_VERSION = 3  # v1 的 pending_praise 混有摸头记录，升级时丢弃；v2 的 pending_praise 迁移成反馈队列里的“做得好”
+FEEDBACK_MAX = 5  # 反馈队列最多几条，满了丢最早的
+FEEDBACK_TEXT_MAX = 200
+REMOTE_DEFAULTS = {"pause_timeout": 1800, "permission_timeout": 120}  # 秒
 
 MIN_HEIGHT, MAX_HEIGHT = 120, 600  # 存档里的显示高度范围（右键菜单只提供 160~320）
 SAVE_RETRY = timedelta(seconds=30)  # 写盘失败后多久再试
@@ -110,6 +113,17 @@ def _int(value, default: int, minimum: int = 0) -> int:
     return max(value, minimum)
 
 
+def _feedback_items(raw) -> list:
+    out = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and item.get("kind") in ("good", "bad"):
+                text = item.get("text")
+                text = " ".join(text.split())[:FEEDBACK_TEXT_MAX] if isinstance(text, str) else ""
+                out.append({"kind": item["kind"], "text": text})
+    return out[-FEEDBACK_MAX:]
+
+
 def _bool(value, default: bool) -> bool:
     return value if isinstance(value, bool) else default
 
@@ -120,7 +134,8 @@ class SaveData:
     first_run: Optional[datetime] = None
     affection: int = 0
     last_attended: Optional[datetime] = None
-    pending_praise: int = 0
+    feedback_queue: list = field(default_factory=list)  # [{"kind": "good"|"bad", "text": str}]
+    remote: dict = field(default_factory=lambda: dict(REMOTE_DEFAULTS))
     stats: dict = field(default_factory=lambda: {"date": "", "pats": 0, "claude_tasks": 0})
     window: dict = field(default_factory=lambda: dict(DEFAULT_WINDOW))
     bubble_muted: bool = False
@@ -136,7 +151,8 @@ class SaveData:
             "first_run": self.first_run.isoformat(timespec="seconds") if self.first_run else None,
             "affection": self.affection,
             "last_attended": self.last_attended.isoformat(timespec="seconds") if self.last_attended else None,
-            "pending_praise": self.pending_praise,
+            "feedback_queue": [dict(i) for i in self.feedback_queue],
+            "remote": dict(self.remote),
             "stats": dict(self.stats),
             "window": dict(self.window),
             "bubble_muted": self.bubble_muted,
@@ -157,7 +173,14 @@ class SaveData:
         d.first_run = _parse_dt(raw.get("first_run"))
         d.last_attended = _parse_dt(raw.get("last_attended"))
         d.affection = _int(raw.get("affection"), 0)
-        d.pending_praise = _int(raw.get("pending_praise"), 0)
+        d.feedback_queue = _feedback_items(raw.get("feedback_queue"))
+        if d.schema_version == 2 and not d.feedback_queue:
+            old = _int(raw.get("pending_praise"), 0)  # v2 的待表扬都来自菜单“做得好”
+            d.feedback_queue = [{"kind": "good", "text": ""}] * min(old, FEEDBACK_MAX)
+        remote = raw.get("remote")
+        if isinstance(remote, dict):
+            d.remote["pause_timeout"] = max(60, min(_int(remote.get("pause_timeout"), 1800), 1880))
+            d.remote["permission_timeout"] = max(10, min(_int(remote.get("permission_timeout"), 120), 170))
         d.bubble_muted = _bool(raw.get("bubble_muted"), False)
         d.inject_praise = _bool(raw.get("inject_praise"), True)
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
@@ -304,8 +327,8 @@ class PetState:
         self._manual: Optional[tuple[str, datetime]] = None
         self._idle_expression: Optional[tuple[str, datetime]] = None
         self._last_logged: Optional[str] = None
+        self.paused = False  # 用户在诗音上点了“暂停”（不存档）
         if self.save.schema_version < SAVE_VERSION:
-            self.save.pending_praise = 0
             self.save.schema_version = SAVE_VERSION
             self._changed(now)
 
@@ -320,7 +343,7 @@ class PetState:
     # ------------------------------------------------------------ 查询
 
     def current(self, now: datetime) -> str:
-        """优先级：drag > 固定/手动表情 > 临时反应 > working > sleep > 待机/底层。"""
+        """优先级：drag > 固定/手动表情 > 临时反应 > 暂停 > working > sleep > 待机/底层。"""
         if self._dragging:
             return "drag"
         if self.save.fixed_expression:
@@ -329,6 +352,8 @@ class PetState:
             return self._manual[0]
         if self._temp and now < self._temp[1]:
             return self._temp[0]
+        if self.paused:
+            return "stop"
         if self._working_until and now < self._working_until:
             return "working"
         if self._is_asleep(now):
@@ -462,24 +487,36 @@ class PetState:
         self._log_state(now)
         return reactions
 
-    def praise_claude(self, now: datetime) -> list[Reaction]:
-        """右键菜单“做得好”：只有这里产生待转达表扬。"""
+    def feedback_good(self, now: datetime) -> list[Reaction]:
+        """右键菜单“做得好”：加入反馈队列，等下次送达 Claude。"""
         reactions = self._touch(now, attend=False)
         self.save.affection += self.config.praise_affection
-        self.save.pending_praise += 1
+        self._enqueue({"kind": "good", "text": ""})
         self._set_temp("proud", now)
         self._changed(now)
         reactions.append(_say("praise_menu"))
         self._log_state(now)
         return reactions
 
-    def take_praise(self, now: Optional[datetime] = None) -> int:
-        """读取并清零待夸奖计数（给 /praise/take 用）。now 用来给存档防抖计时。"""
-        count = self.save.pending_praise
-        if count:
-            self.save.pending_praise = 0
+    def feedback_bad(self, text: str, now: datetime) -> list[Reaction]:
+        """右键菜单“有问题”：附一句话（单行，可留空）。"""
+        reactions = self._touch(now, attend=False)
+        self._enqueue({"kind": "bad", "text": " ".join((text or "").split())[:FEEDBACK_TEXT_MAX]})
+        self._changed(now)
+        reactions.append(_say("feedback_bad"))
+        return reactions
+
+    def _enqueue(self, item: dict) -> None:
+        self.save.feedback_queue.append(item)
+        del self.save.feedback_queue[:-FEEDBACK_MAX]
+
+    def take_feedback(self, now: Optional[datetime] = None) -> list:
+        """读取并清空反馈队列（送达时调用）。now 用来给存档防抖计时。"""
+        items = [dict(i) for i in self.save.feedback_queue]
+        if items:
+            self.save.feedback_queue = []
             self._changed(now or self._last_activity)
-        return count
+        return items
 
     def claude_event(self, etype: str, detail: Optional[str], now: datetime) -> list[Reaction]:
         """处理本地 HTTP 服务转来的事件。未知类型直接忽略。"""

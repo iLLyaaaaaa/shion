@@ -1,16 +1,19 @@
 """Shion 的本地 HTTP 服务。
 
 只用标准库，不 import Qt。通过两个回调和外界交互：
-``on_event(type, detail)`` 收到事件时调用，``on_take_praise()`` 取走待夸奖计数。
+``on_event(type, detail)`` 收到事件时调用，``on_take_feedback()`` 取走并清空反馈队列（返回要注入的文字）。
 这两个回调都在服务线程里被调用；接到界面时由界面层负责切回 GUI 线程。
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
+
+from .remote import RemoteHub
 
 log = logging.getLogger("shion.server")
 
@@ -89,8 +92,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/event":
             self._post_event()
-        elif self.path == "/praise/take":
-            self._post_take_praise()
+        elif self.path == "/feedback/take":
+            self._post_take_feedback()
+        elif self.path == "/pause/wait":
+            self._post_pause_wait()
         else:
             self._send(404, {"error": "not found"})
 
@@ -108,6 +113,9 @@ class _Handler(BaseHTTPRequestHandler):
         if detail is not None and not isinstance(detail, str):
             self._send(400, {"error": "detail 必须是字符串或 null"})
             return
+        if etype == "prompt":
+            # 用户在 CC 里说话就解除暂停；在服务线程里直接做，紧接着的工具调用不会再被误挡
+            self.server.hub.resume()
         try:
             self.server.on_event(etype, detail)
         except Exception:
@@ -116,41 +124,54 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send(200, {"ok": True})
 
-    def _post_take_praise(self):
+    def _post_take_feedback(self):
         # 读取 body（即使不用），避免连接被意外重置
         if self._read_json() is None:
             return
         try:
-            with self.server.praise_lock:
-                count = int(self.server.on_take_praise())
+            with self.server.feedback_lock:
+                text = str(self.server.on_take_feedback())
         except Exception:
-            log.exception("on_take_praise 回调出错")
+            log.exception("on_take_feedback 回调出错")
             self._send(500, {"error": "internal error"})
             return
-        self._send(200, {"count": count})
+        self._send(200, {"text": text})
+
+    def _post_pause_wait(self):
+        """长轮询：暂停中最多等 wait 秒。只读，不能借此改变暂停状态。"""
+        data = self._read_json()
+        if data is None:
+            return
+        wait = data.get("wait", 0) if isinstance(data, dict) else 0
+        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait):
+            wait = 0
+        self._send(200, {"paused": self.server.hub.wait_while_paused(wait)})
 
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False  # 端口被占用时要报错，而不是悄悄共用
 
-    def __init__(self, addr, on_event, on_take_praise):
+    def __init__(self, addr, on_event, on_take_feedback, hub):
         super().__init__(addr, _Handler)
         self.on_event = on_event
-        self.on_take_praise = on_take_praise
-        self.praise_lock = threading.Lock()
+        self.on_take_feedback = on_take_feedback
+        self.hub = hub
+        self.feedback_lock = threading.Lock()
 
 
 class ShionServer:
     def __init__(
         self,
         on_event: Callable[[str, Optional[str]], None],
-        on_take_praise: Callable[[], int],
+        on_take_feedback: Callable[[], str],
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
+        hub: Optional[RemoteHub] = None,
     ):
         self._on_event = on_event
-        self._on_take_praise = on_take_praise
+        self._on_take_feedback = on_take_feedback
+        self.hub = hub or RemoteHub()
         self._host = host
         self._port = port
         self._httpd: Optional[_Server] = None
@@ -164,7 +185,7 @@ class ShionServer:
         """启动服务。端口被占用时抛 OSError。"""
         if self._httpd:
             return
-        self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_praise)
+        self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_feedback, self.hub)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="shion-server", daemon=True
         )
@@ -201,7 +222,7 @@ def main() -> None:
 
     def on_take():
         with lock:
-            return pet.take_praise()
+            return "\n".join(i["kind"] + ":" + i["text"] for i in pet.take_feedback())
 
     srv = ShionServer(on_event, on_take)
     srv.start()

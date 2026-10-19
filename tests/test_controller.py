@@ -68,7 +68,7 @@ def test_pat_shows_happy_counts_and_spawns_hearts_then_returns_to_idle(env):
     assert env.win.sprite_name == "happy"
     assert env.state.save.affection == 1
     assert env.state.save.stats["pats"] == 1
-    assert env.state.save.pending_praise == 0
+    assert env.state.save.feedback_queue == []
     assert env.overlay.particles.active
     assert len(env.overlay.particles.items(env.mono[0])) == 2
     env.advance(2.0)
@@ -86,7 +86,7 @@ def test_continuous_pat_keeps_pair_only_at_start_then_one_every_200ms(env):
         env.win.patted.emit()
         assert len(env.overlay.particles.items(env.mono[0])) == expected
     assert env.data.affection == env.data.stats["pats"] == 15
-    assert env.data.pending_praise == 0
+    assert env.data.feedback_queue == []
 
 
 def test_pat_session_gap_restarts_pair_only_after_one_second(env):
@@ -194,19 +194,19 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["做得好", "表情", "活跃度", "动作", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["工作遥控", "表情", "活跃度", "动作", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
     assert [a.isChecked() for a in sizes] == [False, True, False, False]
 
 
-def test_menu_praise_claude_shows_proud(env):
+def test_menu_good_feedback_shows_proud(env):
     menu = env.ctl.build_menu()  # 要留着引用，菜单被回收后动作也没了
-    find_action(menu, "做得好").trigger()
+    find_action(find_action(menu, "工作遥控").menu(), "做得好").trigger()
     assert env.win.sprite_name == "proud"
     assert env.data.affection == 3
-    assert env.data.pending_praise == 1
+    assert env.data.feedback_queue == [{"kind": "good", "text": ""}]
     assert env.said == ["收到！下次见到 Claude 我就告诉它～"]
 
 
@@ -454,11 +454,19 @@ def test_muted_events_still_change_state_but_say_nothing(env):
     assert env.said == []
 
 
-def test_take_praise_returns_and_clears(env):
+def test_take_feedback_text_merges_goods_and_clears(env):
     for _ in range(3):
-        env.ctl.praise()
-    assert env.ctl.take_praise() == 3
-    assert env.ctl.take_praise() == 0
+        env.ctl.feedback_good()
+    env.ctl.feedback_bad("测试没过")
+    env.ctl.feedback_bad("")
+    text = env.ctl.take_feedback_text()
+    assert text.splitlines() == [
+        "[诗音] 用户觉得你刚才做得很好。",
+        "[诗音] 用户认为刚才的改动有问题：测试没过。请重新检查。",
+        "[诗音] 用户认为刚才的改动有问题。请重新检查。",
+    ]
+    assert env.ctl.take_feedback_text() == ""
+    assert env.data.feedback_queue == []
 
 
 # ---------------------------------------------------------------- 审查修复
@@ -566,7 +574,7 @@ def test_switch_language_applies_immediately_and_saves(env):
     assert env.data.language == "en"
     menu2 = env.ctl.build_menu()
     assert [a.text() for a in menu2.actions() if not a.isSeparator()][:3] == [
-        "Well done", "Expression", "Activity",
+        "Work remote", "Expression", "Activity",
     ]
     assert "Together for 0m" in env.ctl.status_text(T0)
     assert "Pats today: 0" in env.ctl.status_text(T0)

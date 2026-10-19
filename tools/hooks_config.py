@@ -10,8 +10,10 @@ from pathlib import Path
 
 MARKER = "shion_hook.py"
 ROOT = Path(__file__).resolve().parent.parent
-EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUseFailure", "Stop", "Notification"]
-TIMEOUTS = {"SessionStart": 15}
+EVENTS = [
+    "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "Notification",
+]
+TIMEOUTS = {"SessionStart": 15, "PreToolUse": 1900}  # PreToolUse 要等用户点“继续”，比暂停上限长
 DEFAULT_TIMEOUT = 5
 
 
@@ -77,7 +79,7 @@ def merge(settings: dict, python: str, script: str) -> dict:
             "timeout": TIMEOUTS.get(event, DEFAULT_TIMEOUT),
         }
         group = {"hooks": [entry]}
-        if event == "PreToolUse":
+        if event in ("PreToolUse", "PostToolUse"):
             group = {"matcher": "*", **group}
         existing = hooks.setdefault(event, [])
         if not isinstance(existing, list):

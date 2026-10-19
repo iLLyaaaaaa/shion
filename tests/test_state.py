@@ -69,7 +69,7 @@ def test_done_lasts_3s_and_counts_task(pet):
 
 
 def test_praise_menu_proud_and_affection(pet):
-    r = pet.praise_claude(T0)
+    r = pet.feedback_good(T0)
     assert keys(r) == ["praise_menu"]
     assert pet.save.affection == 3
     assert pet.current(T0 + sec(2.9)) == "proud"
@@ -285,24 +285,45 @@ def test_pat_counts(pet):
     pet.pat(T0 + sec(1))
     assert pet.save.affection == 2
     assert pet.save.stats["pats"] == 2
-    assert pet.save.pending_praise == 0
+    assert pet.save.feedback_queue == []
 
 
 def test_pat_never_adds_praise(pet):
     for i in range(8):
         pet.pat(T0 + sec(i))
-    assert pet.save.pending_praise == 0
+    assert pet.save.feedback_queue == []
     assert pet.save.affection == 8  # 好感不受限
     pet.pat(T0 + sec(61))  # 窗口滑过之后又能加
-    assert pet.save.pending_praise == 0
+    assert pet.save.feedback_queue == []
 
 
-def test_take_praise_clears(pet):
-    pet.praise_claude(T0)
-    pet.praise_claude(T0 + sec(1))
-    assert pet.take_praise() == 2
-    assert pet.take_praise() == 0
-    assert pet.save.pending_praise == 0
+def test_take_feedback_clears(pet):
+    pet.feedback_good(T0)
+    pet.feedback_bad("  改得不对\n再看看  ", T0 + sec(1))
+    items = pet.take_feedback()
+    assert items == [{"kind": "good", "text": ""}, {"kind": "bad", "text": "改得不对 再看看"}]
+    assert pet.take_feedback() == []
+    assert pet.save.feedback_queue == []
+
+
+def test_feedback_queue_keeps_latest_five_and_truncates_text(pet):
+    for i in range(7):
+        pet.feedback_bad(f"问题{i}", T0 + sec(i))
+    assert [i["text"] for i in pet.save.feedback_queue] == [f"问题{i}" for i in range(2, 7)]
+    pet.feedback_bad("长" * 500, T0)
+    assert len(pet.save.feedback_queue[-1]["text"]) == 200
+
+
+def test_paused_shows_stop_below_drag_and_expressions(pet):
+    pet.paused = True
+    assert pet.current(T0) == "stop"
+    pet.claude_event("working", None, T0)
+    assert pet.current(T0) == "stop"  # 暂停优先于 working
+    pet.drag_start(T0)
+    assert pet.current(T0) == "drag"
+    pet.drag_end(T0)
+    pet.paused = False
+    assert pet.current(T0) == "working"
 
 
 # ---- 统计与事件 ----
@@ -449,15 +470,25 @@ def test_shaken_landing_dizzy_duration_and_dialogue(pet):
 
 
 def test_legacy_praise_migrates_once_without_resetting_other_data():
-    raw = SaveData(affection=50, pending_praise=8).to_dict()
-    raw.pop("schema_version")
+    raw = {"affection": 50, "pending_praise": 8}  # v1：混有摸头记录，丢弃
     data = SaveData.from_dict(raw)
     dirty = []
     p = PetState(data, T0, on_change=dirty.append)
-    assert dirty and data.pending_praise == 0 and data.affection == 50
-    p.praise_claude(T0)
+    assert dirty and data.feedback_queue == [] and data.affection == 50
+    assert data.schema_version == 3
+    p.feedback_good(T0)
     q = PetState(SaveData.from_dict(data.to_dict()), T0)
-    assert q.save.pending_praise == 1
+    assert q.save.feedback_queue == [{"kind": "good", "text": ""}]
+
+
+def test_v2_pending_praise_migrates_to_good_feedback():
+    data = SaveData.from_dict({"schema_version": 2, "affection": 9, "pending_praise": 3})
+    assert data.feedback_queue == [{"kind": "good", "text": ""}] * 3
+    PetState(data, T0)
+    assert data.schema_version == 3 and data.affection == 9
+    again = SaveData.from_dict(data.to_dict())  # 已经是 v3：不会再迁移一遍
+    assert again.feedback_queue == data.feedback_queue
+    assert "pending_praise" not in data.to_dict()
 
 
 def test_idle_expression_does_not_postpone_sleep_or_count_as_attention(pet):

@@ -37,11 +37,13 @@ class BubbleTimeline:
     def __init__(self) -> None:
         self.text = ""
         self._t0: Optional[float] = None
+        self.sticky = False  # True：打完字后一直显示，不淡出（“暂停中”用）
 
-    def start(self, now: float, text: str) -> None:
+    def start(self, now: float, text: str, sticky: bool = False) -> None:
         """开始新台词；直接替换旧的。"""
         self.text = text
         self._t0 = now
+        self.sticky = sticky
 
     @property
     def active(self) -> bool:
@@ -60,7 +62,7 @@ class BubbleTimeline:
         if self._t0 is None:
             return 0.0
         t = now - self._t0 - self._type_end() - HOLD
-        if t <= 0:
+        if t <= 0 or self.sticky:
             return 1.0
         return max(0.0, 1.0 - t / FADE)
 
@@ -70,6 +72,7 @@ class BubbleTimeline:
     def clear(self) -> None:
         self.text = ""
         self._t0 = None
+        self.sticky = False
 
 
 def place_bubble(
@@ -165,10 +168,10 @@ class BubbleWindow(QWidget):
     def line_count(self) -> int:
         return len(self._lines)
 
-    def say(self, text: str) -> None:
-        """开始说一句；正在说的会被直接替换。"""
+    def say(self, text: str, sticky: bool = False) -> None:
+        """开始说一句；正在说的会被直接替换。sticky：打完后一直留着，直到被替换或收起。"""
         text = text.replace("\r\n", "\n").replace("\n", LINE_SEP)  # 让换行真的换行（下标对得上）
-        self._timeline.start(self._clock(), text)
+        self._timeline.start(self._clock(), text, sticky)
         self._layout(text)
         self._place()
         if not self.isVisible():

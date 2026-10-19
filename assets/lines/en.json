@@ -7,6 +7,9 @@
     "display_name": "Shion"
   },
   "lines": {
+    "feedback_sent": ["Passed it on!"],
+    "feedback_bad": ["Got it, I'll pass that on."],
+    "resumed": ["Back to work!"],
     "startup": ["I'm back to keep you company~", "Shion's here. Let's have a good day!", "Hello again! My little spot on your desktop is still here."],
     "idle_talk": ["Remember to take a break today.", "I'll keep you company~", "Hmm... something sweet would be nice.", "I'm not waiting for head pats!"],
     "poke": [
@@ -79,7 +82,18 @@
     ]
   },
   "ui": {
-    "menu_praise": "Well done",
+    "menu_remote": "Work remote",
+    "menu_pause": "Pause work",
+    "menu_resume": "Resume work",
+    "menu_good": "Nice work",
+    "menu_bad": "Something's wrong...",
+    "panel_bad_title": "What's wrong? (optional)",
+    "panel_send": "Send",
+    "panel_cancel": "Cancel",
+    "hook_bad": "[Shion] The user thinks the recent change has a problem: {text}. Please re-check.",
+    "hook_bad_plain": "[Shion] The user thinks the recent change has a problem. Please re-check.",
+    "paused_status": "Paused",
+    "paused_timeout": "Stopped. Say something in CC to continue.",
     "menu_expression": "Expression",
     "menu_fix_expression": "Keep current expression",
     "menu_auto_expression": "Auto expressions",

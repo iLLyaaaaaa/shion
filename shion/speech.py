@@ -17,7 +17,10 @@ class Priority(IntEnum):
 
 
 HIGH_KEYS = {"claude_done", "tool_error", "nudge", "claude_waiting", "permission_request"}
-MEDIUM_KEYS = {"intro", "startup", "greeting", "wake", "neglect_return", "praise_menu"}
+MEDIUM_KEYS = {
+    "intro", "startup", "greeting", "wake", "neglect_return", "praise_menu",
+    "feedback_sent", "feedback_bad", "resumed",
+}
 
 
 def speech_kind(key: str) -> tuple[Priority, str]:
@@ -35,6 +38,7 @@ class SpeechGate:
         self.started = 0.0
         self.until = 0.0
         self.last_low: dict[str, float] = {}
+        self.sticky = False  # 正在显示的是不会自己消失的“暂停中”
 
     def allows(self, now: float, priority: Priority, category: str) -> bool:
         if priority == Priority.HIGH:
@@ -50,17 +54,21 @@ class SpeechGate:
                 return False
         return True
 
-    def start(self, now: float, text: str, priority: Priority, category: str) -> bool:
+    def start(self, now: float, text: str, priority: Priority, category: str,
+              sticky: bool = False) -> bool:
         if not text or not self.allows(now, priority, category):
             return False
-        self.priority, self.started = priority, now
-        self.until = now + len(text.replace("\r\n", "\n")) * CHAR_INTERVAL + HOLD + FADE
+        # “暂停中”一直挂着，但别的台词可以盖掉它，所以按低优先级占位
+        self.priority, self.started, self.sticky = (Priority.LOW if sticky else priority), now, sticky
+        self.until = float("inf") if sticky else (
+            now + len(text.replace("\r\n", "\n")) * CHAR_INTERVAL + HOLD + FADE)
         if priority == Priority.LOW:
             self.last_low[category] = now
         return True
 
     def dismiss(self) -> None:
         self.until = 0.0
+        self.sticky = False
 
 
 class PatSession:

@@ -82,7 +82,7 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
         assert wait_for(lambda: "→ working" in log_text(log1)), log_text(log1)
         http(port, "POST", "/event", {"type": "stop"})
         assert wait_for(lambda: "→ done" in log_text(log1)), log_text(log1)
-        assert http(port, "POST", "/praise/take", {}) == {"count": 0}
+        assert http(port, "POST", "/feedback/take", {}) == {"text": ""}
 
         # 第二个实例（实例名不同）抢同一个端口：不崩溃，日志里有提示
         p2, log2 = start(tmp_path, port, "b")

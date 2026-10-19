@@ -7,8 +7,22 @@
 - **新版行走分帧素材已提交，爱心参数已调整**，验证结果见 2026-10-20 节；行走/跳跃、气泡仲裁与爱心的动态观感和真实桌面点穿仍 **待用户验收**。用户明确授权补测试、更新记录后 commit，不等待本轮真机验收；不 push。
 - 上一轮交互打磨的待验收清单继续保留，不能用本轮自动测试和静态截图替代。
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。本次未安装/卸载 hooks。以后装用户级之前，先卸载项目级那份，避免重复事件。
-- 下一开发步骤仍为 **v0.3 Claude Code 遥控**；本轮没有推进该步骤。
+- **v0.3 进行中**：第一部分（暂停/继续 + 反馈队列）已完成，见下方「v0.3 第一部分」；第二部分（同意/否决）未开始。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## v0.3 第一部分：暂停/继续 + 反馈队列（2026-10-20）
+- **新增** `shion/remote.py`（纯 Python）：`RemoteHub`，用 `Condition` 保护暂停标志，`wait_while_paused(秒)` 供服务线程长轮询（单次上限 30 秒）。服务线程只读/只等；开始暂停只能由 GUI 线程调用 `hub.pause()`。
+- **服务端**：`POST /feedback/take`（取代 `/praise/take`，返回 `{"text"}`）、`POST /pause/wait`（只读；坏的 wait 值当 0）。收到 `prompt` 事件时服务线程**直接** `hub.resume()`（紧接着的工具调用不会被误挡），再转给 GUI。HTTP 里没有任何能让暂停开始的接口（有测试）。`bridge.py` 的请求对象泛化为 `_TakeRequest`，超时后不会把队列取走。
+- **hook**：PreToolUse 先问 `/pause/wait`，暂停中 25 秒一段循环等；诗音没开、请求失败、返回内容不是 `{"paused": true}` 一律放行；等满上限输出 `permissionDecision: deny`（理由“用户暂停了工作，请停下并等待用户指示”）并发 `pause_timeout`，被拒绝的那次不发 `working`。新订阅 PostToolUse：取反馈非空就输出 `additionalContext`。UserPromptSubmit 改为取 `/feedback/take`。总时限：PreToolUse = 暂停上限 + 30 秒，其他事件不变。暂停上限读存档 `remote.pause_timeout`（夹在 60～1880）。`hooks_config.py`：新增 PostToolUse，PreToolUse 超时 1900 秒。**项目级 `.claude/settings.local.json` 里的 hooks 还没重新安装**，要实测前先 `uninstall` 再 `install`（第二部分结束时一起做）。
+- **存档 v3**：`pending_praise` 换成 `feedback_queue`（最多 5 条，满了丢最早的；`bad` 的文字单行、最多 200 字）和 `remote`（暂停/授权秒数）。v1 丢弃旧计数，v2 的 `pending_praise` 迁移成等量“做得好”。`PetState.paused`（不存档）：暂停时显示 `stop`，优先级低于拖动/固定/手动/临时表情，高于 working。
+- **界面**：右键新增“工作遥控”子菜单（暂停工作⇄继续工作 / 做得好 / 有问题……），原顶层“做得好”并入。暂停时气泡“暂停中”一直挂着（`sticky`：打完字不淡出；`SpeechGate` 按低优先级占位，别的台词可以盖掉它，说完后 tick 里自动恢复；静音时不显示）；超时后文字换成“已经停下了，在 CC 里说一声就能继续”，暂停标记保留，点“继续”只解除标记。“有问题……”弹出新的 `shion/panel.py:InputPanel`（终端配色、一行输入框、Enter 发送/Esc 取消、可留空，这个面板会拿键盘焦点）。送达反馈后说“已经转告啦”。新增 UI 文字不含 “Claude”，三语齐全。
+- **验证**：完整 `.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/v03-a/t12`，**521 passed**（485 基线；改写了旧 praise 测试，新增 `tests/test_remote_control.py` 30 项和 hook 暂停/反馈子进程测试）。**真实 `claude -p`（2.1.289，haiku）联调**（假桌宠服务器 = `ShionServer`+`RemoteHub`，暂停 8 秒）：PreToolUse 被挡住 8 秒、释放后正常开工；PostToolUse 的 `additionalContext` 被模型原样看到；UserPromptSubmit 注入反馈正常。踩坑：`-p` 一开始就会触发 `prompt` 事件，按规则这会解除暂停，所以联调时要在 prompt 之后再暂停。
+- **待用户验收**（我看不到真实桌面/CC 界面）：
+  - [ ] 暂停时 CC 终端版和桌面端 Code 标签页里看到什么（工具卡住的样子）；点“继续”无缝继续；在 CC 里说话自动解除；暂停挡手造型和“暂停中”气泡观感。
+  - [ ] 暂停超时的提示（可临时把存档 `remote.pause_timeout` 改成 60 测试）。
+  - [ ] “做得好”/“有问题……”：工作中（PostToolUse）和空闲时（下一条消息）各自送达，Claude 的回应是否自然，“已经转告啦”。
+  - [ ] “有问题……”输入面板的外观、焦点和三语文字。
+- 已知取舍：并行子代理的多个 PreToolUse 各自计时，超时时每个都 deny；暂停后诗音被关闭，等待中的 hook 会在下一次长轮询失败时放行（最多 25 秒）。
 
 ## 2026-10-20：新版走路分帧与爱心密度
 - 先按用户指定范围独立提交 **`4b26f44`**：`assets/sprites/raw/walk_sheet.png`、`tools/process_sheets.py` 和重新生成的 `walk_1~4.png`、`jump_1~2.png`，共 8 个文件。本轮未再修改原图、生成图或处理脚本；程序读取验证连通区域能切出走路 4 帧/跳跃 2 帧，6 张生成图均可解码且为 448×512 RGBA，未直接打开原始 PNG。提交前完整基线 **477 passed**。
@@ -139,7 +153,7 @@
 - [x] v0.1 审查（独立子代理，只读）+ 修复（pytest 共 210 个通过）
 - [x] v0.2 Claude Code hooks（pytest 共 287 个通过；**真机已验收（2026-10-19）**）
 - [x] v0.2.1 状态感知（pytest 共 321 个通过；**真机已验收（2026-10-19）**）
-- [ ] v0.3 Claude Code 遥控（同意/否决、做得好/有问题、暂停/继续）← 下一步
+- [ ] v0.3 Claude Code 遥控：暂停/继续 + 反馈队列已完成（待验收），同意/否决 ← 下一步
 - [ ] v0.4 诗音的对话菜单（零食、预设对话，不调用模型）
 - [ ] v0.5 内容包
 - [ ] v1.0 发布

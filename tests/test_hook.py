@@ -2,11 +2,13 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
+from shion.remote import RemoteHub
 from shion.server import ShionServer
 
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "shion_hook.py"
@@ -15,15 +17,17 @@ PRAISE_LINE = "[诗音] 用户觉得你刚才做得很好。"
 
 @pytest.fixture
 def env(tmp_path):
-    events, state = [], {"praise": 0}
+    events, state = [], {"feedback": ""}
 
     def take():
-        n, state["praise"] = state["praise"], 0
-        return n
+        text, state["feedback"] = state["feedback"], ""
+        return text
 
-    srv = ShionServer(lambda t, d: events.append((t, d)), take, port=0)
+    hub = RemoteHub()
+    srv = ShionServer(lambda t, d: events.append((t, d)), take, port=0, hub=hub)
     srv.start()
     yield srv, events, state, tmp_path
+    hub.resume()
     srv.stop()
 
 
@@ -112,11 +116,11 @@ def test_tool_error_sends_tool_name_but_not_interrupts(env):
 
 def test_session_start_forwards_and_prints_nothing(env):
     srv, events, state, tmp = env
-    state["praise"] = 2
+    state["feedback"] = PRAISE_LINE
     r = run_hook("SessionStart", srv.port, tmp)
     assert r.returncode == 0 and r.stdout == b""
     assert events == [("session_start", None)]
-    assert state["praise"] == 2  # 只有 UserPromptSubmit 才取夸奖
+    assert state["feedback"] == PRAISE_LINE  # 只有 UserPromptSubmit / PostToolUse 才取反馈
 
 
 def test_unknown_event_sends_nothing(env):
@@ -126,44 +130,132 @@ def test_unknown_event_sends_nothing(env):
     assert run_hook("", srv.port, tmp).returncode == 0
 
 
-def test_prompt_injects_praise_utf8(env):
+def test_prompt_injects_feedback_utf8(env):
     srv, events, state, tmp = env
-    state["praise"] = 2
+    state["feedback"] = PRAISE_LINE
     r = run_hook("UserPromptSubmit", srv.port, tmp)
     assert r.returncode == 0
     assert r.stdout.decode("utf-8").strip() == PRAISE_LINE
     assert events == [("prompt", None)]
-    assert state["praise"] == 0  # 已取走
+    assert state["feedback"] == ""  # 已取走
     assert run_hook("UserPromptSubmit", srv.port, tmp).stdout == b""
-
-
-def test_prompt_respects_inject_praise_false(env):
-    srv, _, state, tmp = env
-    (tmp / "state.json").write_text(json.dumps({"inject_praise": False}), encoding="utf-8")
-    state["praise"] = 2
-    r = run_hook("UserPromptSubmit", srv.port, tmp)
-    assert r.returncode == 0 and r.stdout == b""
-    assert state["praise"] == 0  # 计数仍被清零
 
 
 def test_prompt_with_corrupt_save_still_injects(env):
     srv, _, state, tmp = env
     (tmp / "state.json").write_text("{坏的", encoding="utf-8")
-    state["praise"] = 2
+    state["feedback"] = PRAISE_LINE
     assert run_hook("UserPromptSubmit", srv.port, tmp).stdout.decode("utf-8").strip() == PRAISE_LINE
 
 
-@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
-@pytest.mark.parametrize("count", [1, 9])
-def test_praise_is_one_localized_sentence_without_count(env, lang, count):
-    from shion.lines import Lines
-    srv, _, state, tmp = env
-    (tmp / "state.json").write_text(json.dumps({"language": lang}), encoding="utf-8")
-    state["praise"] = count
-    r = run_hook("UserPromptSubmit", srv.port, tmp)
+def test_post_tool_use_delivers_feedback_as_additional_context(env):
+    srv, events, state, tmp = env
+    state["feedback"] = "[诗音] 用户认为刚才的改动有问题：不对。请重新检查。"
+    r = run_hook("PostToolUse", srv.port, tmp)
     assert r.returncode == 0 and r.stderr == b""
-    assert r.stdout.decode("utf-8") == Lines(lang).ui("hook_praise") + "\n"
-    assert state["praise"] == 0
+    out = json.loads(r.stdout.decode("utf-8"))
+    assert out == {"hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": "[诗音] 用户认为刚才的改动有问题：不对。请重新检查。",
+    }}
+    assert events == [] and state["feedback"] == ""
+    assert run_hook("PostToolUse", srv.port, tmp).stdout == b""  # 没有反馈就什么都不输出
+
+
+def test_feedback_hooks_are_silent_when_shion_is_not_running(tmp_path):
+    for name in ("PostToolUse", "UserPromptSubmit"):
+        r = run_hook(name, 1, tmp_path)  # 端口 1：连不上
+        assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
+
+
+# ---------------------------------------------------------------- 暂停 / 继续
+def test_pre_tool_use_passes_straight_through_when_not_paused(env):
+    srv, events, _, tmp = env
+    r = run_hook("PreToolUse", srv.port, tmp, stdin=json.dumps({"tool_name": "Read"}).encode())
+    assert r.returncode == 0 and r.stdout == b""
+    assert events and events[0][0] == "working"
+
+
+def test_pre_tool_use_passes_when_shion_is_not_running(tmp_path):
+    t0 = time.monotonic()
+    r = run_hook("PreToolUse", 1, tmp_path)
+    assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
+    assert time.monotonic() - t0 < 10
+
+
+def test_pre_tool_use_waits_while_paused_and_continues_on_resume(env):
+    srv, events, _, tmp = env
+    srv.hub.pause()
+    threading.Timer(1.0, srv.hub.resume).start()
+    t0 = time.monotonic()
+    r = run_hook("PreToolUse", srv.port, tmp, stdin=json.dumps({"tool_name": "Read"}).encode())
+    assert time.monotonic() - t0 >= 0.9  # 真的被挡住了
+    assert r.returncode == 0 and r.stdout == b""  # 放行：没有 deny
+    assert events and events[0][0] == "working"
+
+
+def test_prompt_event_releases_pause_from_the_server_thread(env):
+    srv, events, _, tmp = env
+    srv.hub.pause()
+    proc = subprocess.Popen(
+        [sys.executable, str(HOOK), "PreToolUse"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        env={**os.environ, "SHION_PORT": str(srv.port), "SHION_DATA_DIR": str(tmp)},
+    )
+    proc.stdin.write(b"{}")
+    proc.stdin.close()
+    time.sleep(1.0)
+    assert proc.poll() is None  # 还在等
+    run_hook("UserPromptSubmit", srv.port, tmp)
+    assert proc.wait(timeout=10) == 0 and proc.stdout.read() == b""
+    assert srv.hub.is_paused is False
+
+
+def test_pause_gate_times_out_with_deny_and_reports_it(env, monkeypatch):
+    srv, events, _, tmp = env
+    monkeypatch.setenv("SHION_PORT", str(srv.port))
+    h = load_hook()
+    srv.hub.pause()
+    reason = h.pause_gate(0.5, poll=0.2)
+    assert reason == "用户暂停了工作，请停下并等待用户指示"
+    assert ("pause_timeout", None) in events
+
+
+def test_pre_tool_use_prints_deny_json_after_pause_timeout(env):
+    srv, events, _, tmp = env
+    srv.hub.pause()
+    code = (
+        "import sys, importlib.util;"
+        f"spec = importlib.util.spec_from_file_location('h', {str(HOOK)!r});"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
+        "m.pause_limit = lambda: 1; sys.argv = ['x', 'PreToolUse']; m.main()"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code], input=b"{}", capture_output=True, timeout=20,
+        env={**os.environ, "SHION_PORT": str(srv.port), "SHION_DATA_DIR": str(tmp)},
+    )
+    out = json.loads(r.stdout.decode("utf-8"))
+    assert out == {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": "用户暂停了工作，请停下并等待用户指示",
+    }}
+    assert ("pause_timeout", None) in events
+    assert not any(t == "working" for t, _ in events)  # 被拒绝的这次不算开工
+
+
+def test_pause_gate_bad_server_response_means_no_pause(monkeypatch):
+    h = load_hook()
+    for bad in (None, [], {"paused": "yes"}, {"paused": 1}, {}):
+        monkeypatch.setattr(h, "request", lambda *a, _bad=bad, **k: _bad)
+        assert h.pause_gate(5, poll=0.1) is None
+
+
+def test_pause_limit_comes_from_save_and_is_clamped(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHION_DATA_DIR", str(tmp_path))
+    h = load_hook()
+    assert h.pause_limit() == 1800
+    for value, expected in ((600, 600), (5, 60), (99999, 1880), ("x", 1800), (True, 1800)):
+        (tmp_path / "state.json").write_text(json.dumps({"remote": {"pause_timeout": value}}), encoding="utf-8")
+        assert h.pause_limit() == expected
 
 
 def test_launch_sets_source_only_on_child_environment(monkeypatch):

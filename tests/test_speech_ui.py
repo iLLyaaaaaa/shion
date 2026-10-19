@@ -15,21 +15,21 @@ def test_critical_event_interrupts_pat_and_blocks_new_low_and_medium_lines(env, 
     assert env.said[-1] in env.ctl.lines._lines[key]
     accepted = list(env.said)
     env.win.clicked.emit()
-    env.ctl.praise()
+    env.ctl.feedback_good()
     env.ctl._show_status()
     env.ctl.handle_event("working", work("read", "a.py"))
     assert env.said == accepted
-    assert env.data.affection == 4 and env.data.pending_praise == 1
+    assert env.data.affection == 4 and len(env.data.feedback_queue) == 1
 
 
 def test_medium_menu_speech_interrupts_low_but_not_other_medium(env):
     env.win.clicked.emit()
-    env.ctl.praise()
+    env.ctl.feedback_good()
     assert env.said[-1] in env.ctl.lines._lines["praise_menu"]
     before = len(env.said)
     env.ctl.handle_event("session_start")
-    env.ctl.praise()
-    assert len(env.said) == before and env.data.pending_praise == 2
+    env.ctl.feedback_good()
+    assert len(env.said) == before and len(env.data.feedback_queue) == 2
 
 
 def test_continuous_pat_says_twice_without_reducing_hearts_or_stats(env, monkeypatch):

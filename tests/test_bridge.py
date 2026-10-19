@@ -34,7 +34,9 @@ class Rig:
 
         self.env.ctl.handle_event = recording
         self.bridge = ServerBridge(self.env.ctl, take_timeout=take_timeout)
-        self.server = ShionServer(self.bridge.on_event, self.bridge.on_take_praise, port=0)
+        self.server = ShionServer(
+            self.bridge.on_event, self.bridge.on_take_feedback, port=0, hub=self.env.ctl.hub
+        )
         self.server.start()
         self.base = f"http://127.0.0.1:{self.server.port}"
         self.pool = ThreadPoolExecutor(max_workers=24)
@@ -123,44 +125,44 @@ def test_bad_requests_get_400_and_change_nothing(rig):
     assert rig.env.win.sprite_name == "idle"
 
 
-def test_praise_take_returns_count_then_zero(rig):
+def test_feedback_take_returns_text_then_empty(rig):
     for _ in range(3):
-        rig.env.ctl.praise()
-    assert rig.call("POST", "/praise/take", {}) == (200, {"count": 3})
-    assert rig.call("POST", "/praise/take", {}) == (200, {"count": 0})
+        rig.env.ctl.feedback_good()
+    assert rig.call("POST", "/feedback/take", {}) == (200, {"text": "[诗音] 用户觉得你刚才做得很好。"})
+    assert rig.call("POST", "/feedback/take", {}) == (200, {"text": ""})
 
 
-def test_concurrent_praise_take_is_atomic(rig):
+def test_concurrent_feedback_take_is_atomic(rig):
     for _ in range(5):
-        rig.env.ctl.praise()
-    futs = [rig.pool.submit(rig.request, "POST", "/praise/take", {}) for _ in range(20)]
-    counts = [rig.wait(f)[1]["count"] for f in futs]
-    assert sum(counts) == 5  # 不多领也不漏领
-    assert rig.env.data.pending_praise == 0
+        rig.env.ctl.feedback_good()
+    futs = [rig.pool.submit(rig.request, "POST", "/feedback/take", {}) for _ in range(20)]
+    texts = [rig.wait(f)[1]["text"] for f in futs]
+    assert sum(1 for t in texts if t) == 1  # 只有一个请求领到，不重复送达
+    assert rig.env.data.feedback_queue == []
 
 
-def test_praise_take_times_out_with_500_when_gui_thread_not_pumping(qapp, tmp_path):
+def test_feedback_take_times_out_with_500_when_gui_thread_not_pumping(qapp, tmp_path):
     r = Rig(tmp_path, take_timeout=0.2)
     try:
-        fut = r.pool.submit(r.request, "POST", "/praise/take", {})
+        fut = r.pool.submit(r.request, "POST", "/feedback/take", {})
         fut.result(timeout=5)  # 故意不泵事件循环
         assert fut.result()[0] == 500
     finally:
         r.close()
 
 
-def test_praise_request_that_timed_out_does_not_lose_the_count(qapp, tmp_path):
-    """超时后 GUI 线程才处理到那个请求：不能把计数取走（否则调用方没拿到、计数还丢了）。"""
+def test_feedback_request_that_timed_out_does_not_lose_the_queue(qapp, tmp_path):
+    """超时后 GUI 线程才处理到那个请求：不能把队列取走（否则调用方没拿到、反馈还丢了）。"""
     r = Rig(tmp_path, take_timeout=0.2)
     try:
         for _ in range(3):
-            r.env.ctl.praise()
-        fut = r.pool.submit(r.request, "POST", "/praise/take", {})
+            r.env.ctl.feedback_good()
+        fut = r.pool.submit(r.request, "POST", "/feedback/take", {})
         fut.result(timeout=5)  # GUI 线程没泵事件 → 超时 500
         assert fut.result()[0] == 500
         r.pump(100)  # 现在才处理排队的请求：已取消，不取数
-        assert r.env.data.pending_praise == 3
+        assert len(r.env.data.feedback_queue) == 3
         r.bridge._take_timeout = 2.0
-        assert r.call("POST", "/praise/take", {}) == (200, {"count": 3})
+        assert r.call("POST", "/feedback/take", {}) == (200, {"text": "[诗音] 用户觉得你刚才做得很好。"})
     finally:
         r.close()

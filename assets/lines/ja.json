@@ -9,6 +9,9 @@
     "display_name": "詩音"
   },
   "lines": {
+    "feedback_sent": ["伝えておいたよ"],
+    "feedback_bad": ["わかった、伝えるね"],
+    "resumed": ["作業再開だよ"],
     "startup": ["また会えたね。そばにいるよ～", "詩音だよ。今日もよろしくね！", "ただいま！デスクトップのいつもの場所だね。"],
     "idle_talk": ["今日も休憩を忘れないでね。", "ここで一緒にいるよ～", "うーん……甘いものが食べたいな。", "なでてほしくて待ってるわけじゃないし！"],
     "poke": [
@@ -81,7 +84,18 @@
     ]
   },
   "ui": {
-    "menu_praise": "よくできたね",
+    "menu_remote": "作業リモコン",
+    "menu_pause": "作業を一時停止",
+    "menu_resume": "作業を再開",
+    "menu_good": "よくできました",
+    "menu_bad": "問題あり……",
+    "panel_bad_title": "どこが問題？（空でもOK）",
+    "panel_send": "送信",
+    "panel_cancel": "キャンセル",
+    "hook_bad": "[詩音] ユーザーは先ほどの変更に問題があると考えています：{text}。再確認してください。",
+    "hook_bad_plain": "[詩音] ユーザーは先ほどの変更に問題があると考えています。再確認してください。",
+    "paused_status": "一時停止中",
+    "paused_timeout": "止まりました。CC で話しかければ再開できます",
     "menu_expression": "表情",
     "menu_fix_expression": "今の表情を固定",
     "menu_auto_expression": "自動に戻す",

@@ -23,11 +23,11 @@ def req(srv, path, method="GET", body=None, raw=None):
 
 @pytest.fixture
 def env():
-    events, state = [], {"praise": 0}
+    events, state = [], {"feedback": ""}
 
     def take():
-        n, state["praise"] = state["praise"], 0
-        return n
+        text, state["feedback"] = state["feedback"], ""
+        return text
 
     srv = ShionServer(lambda t, d: events.append((t, d)), take, port=0)
     srv.start()
@@ -73,16 +73,18 @@ def test_404(env):
     assert req(srv, "/health", "POST", {})[0] == 404
 
 
-def test_take_praise(env):
+def test_take_feedback(env):
     srv, _, state = env
-    state["praise"] = 3
-    assert req(srv, "/praise/take", "POST", {}) == (200, {"count": 3})
-    assert req(srv, "/praise/take", "POST", {}) == (200, {"count": 0})
+    state["feedback"] = "你好"
+    assert req(srv, "/feedback/take", "POST", {}) == (200, {"text": "你好"})
+    assert req(srv, "/feedback/take", "POST", {}) == (200, {"text": ""})
     # 空请求体也行
-    assert req(srv, "/praise/take", "POST", raw=b"")[0] in (200, 400)
+    assert req(srv, "/feedback/take", "POST", raw=b"")[0] in (200, 400)
+    # 旧的夸奖接口已经取消
+    assert req(srv, "/praise/take", "POST", {})[0] == 404
 
 
-def test_take_praise_serialized():
+def test_take_feedback_serialized():
     active, overlaps = [0], [0]
 
     def take():
@@ -91,12 +93,12 @@ def test_take_praise_serialized():
             overlaps[0] += 1
         time.sleep(0.01)
         active[0] -= 1
-        return 1
+        return ""
 
     srv = ShionServer(lambda t, d: None, take, port=0)
     srv.start()
     try:
-        ts = [threading.Thread(target=req, args=(srv, "/praise/take", "POST", {})) for _ in range(20)]
+        ts = [threading.Thread(target=req, args=(srv, "/feedback/take", "POST", {})) for _ in range(20)]
         [t.start() for t in ts]
         [t.join() for t in ts]
     finally:
@@ -112,7 +114,7 @@ def test_callback_exception_gives_500():
     srv.start()
     try:
         assert req(srv, "/event", "POST", {"type": "stop"})[0] == 500
-        assert req(srv, "/praise/take", "POST", {})[0] == 500
+        assert req(srv, "/feedback/take", "POST", {})[0] == 500
         assert req(srv, "/health")[0] == 200
     finally:
         srv.stop()
@@ -121,13 +123,15 @@ def test_callback_exception_gives_500():
 def test_with_real_petstate():
     now = datetime(2026, 1, 1, 12, 0)
     pet = PetState(SaveData(), now)
-    pet.praise_claude(now)
-    pet.praise_claude(now)
-    srv = ShionServer(lambda t, d: pet.claude_event(t, d, now), pet.take_praise, port=0)
+    pet.feedback_good(now)
+    pet.feedback_bad("x", now)
+    srv = ShionServer(
+        lambda t, d: pet.claude_event(t, d, now), lambda: str(len(pet.take_feedback(now))), port=0
+    )
     srv.start()
     try:
-        assert req(srv, "/praise/take", "POST", {})[1]["count"] == 2
-        assert req(srv, "/praise/take", "POST", {})[1]["count"] == 0
+        assert req(srv, "/feedback/take", "POST", {})[1]["text"] == "2"
+        assert req(srv, "/feedback/take", "POST", {})[1]["text"] == "0"
         assert req(srv, "/event", "POST", {"type": "stop"})[0] == 200
         assert req(srv, "/event", "POST", {"type": "bogus"})[0] == 200  # 未知类型由状态机忽略
         assert pet.current(now) == "done"

@@ -18,6 +18,8 @@ from shion.bubble import BubbleWindow
 from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior
 from shion.effects import HeartOverlay
 from shion.lines import Lines
+from shion.panel import InputPanel
+from shion.remote import RemoteHub
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
 from shion.state import ACTIVITY_LEVELS, EXPRESSIONS, PetState, Reaction, SaveScheduler
@@ -60,6 +62,7 @@ class PetController(QObject):
         lines: Optional[Lines] = None,
         overlay: Optional[HeartOverlay] = None,
         bubble: Optional[BubbleWindow] = None,
+        hub: Optional[RemoteHub] = None,
         now_fn: Callable[[], datetime] = datetime.now,
         say: Optional[Callable[[str], None]] = None,
         autostart: bool = True,
@@ -72,6 +75,9 @@ class PetController(QObject):
         self.lines = lines or Lines()
         self.overlay = overlay
         self.bubble = bubble
+        self.hub = hub or RemoteHub()
+        self._pause_timed_out = False
+        self._input_panel: Optional[InputPanel] = None
         self._now_fn = now_fn
         self._say_fn = say or self._bubble_say
         self._pat_session = PatSession()
@@ -131,6 +137,7 @@ class PetController(QObject):
 
     def tick(self) -> None:
         now = self._now()
+        self._sync_pause()
         self.react(self.state.tick(now))
         self.sync()
         action = self._idle.step(
@@ -187,18 +194,24 @@ class PetController(QObject):
         return False
 
     def say(self, text: str, *, priority: Priority = Priority.MEDIUM,
-            category: str = "status") -> bool:
-        if not self._speech.start(self.window.monotonic_time(), text, priority, category):
+            category: str = "status", sticky: bool = False) -> bool:
+        if not self._speech.start(self.window.monotonic_time(), text, priority, category, sticky):
             return False
         log.info("说：%s", text)
-        self._say_fn(text)
+        if sticky:
+            self._say_fn(text, sticky=True)
+        else:
+            self._say_fn(text)
         return True
 
-    def _bubble_say(self, text: str) -> None:
+    def _bubble_say(self, text: str, sticky: bool = False) -> None:
         if self.bubble is None:
             return
         self.bubble.follow(self.window.body_rect())
-        self.bubble.say(text)
+        if sticky:
+            self.bubble.say(text, sticky=True)
+        else:
+            self.bubble.say(text)
 
     def _on_window_moved(self) -> None:
         if self.bubble is not None and self.bubble.isVisible():
@@ -367,6 +380,11 @@ class PetController(QObject):
         private = self.state.save.privacy_mode
         log.info("收到事件：%s %r", etype, None if private else detail)
         now = self._now()
+        if etype == "pause_timeout":
+            self._on_pause_timeout()
+            return
+        if etype == "prompt":
+            self._sync_pause()  # 服务线程已经在 hub 里解除了暂停
         ui = self.lines.ui
         entry = make_entry(etype, detail, now)
         self.activity.add(entry)
@@ -394,15 +412,93 @@ class PetController(QObject):
         if self.say_text(text):
             self._last_activity_say = (text, now)
 
-    def take_praise(self) -> int:
-        """取走待夸奖计数（给 /praise/take 用）。"""
-        count = self.state.take_praise(self._now())
-        log.info("取走夸奖：%d", count)
-        return count
-
-    def praise(self) -> None:
-        self.react(self.state.praise_claude(self._now()))
+    # ------------------------------------------------------------ 遥控：暂停 / 反馈
+    def pause_work(self) -> None:
+        """下一次工具调用前让 Claude 停住（hook 在 hub 上等待）。"""
+        self.react(self.state.interact(self._now()))
+        self._pause_timed_out = False
+        self.hub.pause()
+        self.state.paused = True
+        self._speech.dismiss()
+        self.refresh_pause_bubble()
         self.sync()
+
+    def resume_work(self, *, quiet: bool = False) -> None:
+        self.hub.resume()
+        self._leave_pause()
+        if not quiet:
+            self.say_key("resumed")
+        self.sync()
+
+    def _leave_pause(self) -> None:
+        was_sticky = self._speech.sticky
+        self.state.paused = False
+        self._pause_timed_out = False
+        if was_sticky:
+            self._speech.dismiss()
+            if self.bubble is not None:
+                self.bubble.dismiss()
+
+    def _sync_pause(self) -> None:
+        """hub 在服务线程里被解除暂停（用户在 CC 里说话）后，把界面状态同步过来。"""
+        if self.state.paused and not self.hub.is_paused:
+            self._leave_pause()
+        self.refresh_pause_bubble()
+
+    def _on_pause_timeout(self) -> None:
+        """hook 等满时限后已拒绝工具调用：保持暂停标记，提示用户去 CC 里说话。"""
+        if not self.state.paused:
+            return
+        self._pause_timed_out = True
+        self._speech.dismiss()
+        self.refresh_pause_bubble()
+
+    def refresh_pause_bubble(self) -> None:
+        """暂停期间让“暂停中”一直挂着；被别的台词盖掉后，等那句说完再恢复。"""
+        if not self.state.paused or self.state.save.bubble_muted:
+            return
+        if self.window.monotonic_time() < self._speech.until:
+            return
+        key = "paused_timeout" if self._pause_timed_out else "paused_status"
+        self.say(self.lines.ui(key), priority=Priority.MEDIUM, category="paused", sticky=True)
+
+    def feedback_good(self) -> None:
+        self.react(self.state.feedback_good(self._now()))
+        self.sync()
+
+    def open_bad_feedback(self) -> None:
+        """“有问题……”：弹出一行输入框，发送后加入反馈队列。"""
+        self.window.stop_motion()
+        if self._input_panel is None:
+            family = self.bubble.font_family if self.bubble is not None else "Consolas"
+            self._input_panel = InputPanel(family)
+            self._input_panel.submitted.connect(self.feedback_bad)
+        ui = self.lines.ui
+        self._input_panel.open(
+            ui("panel_bad_title"), ui("panel_send"), ui("panel_cancel"), self.window.body_rect()
+        )
+
+    def feedback_bad(self, text: str = "") -> None:
+        self.react(self.state.feedback_bad(text, self._now()))
+        self.sync()
+
+    def take_feedback_text(self) -> str:
+        """取走反馈队列，合成要注入给 Claude 的文字（给 /feedback/take 用）；没有就返回空串。"""
+        items = self.state.take_feedback(self._now())
+        log.info("取走反馈：%d 条", len(items))
+        if not items:
+            return ""
+        ui = self.lines.ui
+        parts = []
+        if any(i["kind"] == "good" for i in items):
+            parts.append(ui("hook_praise"))
+        for i in items:
+            if i["kind"] == "bad":
+                parts.append(ui("hook_bad", text=i["text"]) if i["text"] else ui("hook_bad_plain"))
+        if not self.state.save.inject_praise:
+            return ""
+        self.say_key("feedback_sent")
+        return "\n".join(parts)
 
     def quit(self) -> None:
         self.window.stop_motion()
@@ -445,7 +541,13 @@ class PetController(QObject):
     def build_menu(self) -> QMenu:
         menu = QMenu()
         ui = self.lines.ui
-        menu.addAction(ui("menu_praise")).triggered.connect(self.praise)
+        remote_menu = menu.addMenu(ui("menu_remote"))
+        if self.state.paused:
+            remote_menu.addAction(ui("menu_resume")).triggered.connect(lambda: self.resume_work())
+        else:
+            remote_menu.addAction(ui("menu_pause")).triggered.connect(self.pause_work)
+        remote_menu.addAction(ui("menu_good")).triggered.connect(self.feedback_good)
+        remote_menu.addAction(ui("menu_bad")).triggered.connect(self.open_bad_feedback)
 
         expression_menu = menu.addMenu(ui("menu_expression"))
         expression_group = QActionGroup(expression_menu)

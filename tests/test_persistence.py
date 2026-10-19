@@ -12,7 +12,8 @@ def test_round_trip(tmp_path):
         first_run=T0,
         affection=7,
         last_attended=T0 + timedelta(minutes=3),
-        pending_praise=2,
+        feedback_queue=[{"kind": "good", "text": ""}, {"kind": "bad", "text": "不对"}],
+        remote={"pause_timeout": 600, "permission_timeout": 60},
         stats={"date": "2026-10-19", "pats": 4, "claude_tasks": 1},
         window={"x": 10, "y": 20, "height": 320},
         bubble_muted=True,
@@ -63,7 +64,8 @@ def test_missing_and_wrong_type_fields_fall_back(tmp_path):
     p.write_text(
         json.dumps({
             "affection": "lots",
-            "pending_praise": -3,
+            "feedback_queue": [{"kind": "x"}, "y", {"kind": "bad", "text": 5}],
+            "remote": {"pause_timeout": 5, "permission_timeout": "x"},
             "first_run": "yesterday",
             "bubble_muted": "yes",
             "stats": {"date": 5, "pats": "x"},
@@ -74,7 +76,8 @@ def test_missing_and_wrong_type_fields_fall_back(tmp_path):
     )
     d = load(p)
     assert d.affection == 0
-    assert d.pending_praise == 0
+    assert d.feedback_queue == [{"kind": "bad", "text": ""}]
+    assert d.remote == {"pause_timeout": 60, "permission_timeout": 120}
     assert d.first_run is None
     assert d.bubble_muted is False
     assert d.stats == {"date": "", "pats": 0, "claude_tasks": 0}
@@ -169,14 +172,14 @@ def test_failed_save_is_retried_only_after_backoff_then_succeeds(tmp_path):
     assert s.dirty is False and path.exists()
 
 
-def test_take_praise_uses_given_time_for_debounce():
+def test_take_feedback_uses_given_time_for_debounce():
     from shion.state import PetState
 
     dirty = []
-    st = PetState(SaveData(pending_praise=2), T0, on_change=dirty.append)
+    st = PetState(SaveData(feedback_queue=[{"kind": "good", "text": ""}] * 2), T0, on_change=dirty.append)
     dirty.clear()
     later = T0 + timedelta(hours=1)
-    assert st.take_praise(later) == 2
+    assert len(st.take_feedback(later)) == 2
     assert dirty == [later]
 
 
