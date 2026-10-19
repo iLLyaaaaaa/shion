@@ -210,6 +210,29 @@ def test_interact_does_not_reset_neglect(pet):
     assert pet.current(t) == "neglect2"
 
 
+def test_drag_counts_as_attended(pet):
+    t = T0 + timedelta(minutes=45)
+    pet.drag_start(t)
+    assert pet.save.last_attended == t
+    t2 = t + sec(5)
+    pet.drag_end(t2)
+    assert pet.save.last_attended == t2
+    assert pet.current(t2 + sec(1)) == "idle"  # 冷落已重置
+
+
+def test_drag_from_neglect2_says_return_line(pet):
+    r = pet.drag_start(T0 + timedelta(hours=3))
+    assert keys(r) == ["neglect_return"]
+
+
+def test_drag_plain_says_drag_line(pet):
+    assert keys(pet.drag_start(T0 + sec(5))) == ["drag"]
+
+
+def test_drag_wakes_with_wake_line(pet):
+    assert keys(pet.drag_start(T0 + timedelta(minutes=20))) == ["wake"]
+
+
 def test_claude_event_resets_neglect(pet):
     t = T0 + timedelta(hours=3)
     r = pet.claude_event("prompt", None, t)

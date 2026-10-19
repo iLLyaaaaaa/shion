@@ -274,21 +274,22 @@ class PetState:
         self._log_state(now)
 
     def interact(self, now: datetime) -> list[Reaction]:
-        """悬停、双击、右键等：只负责唤醒，不算“被理会”。"""
+        """悬停、双击、右键等：只负责唤醒，不算“被理会”。（拖动算，见 drag_start）"""
         reactions = self._touch(now, attend=False)
         self._log_state(now)
         return reactions
 
     def drag_start(self, now: datetime) -> list[Reaction]:
-        reactions = self._touch(now, attend=False)
+        reactions = self._touch(now, attend=True)
         self._dragging = True
-        reactions.append(_say("drag"))
+        if not reactions:
+            reactions.append(_say("drag"))
         self._log_state(now)
         return reactions
 
     def drag_end(self, now: datetime) -> list[Reaction]:
         self._dragging = False
-        reactions = self._touch(now, attend=False)
+        reactions = self._touch(now, attend=True)
         self._log_state(now)
         return reactions
 
