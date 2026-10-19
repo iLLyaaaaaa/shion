@@ -99,7 +99,7 @@ def run() -> int:
     config = state_mod.Config.debug() if debug else state_mod.Config()
     pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty)
 
-    win = PetWindow(height=data.window.get("height", 240))
+    win = PetWindow(height=data.window.get("height", 200))
     overlay = HeartOverlay()
     bubble = BubbleWindow()
     controller = PetController(

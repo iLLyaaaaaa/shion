@@ -20,10 +20,10 @@ log = logging.getLogger("shion.state")
 # 有持续时间的临时状态（同时也是 react 事件允许的表情名）
 TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
 
-MIN_HEIGHT, MAX_HEIGHT = 120, 600  # 存档里的显示高度范围（右键菜单只提供 180~400）
+MIN_HEIGHT, MAX_HEIGHT = 120, 600  # 存档里的显示高度范围（右键菜单只提供 160~320）
 SAVE_RETRY = timedelta(seconds=30)  # 写盘失败后多久再试
 
-DEFAULT_WINDOW = {"x": None, "y": None, "height": 240}  # x/y 为 None 表示用默认位置（右下角）
+DEFAULT_WINDOW = {"x": None, "y": None, "height": 200}  # x/y 为 None 表示用默认位置（右下角）
 
 
 @dataclass(frozen=True)

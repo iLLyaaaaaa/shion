@@ -21,7 +21,7 @@ from shion.state import PetState, Reaction, SaveScheduler
 
 log = logging.getLogger("shion.controller")
 
-SIZES = (180, 240, 320, 400)
+SIZES = (160, 200, 260, 320)
 
 
 def pick_screen_rect(rects, x, y, w, h):
@@ -292,7 +292,7 @@ class PetController(QObject):
         size_menu = menu.addMenu("大小")
         group = QActionGroup(size_menu)
         group.setExclusive(True)
-        cur = self.state.save.window.get("height", 240)
+        cur = self.state.save.window.get("height", 200)
         for h in SIZES:
             act = size_menu.addAction(str(h))
             act.setCheckable(True)

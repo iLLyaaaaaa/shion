@@ -26,7 +26,7 @@ def test_missing_file_gives_defaults(tmp_path):
     d = load(tmp_path / "nope.json")
     assert d == SaveData()
     assert d.affection == 0 and d.inject_praise is True
-    assert d.window["height"] == 240
+    assert d.window["height"] == 200
 
 
 def test_corrupt_json_recovers_and_backs_up(tmp_path):
@@ -79,7 +79,7 @@ def test_partial_file_keeps_valid_fields(tmp_path):
     d = load(p)
     assert d.affection == 12
     assert d.inject_praise is False
-    assert d.window["height"] == 240
+    assert d.window["height"] == 200
 
 
 def test_atomic_save_leaves_no_tmp_and_creates_dirs(tmp_path):

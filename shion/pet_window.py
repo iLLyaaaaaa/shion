@@ -24,7 +24,8 @@ STATES = [
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
 ]
 
-DEFAULT_HEIGHT = 240
+DEFAULT_HEIGHT = 200
+HEAD_FRAC = 0.45  # 精灵上方多少比例算头部（摸头判定区）
 MARGIN_X = 64  # 画布左右留边（倾斜 12° 时头部偏移约 50px）
 MARGIN_TOP = 8
 MARGIN_BOTTOM = 6  # 倾斜时一只脚会往下沉，留出空间不被裁掉
@@ -161,10 +162,10 @@ class PetWindow(QWidget):
         self.moved.emit()
 
     def _is_head(self, pos: QPoint) -> bool:
-        """鼠标是否在精灵上方 35%（按未变换的精灵坐标）。"""
+        """鼠标是否在精灵上方 45%（按未变换的精灵坐标）。"""
         sx = pos.x() - MARGIN_X
         sy = pos.y() - MARGIN_TOP
-        return 0 <= sx < self._sw and 0 <= sy < self._sh * 0.35
+        return 0 <= sx < self._sw and 0 <= sy < self._sh * HEAD_FRAC
 
     def _load_sprites(self) -> None:
         screen = QGuiApplication.primaryScreen()

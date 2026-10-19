@@ -19,10 +19,10 @@ claude pet/
 ├── requirements.txt
 ├── reference/                 原始黑底立绘（只读，暂不进 git）
 ├── assets/
-│   ├── sprites/               程序使用的精灵图 256x512 RGBA（由脚本生成）
+│   ├── sprites/               程序使用的精灵图 448x512 RGBA（由脚本生成）
 │   │   └── raw/               GPT 原图（只读）
 │   └── lines/zh.json          台词
-├── tools/process_sprites.py   素材处理脚本（已完成）
+├── tools/process_sprites.py   素材处理脚本（已完成，已重写）
 ├── shion/                     桌宠主程序包
 │   ├── __main__.py            入口：python -m shion
 │   ├── app.py                 QApplication、单实例检查
@@ -38,7 +38,9 @@ claude pet/
 
 ## 素材
 
-`assets/sprites/` 里有 12 张图，尺寸统一为 256x512，**画框和脚底基线已对齐**，切换时不需要任何偏移。
+`assets/sprites/` 里有 12 张图，是 Q 版 2.3 头身，尺寸统一为 448x512（人物高约 480，头约占上部 45%，脚底离底边 8px），**画框和脚底基线已对齐**，切换时不需要任何偏移。
+
+处理脚本 `tools/process_sprites.py`：不依赖固定坐标，把 `raw/` 的原图清理 alpha 去毛边；以 idle 为基准把站立图的人物高度统一到 480，坐着/悬空的图（sleep/drag/neglect2）用站立图的平均缩放比例；脚底贴底，水平按头部（上部 40%）重心居中，切换表情时头不跳；个别图用 `EXTRA_SCALE` 手动微调。
 
 | 文件 | 用途 |
 |---|---|
@@ -60,7 +62,7 @@ claude pet/
 ## 窗口
 
 - 无边框、背景透明、始终置顶、不在任务栏显示：`FramelessWindowHint | WindowStaysOnTopHint | Tool`，加上 `WA_TranslucentBackground`。
-- 默认显示高度 **240px**（图片按比例缩放，用平滑缩放）。右键菜单可以调成 180 / 240 / 320 / 400。
+- 默认显示高度 **200px**（图片按比例缩放，用平滑缩放）。右键菜单可以调成 160 / 200 / 260 / 320。
 - 默认位置：主屏幕可用区域（`availableGeometry`，不含任务栏）的右下角，脚底贴着底边。
 - 透明像素要能**点击穿透**。Windows 的分层窗口一般会自动穿透，务必实测确认。如果不行，用 `setMask` 根据当前帧的 alpha 生成遮罩。
 - 只允许运行一个实例：用 `QLocalServer`/`QLocalSocket` 检测，第二个实例启动后直接退出。
@@ -69,7 +71,7 @@ claude pet/
 
 | 操作 | 判定 | 反应 |
 |---|---|---|
-| 鼠标悬停在头部 | 精灵图上方 35% 的区域 | 光标变成张开的手（`Qt.OpenHandCursor`） |
+| 鼠标悬停在头部 | 精灵图上方 45% 的区域 | 光标变成张开的手（`Qt.OpenHandCursor`） |
 | **摸头** | 在头部按住左键并左右移动，累计移动超过 40px 算摸 1 次 | 切到 happy，头部轻微左右摇，往上冒爱心粒子；好感度 +1；待夸奖计数 +1（每分钟最多 +5） |
 | 单击身体 | 按下到松开，移动不超过 6px | 轻微压扁再弹回（0.2s），随机说一句话 |
 | 连续戳 | 3 秒内单击 5 次 | 切到 stop 2 秒，说傲娇台词 |
@@ -114,7 +116,7 @@ claude pet/
   "last_attended": "ISO 时间",
   "pending_praise": 0,
   "stats": {"date": "2026-10-19", "pats": 0, "claude_tasks": 0},
-  "window": {"x": 0, "y": 0, "height": 240},
+  "window": {"x": 0, "y": 0, "height": 200},
   "bubble_muted": false,
   "inject_praise": true
 }

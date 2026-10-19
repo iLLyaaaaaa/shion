@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 reference/
 assets/sprites/_check.png
+assets/sprites/_to_delete/
+assets/sprites/old_4.3heads/
+assets/sprites/raw/old_4.3heads/
+assets/sprites/raw/drafts/

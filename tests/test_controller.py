@@ -37,7 +37,7 @@ class Env:
         self.scheduler = S.SaveScheduler(self.path, self.data)
         self.state = S.PetState(self.data, self.now, on_change=self.scheduler.mark_dirty)
         self.win = PetWindow(
-            height=self.data.window.get("height", 240), clock=lambda: self.mono[0], autostart=False
+            height=self.data.window.get("height", 200), clock=lambda: self.mono[0], autostart=False
         )
         self.overlay = HeartOverlay(clock=lambda: self.mono[0], autostart=False)
         self.ctl = PetController(
@@ -139,7 +139,7 @@ def test_menu_contents(env):
     assert texts == ["夸夸 Claude", "大小", "静音气泡", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
-    assert [a.text() for a in sizes] == ["180", "240", "320", "400"]
+    assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
     assert [a.isChecked() for a in sizes] == [False, True, False, False]
 
 
@@ -156,10 +156,10 @@ def test_menu_size_changes_window_and_save_and_checkmark(env):
     env.win.place_default()
     old_h = env.win.height()
     menu = env.ctl.build_menu()
-    find_action(find_action(menu, "大小").menu(), "320").trigger()
-    assert env.win.sprite_size[1] == 320
+    find_action(find_action(menu, "大小").menu(), "260").trigger()
+    assert env.win.sprite_size[1] == 260
     assert env.win.height() > old_h
-    assert env.data.window["height"] == 320
+    assert env.data.window["height"] == 260
     menu2 = env.ctl.build_menu()
     sizes = find_action(menu2, "大小").menu().actions()
     assert [a.isChecked() for a in sizes] == [False, False, True, False]
@@ -225,12 +225,12 @@ def test_save_is_debounced_then_written_and_flushed_on_quit(env):
 
 def test_size_survives_restart(qapp, tmp_path):
     e1 = Env(tmp_path)
-    e1.ctl.set_size(180)
+    e1.ctl.set_size(160)
     e1.ctl.quit()
     e1.close()
     e2 = Env(tmp_path)
     try:
-        assert e2.win.sprite_size[1] == 180
+        assert e2.win.sprite_size[1] == 160
     finally:
         e2.close()
 

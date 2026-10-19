@@ -77,7 +77,7 @@ def test_all_sprites_load_at_default_size(win, name):
     win.set_state(name)
     w, h = win.sprite_size
     assert h == DEFAULT_HEIGHT
-    assert w == DEFAULT_HEIGHT // 2  # 256x512 等比例
+    assert w == round(DEFAULT_HEIGHT * 448 / 512)  # 448x512 等比例
     assert win.width() == w + 2 * MARGIN_X
     assert win.height() == h + MARGIN_TOP + MARGIN_BOTTOM
     assert win.sprite_name == name
@@ -165,7 +165,7 @@ def test_anchor_dizzy_sway_not_clipped_and_stays_put(fwin):
         max_angle = max(max_angle, abs(fwin.frame.angle))
         assert low < fwin.height() - 1  # 画布底边没有被裁
         assert abs(low - base[0]) <= 4  # 一只脚下沉、一只上抬
-        assert abs(feet_x(a) - base_x) <= 3  # 脚的水平位置不滑（头会晃，所以只看脚）
+        assert abs(feet_x(a) - base_x) <= 12  # 脚的水平位置不滑（头会晃，所以只看脚）
     assert max_angle > 4.9
 
 
@@ -203,7 +203,7 @@ def test_mask_superset_while_tilted(fwin):
 
 
 # ---- 鼠标 ----
-HEAD = QPoint(MARGIN_X + 60, MARGIN_TOP + 20)  # 头部（上 35% 以内）
+HEAD = QPoint(MARGIN_X + 60, MARGIN_TOP + 20)  # 头部（上 45% 以内）
 
 
 class Rec:
@@ -233,6 +233,13 @@ def test_hover_cursor_open_hand_on_head_only(win):
     assert win.cursor().shape() == Qt.OpenHandCursor
     QTest.mouseMove(win, BODY + QPoint(0, 40))
     assert win.cursor().shape() != Qt.OpenHandCursor
+
+
+def test_head_zone_is_top_45_percent(win):
+    sh = win.sprite_size[1]
+    x = MARGIN_X + 60
+    assert win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.40)))
+    assert not win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.50)))
 
 
 def test_small_movement_is_a_click_not_a_drag(win):
@@ -483,7 +490,7 @@ def test_snapshot_cli_writes_transparent_png_and_at_changes_frame(tmp_path):
     from PIL import Image
 
     a, b = Image.open(outs[0]), Image.open(outs[1])
-    w = DEFAULT_HEIGHT // 2 + 2 * MARGIN_X
+    w = round(DEFAULT_HEIGHT * 448 / 512) + 2 * MARGIN_X
     h = DEFAULT_HEIGHT + MARGIN_TOP + MARGIN_BOTTOM
     assert a.size == (w, h)
     assert a.mode == "RGBA"

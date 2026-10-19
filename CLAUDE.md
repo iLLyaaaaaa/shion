@@ -22,5 +22,5 @@
 - `docs/spec.md` 完整规格（窗口、交互、状态机、通信协议、开发步骤）
 - `docs/progress.md` 进度与交接记录
 - `shion/` 主程序 · `tests/` 测试 · `hooks/` CC hook 脚本 · `mcp/` MCP 服务器
-- `assets/sprites/` 12 张精灵图（256x512，已对齐）· `assets/lines/zh.json` 台词
+- `assets/sprites/` 12 张精灵图（448x512，已对齐）· `assets/lines/zh.json` 台词
 - `tools/process_sprites.py` 素材处理脚本
