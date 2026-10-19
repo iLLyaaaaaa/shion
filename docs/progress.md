@@ -3,10 +3,22 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- **v0.1 已完成**（审查已做、意见已修），之后又做了 2.3 头身素材、三语、动画打磨与启动自我介绍（pytest 263 个通过）。下一步：**v0.2 Claude Code hooks**（见 spec「Claude Code hooks」）。但**真机验收项还没人做**，用户回来后先按下面各节的清单一次性验收
+- **v0.2 Claude Code hooks 已实现**（pytest 共 **287** 个通过，reviewer 已审、必须修的已修），见下面「v0.2」一节。**待用户验收**真机项；验收通过后用 `tools/install_hooks.py` 装到用户级，再做 **v0.3 MCP**
+- v0.1 及之后的素材/三语/动画打磨都已完成，真机验收清单仍在下面各节，用户回来后一次性验收
 - 2026-10-19 用 reviewer 审查了动画打磨与自我介绍两个 commit（`39b0316`、`ea6aac3`）：**没有必须修的问题**，未改代码。可选项（都没做）：①端口被占用时 `port_busy` 提示会立刻盖掉首次启动的 intro（`controller.py:132`、`app.py:136-138`）；②非首次启动的 `greeting` 台词是“Claude 来啦”，Claude 不一定在，可考虑专用 `startup` 类别；③同状态重复 `set_state` 不再重播动画，以后要重播用 `immediate=True`；④下落中改大小会重置下落速度；⑤淡化时每帧做 `toImage` 转换，卡了再缓存预乘 ndarray
 - v0.2 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
+
+## v0.2：Claude Code hooks（2026-10-19，用户外出，只做自动化验证）
+- 新增 `hooks/shion_hook.py`（只用标准库）：5 个事件映射到 session_start/prompt/working/stop/notification；UserPromptSubmit 调 `/praise/take`，count>0 且存档 `inject_praise` 不为 false 时用 UTF-8 字节写出那句表扬；SessionStart 在 `/health` 不通时用 `.venv\Scripts\pythonw.exe -m shion` 脱离父进程拉起桌宠并最多等 3 秒。任何情况返回 0、stderr 为空；请求不走系统代理、单次超时 0.5 秒，另有总时限兜底（普通事件 2.5 秒、SessionStart 12 秒）。
+- 新增 `tools/install_hooks.py`、`uninstall_hooks.py`、`hooks_config.py`：`--settings PATH`（默认用户级 `~/.claude/settings.json`）；写前备份为 `*.shion-backup-时间戳`，合并不覆盖、可重复安装、卸载只删 Shion 条目；坏 JSON 不改文件；文件不存在/没有变化时卸载不写盘。
+- 桌宠侧只加日志：`收到事件：…`、`取走夸奖：N`，用日志验证事件有没有到。
+- **开发阶段只装在项目级** `.claude/settings.local.json`（已 gitignore，含本机绝对路径）；**没有动用户级 `~/.claude/settings.json`**。
+- 验证：pytest 287 个通过（新增 hook 子进程测试、服务卡死/关闭/大 stdin、安装卸载往返等）；手动冒烟（隔离端口和数据目录）逐个事件日志正确；**真实 `claude -p` 端到端**：桌宠关闭时 SessionStart 自动拉起，日志依次出现 session_start / prompt / working / stop。
+- **踩坑**：Claude Code 在这台机器上用 **PowerShell** 执行 hook，命令以带引号的路径开头（`"D:/…/python.exe" …`）会解析失败（hook 报错但不阻塞）。所以命令改成以不带引号的 `python` 开头：`python "D:/…/hooks/shion_hook.py" Stop`，bash 和 PowerShell 都能解析。代价：要求 PATH 里有真 python（install 脚本会检查，Microsoft Store 占位程序会被拒）；项目路径含 `$`、反引号、引号时拒绝安装。
+- **待用户验收**：①桌面端 Code 标签页和终端里开会话时桌宠自动出现、没有控制台窗口一闪；②用工具时 working、结束 done 的观感；③摸头/夸夸后的下一条消息里 Claude 是否自然回应表扬；④关掉桌宠时 CC 完全无感（PreToolUse 每次多一个 python 进程，约 0.1 秒）；⑤桌面端 Code 标签页是否也读到项目级 `.claude/settings.local.json`（只在终端测过）。
+- 审查可选项（没做）：用户级和项目级同时装会让每个事件触发两次（claude_tasks +2）——**装用户级之前先对项目级运行 `uninstall_hooks.py --settings .claude/settings.local.json`**；`inject_praise` 是 hook 读磁盘存档的，右键切换后若还没落盘会读到旧值（目前菜单里没有这个开关，影响小）；`launch_shion` 无自动测试；PowerShell 下解析命令没有自动测试；拉起桌宠超过 3 秒才就绪时那次 session_start 会丢。
+- 已知取舍：被 SessionStart 拉起时，桌宠自己的启动介绍会被随后的 session_start 问候盖掉。
 
 ## 2026-10-19：动画打磨与启动自我介绍
 - 按用户要求先提交此前遗留：截图验收记录/忽略规则、诗音更名和三语 `intro` 台词（`39b0316`）；基线 237 项测试通过。此次实现不新增或修改图片素材，不引入新依赖。
@@ -54,8 +66,8 @@
 - [x] v0.1-5 气泡与台词（`shion/bubble.py`；pytest 共 173 个通过；**真机验收待用户**）
 - [x] 把 server 回调接到 Qt 信号上（`shion/bridge.py`、`app.run()` 启动服务；pytest 共 189 个通过；真机用 curl 验收待用户）
 - [x] v0.1 审查（独立子代理，只读）+ 修复（pytest 共 210 个通过）
-- [ ] v0.2 Claude Code hooks ← 下一步
-- [ ] v0.3 MCP
+- [x] v0.2 Claude Code hooks（pytest 共 287 个通过；**真机验收待用户**）
+- [ ] v0.3 MCP ← 下一步
 - [ ] v1.0 发布
 
 ## 第 1 步：待用户验收（用户不在电脑前，没法手动测）
