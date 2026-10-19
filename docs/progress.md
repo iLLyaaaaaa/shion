@@ -3,8 +3,8 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- 下一步：**v0.1 第 1 步**（骨架 / 透明置顶窗口 / 拖动下落 / `--snapshot`），需要用户在电脑前验收
-- 之后的顺序：1 → 2 → 4 → 5 → 把 server 回调接到 Qt 信号 → 审查
+- 下一步：**v0.1 第 2 步**（`animator.py` 程序动画）。第 1 步代码已完成并自测，但**真机验收项还没做**（见下）
+- 之后的顺序：2 → 4 → 5 → 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
 ## 已完成
@@ -12,8 +12,8 @@
 - [x] 规格文档
 - [x] v0.1-3 状态机 + 持久化（`shion/state.py`，pytest 全部通过）
 - [x] v0.1-6 本地 HTTP 服务（`shion/server.py`，回调式，不依赖窗口；pytest 共 72 个通过）
-- [ ] v0.1-1 骨架 ← 下一步 / 窗口 / 拖动下落 / 截图模式（等用户在电脑前）
-- [ ] v0.1-2 程序动画
+- [x] v0.1-1 骨架 / 透明置顶窗口 / 拖动下落 / `--snapshot`（pytest 共 94 个通过；**真机验收待用户**）
+- [ ] v0.1-2 程序动画 ← 下一步
 - [ ] v0.1-4 交互
 - [ ] v0.1-5 气泡与台词
 - [ ] 把 server 回调接到 Qt 信号上（第 1 步之后）
@@ -21,6 +21,23 @@
 - [ ] v0.2 Claude Code hooks
 - [ ] v0.3 MCP
 - [ ] v1.0 发布
+
+## 第 1 步：待用户验收（用户不在电脑前，没法手动测）
+自动验证过：pytest（拖动阈值、拖动切 drag、松手落到底边、屏幕外拉回、落地回 idle、透明角落不在 mask 里、单实例、`--snapshot` 输出透明 RGBA 120x240）；真实第二个进程启动会直接退出（exit 0）；idle 截图目视正常。
+**以下需要用户在电脑前做**（运行 `.venv\Scripts\python -m shion`，右键 → 退出可关闭）：
+- [ ] 启动后桌宠出现在主屏右下角，脚贴任务栏上沿，置顶、任务栏不显示图标
+- [ ] 按住身体拖动 → 变成 drag 图，窗口跟着鼠标；松手 → 下落贴底，回到 idle；拖到屏幕外松手会被拉回
+- [ ] **透明区域点穿**：点人物两侧的空白处，能点到下面的窗口；点人物身体不穿透
+- [ ] 再开第二个 `python -m shion` 会直接退出，不出现第二只
+- [ ] 高分屏（缩放 150%）下清晰度、窗口大小正常
+没能真机验证透明点穿的原因：测试时电脑处于锁屏状态（`WindowFromPoint` 返回 LockScreenBackstopFrame）。实现用的是 `setMask`（按精灵 alpha 生成遮罩），不依赖 Windows 分层窗口的自动穿透。
+
+## 第 1 步留给后面步骤的接口（`shion/pet_window.py`、`app.py`）
+- `PetWindow(height=240)`：`set_sprite(name)`、`place_default()`、`start_fall()`、信号 `quit_requested`；落地后回到 `_base_sprite`（第 4 步接状态机后改成 `state.current()`）
+- 拖动/下落没有接状态机（`drag_start/drag_end` 还没调用），第 4 步接；右键菜单目前只有「退出」，第 4 步补全
+- 窗口位置/大小还没存档，第 4 步一起做（`state.py` 的 `window.x/y/height`）
+- `app.run()` 只建窗口，没接 server 和 `SaveScheduler`，留到“把 server 接到 Qt 信号”那步
+- `app.snapshot(out, state, bubble)`：离屏渲染；`--bubble` 第 5 步才生效
 
 ## 第 3 步留给后面步骤的接口（`shion/state.py`）
 - `PetState(data, now, config=None, on_change=None)`；`current(now)` 返回精灵名；`tick(now)` 清理到期状态
@@ -46,5 +63,8 @@
 - `stop` 事件无论是否在 working 都会算一次任务完成
 
 ## 踩坑记录
+- `QRegion(QPixmap.mask().scaled(...))` 会报错，要先 `QBitmap.fromPixmap(...)`
+- Windows 下 Qt 窗口坐标是逻辑像素，用 `WindowFromPoint` 等 Win32 API 检查时要乘 `devicePixelRatio`；锁屏时它返回 LockScreenBackstopFrame，测不了
+- Git Bash 的长 heredoc 里夹中文/引号容易解析失败，写大文件用 Write 工具
 - 本机只有 Python 3.10，spec 已从 3.11+ 改成 3.10+
 - Windows 下 git 会提示 LF 将转 CRLF，只是警告
