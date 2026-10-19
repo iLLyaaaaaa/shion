@@ -4,7 +4,7 @@
 - jump_sheet.png → jump_1.png（下蹲）、jump_2.png（腾空）
 
 处理方式：
-1. 按透明的竖直空隙把整张图切成若干帧（每帧都是一个完整的人物）
+1. 按连通区域把整张图切成若干帧（每帧都是一个完整的人物，相邻帧挨得很近也能切开）
 2. 统一大小：按 SHEETS 里的方式（人物高度 或 头部宽度）和 idle 对比，
    同一张分帧图里的所有帧用同一个缩放比例，保证帧与帧之间大小一致
 3. 对齐：画布与 process_sprites.py 相同；水平按头部重心居中；
@@ -28,21 +28,39 @@ SHEETS = {
     "jump_sheet": ("jump", "head", False),
 }
 HEAD_TOP = 0.28     # 头部宽度测量范围：人物上部 28%（避开举起的手臂）
-MIN_GAP_W = 20      # 宽度小于这个值的块当作杂点忽略
+MIN_FRAME_AREA = 5000  # 像素数大于这个值的连通块才算一帧
 
 
-def split_frames(img: Image.Image) -> list[tuple[int, int]]:
-    a = np.array(img)[..., 3]
-    cols = (a > 128).sum(0) > 0
-    runs, start = [], None
-    for x, c in enumerate(cols):
-        if c and start is None:
-            start = x
-        elif not c and start is not None:
-            runs.append((start, x)); start = None
-    if start is not None:
-        runs.append((start, len(cols)))
-    return [r for r in runs if r[1] - r[0] >= MIN_GAP_W]
+def split_frames(img: Image.Image) -> list[tuple[Image.Image, int]]:
+    """按连通区域切帧：每个大块是一帧，小碎块（发丝、汗滴等）归到离它最近的那一帧。
+
+    GPT 画的分帧图里，相邻两帧的头发经常挨得很近，按竖直空隙切会切不开，所以按连通区域切。
+    """
+    from scipy import ndimage as nd
+    a = np.array(img)
+    mask = a[..., 3] > 40
+    lab, n = nd.label(mask)
+    if n == 0:
+        return []
+    sizes = nd.sum(mask, lab, range(1, n + 1))
+    centers = nd.center_of_mass(mask, lab, range(1, n + 1))
+    big = [i for i in range(n) if sizes[i] >= MIN_FRAME_AREA]
+    big.sort(key=lambda i: centers[i][1])
+    owner = {}
+    for i in range(n):
+        if i in big:
+            owner[i] = i
+        else:
+            owner[i] = min(big, key=lambda b: abs(centers[b][1] - centers[i][1]))
+    frames = []
+    for b in big:
+        keep = np.isin(lab, [i + 1 for i in range(n) if owner[i] == b])
+        out = a.copy()
+        out[~keep] = 0
+        frame = Image.fromarray(out)
+        box = frame.getbbox()
+        frames.append((frame.crop(box), box[3]))  # (人物, 该帧脚底在整图中的 y)
+    return frames
 
 
 def head_width(img: Image.Image) -> int:
@@ -62,11 +80,7 @@ def main():
             print(f"跳过：没有 {path.name}")
             continue
         full = ps.load_clean(path)  # 已裁到整体边界
-        frames = []
-        for x0, x1 in split_frames(full):
-            part = full.crop((x0, 0, x1, full.height))
-            box = part.getbbox()
-            frames.append((part.crop(box), box[3]))  # (人物, 该帧脚底在整图中的 y)
+        frames = split_frames(full)
         if mode == "height":
             s = ps.FIG_H / float(np.median([f.height for f, _ in frames]))
         else:
