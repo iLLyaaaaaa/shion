@@ -222,7 +222,7 @@ class PetController(QObject):
             reactions = [Reaction("say", "pat")]
         self.react(reactions, category="pat")
         if self.overlay is not None:
-            self.overlay.burst(self.window.head_anchor())
+            self.overlay.burst(self.window.head_anchor(), start_session=self._pat_session.new_session)
         self.sync()
 
     def _on_click(self) -> None:

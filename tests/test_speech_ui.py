@@ -36,9 +36,9 @@ def test_continuous_pat_says_twice_without_reducing_hearts_or_stats(env, monkeyp
     env.data.activity_level = "quiet"
     bursts = []
     original = env.overlay.burst
-    def burst(point):
-        bursts.append(point)
-        original(point)
+    def burst(point, **kwargs):
+        bursts.append(kwargs.get("start_session", False))
+        original(point, **kwargs)
     monkeypatch.setattr(env.overlay, "burst", burst)
     env.win.patted.emit()
     for _ in range(12):
@@ -52,9 +52,10 @@ def test_continuous_pat_says_twice_without_reducing_hearts_or_stats(env, monkeyp
         env.advance(0.5)
         env.win.patted.emit()
     assert len(env.said) == 2 and len(bursts) == 30
+    assert bursts == [True] + [False] * 29  # 六秒后的第二句不算新摸头过程
     assert env.data.affection == env.data.stats["pats"] == 30
     assert env.win.sprite_name == "happy"
-    assert len(env.overlay.particles.items(env.mono[0])) <= 3
+    assert len(env.overlay.particles.items(env.mono[0])) <= 6
 
 
 def test_blocked_pat_is_dropped_without_retry_before_six_seconds(env):

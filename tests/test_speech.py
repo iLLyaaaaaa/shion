@@ -73,13 +73,16 @@ def test_poke_variants_share_one_low_category():
 def test_pat_session_inclusive_gap_strict_repeat_and_no_further_repetition():
     session = PatSession()
     assert session.feed(100)
+    assert session.new_session
     for i in range(1, 7):
         assert not session.feed(100 + i * PAT_SESSION_GAP)
     assert not session.feed(100 + PAT_REPEAT_AFTER)
     assert session.feed(100 + PAT_REPEAT_AFTER + 0.001)
+    assert not session.new_session
     for i in range(7, 20):
         assert not session.feed(100 + i)
     assert session.feed(120.001)  # 距上次 >1 秒，开始新过程。
+    assert session.new_session
 
 
 def test_quick_new_pat_session_still_obeys_four_second_speech_cooldown():

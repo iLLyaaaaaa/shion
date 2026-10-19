@@ -70,9 +70,11 @@ class PatSession:
         self.last: float | None = None
         self.started = 0.0
         self.repeated = False
+        self.new_session = False
 
     def feed(self, now: float) -> bool:
         new = self.last is None or now - self.last > PAT_SESSION_GAP
+        self.new_session = new
         self.last = now
         if new:
             self.started, self.repeated = now, False

@@ -70,8 +70,48 @@ def test_pat_shows_happy_counts_and_spawns_hearts_then_returns_to_idle(env):
     assert env.state.save.stats["pats"] == 1
     assert env.state.save.pending_praise == 0
     assert env.overlay.particles.active
+    assert len(env.overlay.particles.items(env.mono[0])) == 2
     env.advance(2.0)
     assert env.win.sprite_name == "idle"
+
+
+def test_continuous_pat_keeps_pair_only_at_start_then_one_every_200ms(env):
+    env.data.activity_level = "quiet"
+    env.win.patted.emit()
+    for _ in range(10):
+        env.win.patted.emit()
+    assert len(env.overlay.particles.items(env.mono[0])) == 2
+    for expected in (3, 4, 5, 6):
+        env.advance(0.2)
+        env.win.patted.emit()
+        assert len(env.overlay.particles.items(env.mono[0])) == expected
+    assert env.data.affection == env.data.stats["pats"] == 15
+    assert env.data.pending_praise == 0
+
+
+def test_pat_session_gap_restarts_pair_only_after_one_second(env):
+    env.data.activity_level = "quiet"
+    env.win.patted.emit()
+    assert len(env.overlay.particles.items(env.mono[0])) == 2
+    env.advance(1)
+    env.win.patted.emit()
+    assert len(env.overlay.particles.items(env.mono[0])) == 1
+    env.advance(1.001)
+    env.win.patted.emit()
+    assert len(env.overlay.particles.items(env.mono[0])) == 2
+
+
+def test_new_pat_pair_is_not_blocked_by_high_priority_speech_or_mute(env):
+    env.ctl.handle_event("stop", "好了")
+    accepted = list(env.said)
+    env.win.patted.emit()
+    assert env.said == accepted
+    assert len(env.overlay.particles.items(env.mono[0])) == 2
+    env.advance(1.001)
+    env.ctl.set_muted(True)
+    env.win.patted.emit()
+    assert len(env.overlay.particles.items(env.mono[0])) == 2
+    assert env.data.affection == env.data.stats["pats"] == 2
 
 
 def test_pat_occasionally_says_a_pat_line(env):

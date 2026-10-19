@@ -13,10 +13,11 @@ from PySide6.QtWidgets import QWidget
 from shion.animator import ease_out
 
 LIFETIME = 1.0  # 秒
-RISE = 45.0  # px
-SPAWN_INTERVAL = 0.6
-MAX_PARTICLES = 3
-HEART_SIZE = 18.0
+RISE = 55.0  # px
+SPAWN_INTERVAL = 0.2
+MAX_PARTICLES = 6
+HEART_SIZE = 20.0
+PAT_START_PARTICLES = 2
 HEART_SPREAD = 25.0
 HEART_DRIFT = 15.0
 HEART_SCALE = (0.8, 1.2)
@@ -37,19 +38,23 @@ class Particles:
         self._ps: list[Particle] = []
         self._last_spawn = -float("inf")
 
-    def spawn(self, now: float, n: int = 1) -> None:
+    def spawn(self, now: float, n: int = 1, *, start_session: bool = False) -> None:
+        """新摸头过程立即冒两颗；后续按间隔冒一颗，始终守总数上限且不补播。"""
         self.update(now)
-        if n <= 0 or now - self._last_spawn < SPAWN_INTERVAL or len(self._ps) >= MAX_PARTICLES:
+        if (n <= 0 or len(self._ps) >= MAX_PARTICLES
+                or not start_session and now - self._last_spawn + 1e-9 < SPAWN_INTERVAL):
             return
         self._last_spawn = now
-        self._ps.append(
-            Particle(
-                born=now,
-                x0=self._rng.uniform(-HEART_SPREAD, HEART_SPREAD),
-                drift=self._rng.uniform(-HEART_DRIFT, HEART_DRIFT),
-                size=self._rng.uniform(*HEART_SCALE),
+        count = min(PAT_START_PARTICLES if start_session else 1, MAX_PARTICLES - len(self._ps))
+        for _ in range(count):
+            self._ps.append(
+                Particle(
+                    born=now,
+                    x0=self._rng.uniform(-HEART_SPREAD, HEART_SPREAD),
+                    drift=self._rng.uniform(-HEART_DRIFT, HEART_DRIFT),
+                    size=self._rng.uniform(*HEART_SCALE),
+                )
             )
-        )
 
     def update(self, now: float) -> None:
         self._ps = [p for p in self._ps if now - p.born < LIFETIME]
@@ -107,10 +112,10 @@ class HeartOverlay(QWidget):
     def particles(self) -> Particles:
         return self._particles
 
-    def burst(self, anchor: QPoint, n: int = 1) -> None:
+    def burst(self, anchor: QPoint, n: int = 1, *, start_session: bool = False) -> None:
         self._anchor = anchor
         self.move(anchor.x() - self.SIZE // 2, anchor.y() - self.SIZE + 20)
-        self._particles.spawn(self._clock(), n)
+        self._particles.spawn(self._clock(), n, start_session=start_session)
         if not self.isVisible():
             self.show()
         if self._autostart and not self._timer.isActive():

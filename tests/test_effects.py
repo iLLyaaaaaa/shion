@@ -1,5 +1,7 @@
 import random
 
+import pytest
+
 from shion.effects import LIFETIME, RISE, Particles, heart_path
 
 
@@ -50,9 +52,63 @@ def test_particle_rate_limit_and_total_cap(monkeypatch):
     import shion.effects as e
     monkeypatch.setattr(e, "LIFETIME", 10)
     p = Particles()
-    for t in (0, 0.1, 0.59, 0.6, 1.2, 1.8, 2.4):
+    for t in (0, 0.1, 0.199999, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2):
         p.spawn(t, 100)
-    assert len(p.items(2.4)) == 3
-    assert [x.born for x in p._ps] == [0, 0.6, 1.2]
+    assert len(p.items(1.2)) == 6
+    assert [x.born for x in p._ps] == [0, 0.2, 0.4, 0.6, 0.8, 1.0]
     p.spawn(20)
     assert len(p.items(20)) == 1
+
+
+def test_new_pat_session_spawns_two_immediately_and_restarts_interval():
+    p = Particles()
+    p.spawn(100)
+    p.spawn(100.1, start_session=True)  # 开始反馈不被旧的冒出间隔挡住
+    assert [x.born for x in p._ps] == [100, 100.1, 100.1]
+    p.spawn(100.299999)
+    assert len(p.items(100.299999)) == 3
+    p.spawn(100.3)
+    assert len(p.items(100.3)) == 4  # 原生 perf_counter 数值下也接受恰好 0.2 秒
+
+
+def test_initial_pair_and_regular_stream_can_reach_six_live_hearts():
+    p = Particles()
+    p.spawn(100, start_session=True)
+    for t in (100.2, 100.4, 100.6, 100.8):
+        p.spawn(t)
+    assert len(p.items(100.8)) == 6
+    p.spawn(100.9, start_session=True)
+    assert len(p.items(100.9)) == 6  # 开始反馈也不能越过总数上限
+    p.spawn(101)
+    assert len(p.items(101)) == 5  # 最早两颗到期，正常只补一颗
+
+
+def test_start_pair_respects_remaining_capacity_and_rejected_spawns_are_not_queued(monkeypatch):
+    import shion.effects as e
+
+    monkeypatch.setattr(e, "LIFETIME", 10)
+    p = Particles()
+    for t in (0, 0.2, 0.4, 0.6, 0.8):
+        p.spawn(t)
+    p.spawn(0.81, start_session=True)
+    assert len(p.items(0.81)) == 6  # 只剩一个空位
+    for i in range(20):
+        p.spawn(0.82 + i / 100, start_session=True)
+    p.update(20)
+    assert not p.active
+    p.spawn(20)
+    assert len(p.items(20)) == 1  # 被丢弃的粒子不补播
+
+
+def test_zero_requested_hearts_does_not_consume_the_start_feedback():
+    p = Particles()
+    p.spawn(100, 0, start_session=True)
+    assert not p.active
+    p.spawn(100, start_session=True)
+    assert len(p.items(100)) == 2
+
+
+def test_rise_uses_55_pixels_with_the_existing_ease_out():
+    p = Particles()
+    p.spawn(0)
+    assert p.items(0.5)[0][1] == pytest.approx(-55 * 0.875)
