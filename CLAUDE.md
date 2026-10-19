@@ -1,6 +1,6 @@
 # Shion（诗音）—— Claude 的桌宠
 
-用 Python + PySide6 做的 Windows 桌宠，可以和 Claude Code（hooks）以及 Claude 桌面端（MCP）联动。非官方粉丝作品。
+用 Python + PySide6 做的 Windows 桌宠，可以通过 hooks 和 Claude Code 联动（显示工作状态、同意/否决、暂停/继续、反馈）。非官方粉丝作品。
 
 ## 每次会话开始时
 1. 先读 `docs/progress.md`，弄清楚做到哪一步、下一步做什么
@@ -21,6 +21,6 @@
 ## 目录
 - `docs/spec.md` 完整规格（窗口、交互、状态机、通信协议、开发步骤）
 - `docs/progress.md` 进度与交接记录
-- `shion/` 主程序 · `tests/` 测试 · `hooks/` CC hook 脚本 · `mcp/` MCP 服务器
+- `shion/` 主程序 · `tests/` 测试 · `hooks/` CC hook 脚本
 - `assets/sprites/` 12 张精灵图（448x512，已对齐）· `assets/lines/zh.json` 台词
 - `tools/process_sprites.py` 素材处理脚本
