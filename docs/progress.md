@@ -7,6 +7,13 @@
 - v0.2 之后的顺序： 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
+## 2026-10-19：截图视觉检查（用户外出，代查静态画面）
+- 使用 `.venv\Scripts\python -m shion --snapshot`，原生 Windows Qt 平台生成 **12 张状态截图 + 中/英/日各 4 张气泡截图**：每种语言按字数挑最长的两条台词、使用大计数的状态文字（9999 天 / 99999 次 / 好感度 999999）和端口占用提示，共 24 张。
+- 总览：`docs/preview.png`（1280×2449），已加入 `.gitignore`，**不提交**。单图、三语细节图、生成脚本、检查结果和测试日志在已忽略的 `.venv/preview-run/`。
+- 已目视检查总览和三语原尺寸细节：12 张状态内容正常；未见方块字、气泡文字越界、遮挡人物或位置异常。另对 90 条文本实例检查 Qt 字形缺失和折行绘制边界，均通过，未改程序或素材。
+- 测试：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/pytest-temp-20261019`，**237 passed**；2 条现有 Pillow `getdata` 弃用警告。默认 pytest 临时目录访问被拒（WinError 5），改用项目内独立临时目录后通过。
+- 此次只完成静态画面检查；上面的拖动、点穿、焦点、高分屏、打字机/淡出等真机交互清单仍待用户回来验收。下一开发步骤仍是 v0.2 Claude Code hooks。本次未 commit。
+
 ## 换 2.3 头身 Q 版精灵图（v0.1 之后的素材更新）
 - 精灵图 448x512（人物高约 480，头约 45%），`tools/process_sprites.py` 已重写；旧图备份在 `old_4.3heads/`（已 gitignore）
 - 摸头判定区 35% → 45%（`pet_window.HEAD_FRAC`）；默认高度 240 → 200；大小档位 160/200/260/320

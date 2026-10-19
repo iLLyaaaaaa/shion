@@ -1,4 +1,4 @@
-# Shion（知音）—— Claude 的桌宠
+# Shion（诗音）—— Claude 的桌宠
 
 用 Python + PySide6 做的 Windows 桌宠，可以和 Claude Code（hooks）以及 Claude 桌面端（MCP）联动。非官方粉丝作品。
 

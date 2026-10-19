@@ -1,18 +1,70 @@
 {
-  "meta": {"name": "English", "font_fallback": ["Segoe UI"]},
+  "meta": {
+    "name": "English",
+    "font_fallback": [
+      "Segoe UI"
+    ],
+    "display_name": "Shion"
+  },
   "lines": {
-    "poke": ["Hm?", "Hey, what's with the poking?", "I'm right here.", "Need something?"],
-    "stop": ["O-okay, that's enough!", "Poke me again and I'll get mad!"],
-    "dizzy": ["The world is spinning...", "Ugh... so dizzy..."],
-    "pat": ["...hehe.", "I guess one more pat is fine.", "I'll tell Claude you said so!"],
-    "praise_menu": ["Got it! I'll pass that on to Claude~"],
-    "claude_working": ["Claude's working hard...", "Shh, don't distract it."],
-    "claude_done": ["All done! Go on, praise Claude.", "Task complete~"],
-    "claude_waiting": ["Claude's waiting for your reply.", "I think it wants to ask you something."],
-    "greeting": ["Claude's here!", "Here we go again~"],
-    "wake": ["Mmh... morning.", "I-I wasn't sleeping!"],
-    "neglect_return": ["...You finally came back.", "I thought you'd forgotten me..."],
-    "drag": ["Put me down!", "Waaah—!"]
+    "poke": [
+      "Hm?",
+      "Hey, what's with the poking?",
+      "I'm right here.",
+      "Need something?",
+      "Shion's right here~"
+    ],
+    "stop": [
+      "O-okay, that's enough!",
+      "Poke me again and I'll get mad!"
+    ],
+    "dizzy": [
+      "The world is spinning...",
+      "Ugh... so dizzy..."
+    ],
+    "pat": [
+      "...hehe.",
+      "I guess one more pat is fine.",
+      "I'll tell Claude you said so!",
+      "Shion loves head pats... I-I mean, it's fine, I guess."
+    ],
+    "praise_menu": [
+      "Got it! I'll pass that on to Claude~"
+    ],
+    "claude_working": [
+      "Claude's working hard...",
+      "Shh, don't distract it."
+    ],
+    "claude_done": [
+      "All done! Go on, praise Claude.",
+      "Task complete~"
+    ],
+    "claude_waiting": [
+      "Claude's waiting for your reply.",
+      "I think it wants to ask you something."
+    ],
+    "greeting": [
+      "Claude's here!",
+      "Here we go again~",
+      "Shion is ready!"
+    ],
+    "wake": [
+      "Mmh... morning.",
+      "I-I wasn't sleeping!"
+    ],
+    "neglect_return": [
+      "...You finally came back.",
+      "I thought you'd forgotten me...",
+      "Shion was waiting for you, you know."
+    ],
+    "drag": [
+      "Put me down!",
+      "Waaah—!"
+    ],
+    "intro": [
+      "Nice to meet you! I'm Shion — I live on your desktop now.",
+      "I'm Shion~ Let's get along!"
+    ]
   },
   "ui": {
     "menu_praise": "Praise Claude",

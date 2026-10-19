@@ -1,18 +1,72 @@
 {
-  "meta": {"name": "日本語", "font_fallback": ["Yu Gothic UI", "Meiryo UI", "Meiryo"]},
+  "meta": {
+    "name": "日本語",
+    "font_fallback": [
+      "Yu Gothic UI",
+      "Meiryo UI",
+      "Meiryo"
+    ],
+    "display_name": "詩音"
+  },
   "lines": {
-    "poke": ["ん？", "なによ、つつかないでよ", "ここにいるよ", "なにか用？"],
-    "stop": ["も、もういいってば！", "これ以上つついたら怒るからね"],
-    "dizzy": ["世界がまわってる……", "うぅ……目がまわる……"],
-    "pat": ["……えへへ", "もう一回くらいなら……いいけど", "Claude に伝えておくね！"],
-    "praise_menu": ["了解！次に Claude に会ったら伝えておくね～"],
-    "claude_working": ["Claude ががんばってる……", "しーっ、邪魔しないであげて"],
-    "claude_done": ["終わったよ！Claude をほめてあげて", "タスク完了～"],
-    "claude_waiting": ["Claude が返事を待ってるよ", "なにか聞きたいことがあるみたい"],
-    "greeting": ["Claude が来たよ！", "さあ、始めよっか～"],
-    "wake": ["んん……おはよ", "ね、寝てないし！"],
-    "neglect_return": ["……やっと帰ってきた。", "忘れられたのかと思った……"],
-    "drag": ["おろしてよ！", "わあぁぁ——"]
+    "poke": [
+      "ん？",
+      "なによ、つつかないでよ",
+      "ここにいるよ",
+      "なにか用？",
+      "詩音はここだよ～"
+    ],
+    "stop": [
+      "も、もういいってば！",
+      "これ以上つついたら怒るからね"
+    ],
+    "dizzy": [
+      "世界がまわってる……",
+      "うぅ……目がまわる……"
+    ],
+    "pat": [
+      "……えへへ",
+      "もう一回くらいなら……いいけど",
+      "Claude に伝えておくね！",
+      "詩音、なでられるの好き……べ、別にそうでもないけど！"
+    ],
+    "praise_menu": [
+      "了解！次に Claude に会ったら伝えておくね～"
+    ],
+    "claude_working": [
+      "Claude ががんばってる……",
+      "しーっ、邪魔しないであげて"
+    ],
+    "claude_done": [
+      "終わったよ！Claude をほめてあげて",
+      "タスク完了～"
+    ],
+    "claude_waiting": [
+      "Claude が返事を待ってるよ",
+      "なにか聞きたいことがあるみたい"
+    ],
+    "greeting": [
+      "Claude が来たよ！",
+      "さあ、始めよっか～",
+      "詩音、準備できてるよ！"
+    ],
+    "wake": [
+      "んん……おはよ",
+      "ね、寝てないし！"
+    ],
+    "neglect_return": [
+      "……やっと帰ってきた。",
+      "忘れられたのかと思った……",
+      "詩音、ずっと待ってたんだからね。"
+    ],
+    "drag": [
+      "おろしてよ！",
+      "わあぁぁ——"
+    ],
+    "intro": [
+      "はじめまして！詩音だよ。今日からあなたのデスクトップに住むね。",
+      "詩音っていいます～これからよろしくね！"
+    ]
   },
   "ui": {
     "menu_praise": "Claude をほめる",
@@ -23,7 +77,7 @@
     "menu_about": "Shion について",
     "menu_quit": "終了",
     "about_title": "Shion について",
-    "about_body": "Shion（知音）v{version}\nClaude のデスクトップマスコット。\n\n非公式ファン作品です。Anthropic とは関係ありません。",
+    "about_body": "Shion（詩音）v{version}\nClaude のデスクトップマスコット。\n\n非公式ファン作品です。Anthropic とは関係ありません。",
     "span_days": "{days}日{hours}時間",
     "span_hours": "{hours}時間{minutes}分",
     "span_minutes": "{minutes}分",
