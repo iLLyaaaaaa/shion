@@ -170,3 +170,15 @@ def test_take_praise_uses_given_time_for_debounce():
     later = T0 + timedelta(hours=1)
     assert st.take_praise(later) == 2
     assert dirty == [later]
+
+
+def test_language_roundtrip_and_invalid_values(tmp_path):
+    p = tmp_path / "state.json"
+    assert load(p).language is None  # 没选过
+    p.write_text(json.dumps({"language": "ja"}), encoding="utf-8")
+    assert load(p).language == "ja"
+    for bad in (5, "", None, ["zh"]):
+        p.write_text(json.dumps({"language": bad}), encoding="utf-8")
+        assert load(p).language is None
+    save(p, SaveData(language="en"))
+    assert load(p).language == "en"

@@ -1,0 +1,33 @@
+{
+  "meta": {"name": "日本語", "font_fallback": ["Yu Gothic UI", "Meiryo UI", "Meiryo"]},
+  "lines": {
+    "poke": ["ん？", "なによ、つつかないでよ", "ここにいるよ", "なにか用？"],
+    "stop": ["も、もういいってば！", "これ以上つついたら怒るからね"],
+    "dizzy": ["世界がまわってる……", "うぅ……目がまわる……"],
+    "pat": ["……えへへ", "もう一回くらいなら……いいけど", "Claude に伝えておくね！"],
+    "praise_menu": ["了解！次に Claude に会ったら伝えておくね～"],
+    "claude_working": ["Claude ががんばってる……", "しーっ、邪魔しないであげて"],
+    "claude_done": ["終わったよ！Claude をほめてあげて", "タスク完了～"],
+    "claude_waiting": ["Claude が返事を待ってるよ", "なにか聞きたいことがあるみたい"],
+    "greeting": ["Claude が来たよ！", "さあ、始めよっか～"],
+    "wake": ["んん……おはよ", "ね、寝てないし！"],
+    "neglect_return": ["……やっと帰ってきた。", "忘れられたのかと思った……"],
+    "drag": ["おろしてよ！", "わあぁぁ——"]
+  },
+  "ui": {
+    "menu_praise": "Claude をほめる",
+    "menu_size": "サイズ",
+    "menu_mute": "吹き出しをミュート",
+    "menu_autostart": "スタートアップで起動（v1.0）",
+    "menu_language": "言語",
+    "menu_about": "Shion について",
+    "menu_quit": "終了",
+    "about_title": "Shion について",
+    "about_body": "Shion（知音）v{version}\nClaude のデスクトップマスコット。\n\n非公式ファン作品です。Anthropic とは関係ありません。",
+    "span_days": "{days}日{hours}時間",
+    "span_hours": "{hours}時間{minutes}分",
+    "span_minutes": "{minutes}分",
+    "status": "一緒に過ごした時間 {span} · 今日なでられた回数 {pats} · Claude の完了タスク {tasks} · 好感度 {affection}",
+    "port_busy": "ローカルポート {port} が使用中のため、Claude との連携は一時的に使えません"
+  }
+}

@@ -136,7 +136,7 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["夸夸 Claude", "大小", "静音气泡", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["夸夸 Claude", "大小", "静音气泡", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
@@ -491,3 +491,60 @@ def test_relocate_does_nothing_while_dragging_or_falling(env):
     y = env.win.y()
     env.ctl.relocate()
     assert env.win.y() == y
+
+
+def test_language_menu_lists_scanned_languages_and_checks_current(env):
+    menu = env.ctl.build_menu()
+    langs = find_action(menu, "语言").menu().actions()
+    codes = env.ctl.lines.available_languages()
+    assert [a.text() for a in langs] == [n for _, n in codes]
+    assert {"English", "日本語"} <= {a.text() for a in langs}
+    assert [a.isChecked() for a in langs] == [c == "zh" for c, _ in codes]
+
+
+def test_switch_language_applies_immediately_and_saves(env):
+    menu = env.ctl.build_menu()
+    find_action(find_action(menu, "语言").menu(), "English").trigger()
+    assert env.data.language == "en"
+    menu2 = env.ctl.build_menu()
+    assert [a.text() for a in menu2.actions() if not a.isSeparator()][:3] == [
+        "Praise Claude", "Size", "Mute speech bubbles",
+    ]
+    assert "Together for 0m" in env.ctl.status_text(T0)
+    assert "Pats today: 0" in env.ctl.status_text(T0)
+    env.ctl.say_key("poke")
+    assert env.said[-1] in env.ctl.lines._lines["poke"]
+    assert env.said[-1] not in Lines()._lines["poke"]  # 不是中文台词
+    env.ctl.set_language("ja")
+    assert env.data.language == "ja"
+    assert "0分" in env.ctl.status_text(T0)
+
+
+def test_language_survives_restart(qapp, tmp_path):
+    e1 = Env(tmp_path)
+    e1.ctl.set_language("ja")
+    e1.ctl.quit()
+    e1.close()
+    e2 = Env(tmp_path)
+    try:
+        assert e2.data.language == "ja"
+    finally:
+        e2.close()
+
+
+def test_switch_language_dismisses_bubble_and_sets_fonts(env):
+    class FakeBubble:
+        def __init__(self):
+            self.dismissed = 0
+            self.fallback = None
+
+        def dismiss(self):
+            self.dismissed += 1
+
+        def set_font_fallback(self, fams):
+            self.fallback = list(fams)
+
+    fb = env.ctl.bubble = FakeBubble()
+    env.ctl.set_language("ja")
+    assert fb.dismissed == 1
+    assert fb.fallback == env.ctl.lines.font_fallback and fb.fallback

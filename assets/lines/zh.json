@@ -1,14 +1,33 @@
 {
-  "poke": ["嗯？", "干嘛戳我啦", "我在呢", "有事吗～"],
-  "stop": ["够、够了啦！", "再戳我就生气了哦"],
-  "dizzy": ["世界在转……", "呜……晕了"],
-  "pat": ["……嘿嘿", "再摸一下也不是不行", "我会转告 Claude 的！"],
-  "praise_menu": ["收到！下次见到 Claude 我就告诉它～"],
-  "claude_working": ["Claude 在努力中……", "嘘，别打扰它"],
-  "claude_done": ["做完啦！快夸夸 Claude", "任务完成～"],
-  "claude_waiting": ["Claude 在等你回话呢", "它好像有话想问你"],
-  "greeting": ["Claude 来啦！", "新的一轮开始～"],
-  "wake": ["唔……早", "我才没有睡着"],
-  "neglect_return": ["……你终于回来了。", "我还以为你不要我了"],
-  "drag": ["放我下来！", "哇啊啊——"]
+  "meta": {"name": "中文", "font_fallback": ["Microsoft YaHei UI", "Microsoft YaHei"]},
+  "lines": {
+    "poke": ["嗯？", "干嘛戳我啦", "我在呢", "有事吗～"],
+    "stop": ["够、够了啦！", "再戳我就生气了哦"],
+    "dizzy": ["世界在转……", "呜……晕了"],
+    "pat": ["……嘿嘿", "再摸一下也不是不行", "我会转告 Claude 的！"],
+    "praise_menu": ["收到！下次见到 Claude 我就告诉它～"],
+    "claude_working": ["Claude 在努力中……", "嘘，别打扰它"],
+    "claude_done": ["做完啦！快夸夸 Claude", "任务完成～"],
+    "claude_waiting": ["Claude 在等你回话呢", "它好像有话想问你"],
+    "greeting": ["Claude 来啦！", "新的一轮开始～"],
+    "wake": ["唔……早", "我才没有睡着"],
+    "neglect_return": ["……你终于回来了。", "我还以为你不要我了"],
+    "drag": ["放我下来！", "哇啊啊——"]
+  },
+  "ui": {
+    "menu_praise": "夸夸 Claude",
+    "menu_size": "大小",
+    "menu_mute": "静音气泡",
+    "menu_autostart": "开机自启（v1.0）",
+    "menu_language": "语言",
+    "menu_about": "关于",
+    "menu_quit": "退出",
+    "about_title": "关于 Shion",
+    "about_body": "Shion（知音）v{version}\nClaude 的桌宠。\n\n非官方粉丝作品，与 Anthropic 无关。",
+    "span_days": "{days} 天 {hours} 小时",
+    "span_hours": "{hours} 小时 {minutes} 分钟",
+    "span_minutes": "{minutes} 分钟",
+    "status": "已陪伴 {span} · 今天被摸 {pats} 次 · Claude 完成了 {tasks} 个任务 · 好感度 {affection}",
+    "port_busy": "本地端口 {port} 被占用了，Claude 联动暂时不可用"
+  }
 }

@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QStandardPaths
+from PySide6.QtCore import QLocale, QObject, QStandardPaths
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
@@ -18,6 +18,7 @@ from shion.bridge import ServerBridge
 from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController
 from shion.effects import HeartOverlay
+from shion.lines import Lines, available_languages, resolve_language
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
 from shion.server import DEFAULT_PORT, ShionServer
 
@@ -102,9 +103,17 @@ def run() -> int:
     win = PetWindow(height=data.window.get("height", 200))
     overlay = HeartOverlay()
     bubble = BubbleWindow()
-    controller = PetController(
-        win, pet_state, scheduler, overlay=overlay, bubble=bubble, parent=app
+    lang = resolve_language(
+        data.language, QLocale().name(), [c for c, _ in available_languages()]
     )
+    lines = Lines(lang)
+    bubble.set_font_fallback(lines.font_fallback)
+    controller = PetController(
+        win, pet_state, scheduler, lines=lines, overlay=overlay, bubble=bubble, parent=app
+    )
+    if data.language != lines.lang:  # 首次启动：把跟随系统得到的语言记进存档
+        data.language = lines.lang
+        scheduler.mark_dirty(now)
     controller.quit_requested.connect(app.quit)
 
     # 本地 HTTP 服务：回调在服务线程里，经 ServerBridge 切回 GUI 线程
@@ -124,7 +133,7 @@ def run() -> int:
     win.show()
     log.info("Shion 启动，存档：%s", save_path)
     if not server_ok:
-        controller.say(f"本地端口 {port} 被占用了，Claude 联动暂时不可用")
+        controller.say(lines.ui("port_busy", port=port))
     code = app.exec()
     scheduler.flush()
     guard.release()
@@ -137,6 +146,7 @@ def snapshot(
     bubble: str | None = None,
     at: float = 0.0,
     squash: str | None = None,
+    lang: str = "zh",
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -158,6 +168,7 @@ def snapshot(
     if bubble:
         bt = [100.0]
         bw = BubbleWindow(clock=lambda: bt[0], autostart=False)
+        bw.set_font_fallback(Lines(lang).font_fallback)
         bw.say(bubble)
         bt[0] += at if at > 0 else len(bubble) * CHAR_INTERVAL
         bimg = bw.render_image(bt[0])

@@ -14,6 +14,14 @@
 - 测试：`test_anchor_dizzy_sway...` 的脚水平漂移容差 3 → 12px（新图脚更宽，最低 8 行在倾斜时只剩一只脚，是度量方式的问题，不是脚真的在滑）；新增摸头区测试，pytest 共 211 个通过
 - 待用户真机确认：200 高度下观感、头部 45% 的悬停/摸头手感
 
+## 多语言（中/英/日）
+- `shion/lines.py` 重写：`Lines(lang, rng, directory)`、`set_language`、`ui(key, **kw)`、`font_fallback`、`available_languages()`（扫描 `assets/lines/*.json`）、`resolve_language(saved, locale, codes)`；缺 key 回退中文
+- 存档新增 `language`（None=还没选）；首次启动跟随系统语言（zh→中、ja→日、其他→英）并写入存档
+- 控制器/app 的界面文字全部走 `lines.ui()`；右键菜单新增「语言」子菜单，切换立即生效并存档；气泡 `set_font_fallback` 追加备选字体；`--snapshot --lang ja` 可看日文气泡
+- pytest 共 237 个通过；日文气泡截图正常（不是方块）
+- 待用户真机确认：右键 → 语言 切换三种语言的观感；删掉存档里的 `language` 后按系统语言启动；日文字体在你机器上显示正常
+- 注意：`zh.json` 必须完整（它是回退的底）；以后新增台词类别/界面 key 要先加到 zh
+
 ## 已完成
 - [x] 美术素材：12 张精灵图已处理好（`tools/process_sprites.py`）
 - [x] 规格文档

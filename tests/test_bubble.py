@@ -222,3 +222,13 @@ def test_every_wrapped_line_starts_with_a_prefix(bub):
         region = img[top : top + 12, x0 : x0 + int(bub._prefix_w) - 2]
         fg = ((region[:, :, 0] > 200) & (region[:, :, 1] > 190) & (region[:, :, 3] > 200)).sum()
         assert fg > 0, f"第 {i} 行开头没有 > 前缀"
+
+
+def test_set_font_fallback_adds_only_installed_families(bub, monkeypatch):
+    # offscreen 平台没有字体，这里假装系统装了两个
+    monkeypatch.setattr(B, "QFontDatabase", type("FakeDB", (), {"families": staticmethod(lambda: ["Yu Gothic UI", "Segoe UI"])}))
+    bub.set_font_fallback(["Yu Gothic UI", "No Such Font XYZ"])
+    fams = bub._font.families()
+    assert fams[0] == bub.font_family and "Yu Gothic UI" in fams and "No Such Font XYZ" not in fams
+    bub.say("日本語のテスト")  # 切换后能正常排版
+    assert bub.line_count >= 1

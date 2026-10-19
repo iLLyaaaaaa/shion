@@ -112,6 +112,7 @@ class SaveData:
     window: dict = field(default_factory=lambda: dict(DEFAULT_WINDOW))
     bubble_muted: bool = False
     inject_praise: bool = True
+    language: Optional[str] = None  # None = 还没选过，首次启动时跟随系统语言
 
     def to_dict(self) -> dict:
         return {
@@ -123,6 +124,7 @@ class SaveData:
             "window": dict(self.window),
             "bubble_muted": self.bubble_muted,
             "inject_praise": self.inject_praise,
+            "language": self.language,
         }
 
     @classmethod
@@ -137,6 +139,8 @@ class SaveData:
         d.pending_praise = _int(raw.get("pending_praise"), 0)
         d.bubble_muted = _bool(raw.get("bubble_muted"), False)
         d.inject_praise = _bool(raw.get("inject_praise"), True)
+        lang = raw.get("language")
+        d.language = lang if isinstance(lang, str) and lang else None
 
         stats = raw.get("stats")
         if isinstance(stats, dict):

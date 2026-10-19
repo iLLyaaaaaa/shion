@@ -1,0 +1,33 @@
+{
+  "meta": {"name": "English", "font_fallback": ["Segoe UI"]},
+  "lines": {
+    "poke": ["Hm?", "Hey, what's with the poking?", "I'm right here.", "Need something?"],
+    "stop": ["O-okay, that's enough!", "Poke me again and I'll get mad!"],
+    "dizzy": ["The world is spinning...", "Ugh... so dizzy..."],
+    "pat": ["...hehe.", "I guess one more pat is fine.", "I'll tell Claude you said so!"],
+    "praise_menu": ["Got it! I'll pass that on to Claude~"],
+    "claude_working": ["Claude's working hard...", "Shh, don't distract it."],
+    "claude_done": ["All done! Go on, praise Claude.", "Task complete~"],
+    "claude_waiting": ["Claude's waiting for your reply.", "I think it wants to ask you something."],
+    "greeting": ["Claude's here!", "Here we go again~"],
+    "wake": ["Mmh... morning.", "I-I wasn't sleeping!"],
+    "neglect_return": ["...You finally came back.", "I thought you'd forgotten me..."],
+    "drag": ["Put me down!", "Waaah—!"]
+  },
+  "ui": {
+    "menu_praise": "Praise Claude",
+    "menu_size": "Size",
+    "menu_mute": "Mute speech bubbles",
+    "menu_autostart": "Start with Windows (v1.0)",
+    "menu_language": "Language",
+    "menu_about": "About",
+    "menu_quit": "Quit",
+    "about_title": "About Shion",
+    "about_body": "Shion v{version}\nA desktop pet for Claude.\n\nUnofficial fan project, not affiliated with Anthropic.",
+    "span_days": "{days}d {hours}h",
+    "span_hours": "{hours}h {minutes}m",
+    "span_minutes": "{minutes}m",
+    "status": "Together for {span} · Pats today: {pats} · Claude tasks done: {tasks} · Affection: {affection}",
+    "port_busy": "Local port {port} is in use — Claude integration is unavailable for now."
+  }
+}

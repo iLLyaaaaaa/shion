@@ -21,7 +21,7 @@ claude pet/
 ├── assets/
 │   ├── sprites/               程序使用的精灵图 448x512 RGBA（由脚本生成）
 │   │   └── raw/               GPT 原图（只读）
-│   └── lines/zh.json          台词
+│   └── lines/{zh,en,ja}.json  各语言的台词和界面文字（扫描此目录得到语言列表）
 ├── tools/process_sprites.py   素材处理脚本（已完成，已重写）
 ├── shion/                     桌宠主程序包
 │   ├── __main__.py            入口：python -m shion
@@ -118,7 +118,8 @@ claude pet/
   "stats": {"date": "2026-10-19", "pats": 0, "claude_tasks": 0},
   "window": {"x": 0, "y": 0, "height": 200},
   "bubble_muted": false,
-  "inject_praise": true
+  "inject_praise": true,
+  "language": "zh"
 }
 ```
 
@@ -129,9 +130,18 @@ claude pet/
 - 独立的无边框置顶小窗口，跟随在桌宠头顶上方；如果靠近屏幕边缘，自动翻到另一侧。
 - **终端风格**：背景 `#0A0A0A`，1px 橙色 `#F58236` 边框，圆角 4px，米白色文字，等宽字体（优先 `Cascadia Mono`，回退到 `Consolas`），每行开头加 `> `。
 - 打字机效果：每 30ms 出一个字，全部显示完后停留 4 秒再淡出。新台词出现时直接替换旧的。
-- 台词从 `assets/lines/zh.json` 随机抽取，同一类台词不要连续重复。静音时不弹气泡。
+- 台词从当前语言的 json 随机抽取，同一类台词不要连续重复。静音时不弹气泡。
+- 气泡字体：首选等宽字体不变，后面追加当前语言 `meta.font_fallback` 里已安装的字体（日文、中文字符走它）。
 
-`assets/lines/zh.json` 的初始内容（Shion 的性格：温柔、有点傲娇，很在意 Claude 有没有被夸）：
+### 多语言（lines.py）
+
+- 语言文件 `assets/lines/<代码>.json`，格式：`meta`（`name` 是该语言自己的名字，显示在菜单里；`font_fallback` 是字体备选列表）、`lines`（台词类别 → 台词数组）、`ui`（界面文字，`{xxx}` 是占位符，如 `{version}`、`{span}`、`{port}`）。
+- **语言列表自动扫描**该目录下所有能解析的 `*.json`（坏文件跳过），中文排第一，其余按代码排序。新增语言只需放一个 json，不用改代码。
+- **回退**：缺的台词类别、缺的界面文字都回退到中文（`zh.json` 必须完整）；`ui()` 在占位符对不上时不抛异常；语言文件不存在就用中文。
+- **首次启动**（存档里没有 `language`）跟随系统语言（`QLocale`）：`zh*` → 中文，`ja*` → 日文，其他 → 英文；结果写入存档，之后固定。
+- 右键菜单「语言」子菜单列出扫描到的语言（单选），选择后立即生效（菜单、双击状态、之后的台词、气泡字体），保存到存档，正在显示的气泡收起。
+
+`assets/lines/zh.json` 的 `lines` 部分的初始内容（Shion 的性格：温柔、有点傲娇，很在意 Claude 有没有被夸）：
 
 ```json
 {

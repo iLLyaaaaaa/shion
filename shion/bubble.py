@@ -145,6 +145,14 @@ class BubbleWindow(QWidget):
         self._timer.timeout.connect(self._tick)
 
     # ---- 对外接口 ----
+    def set_font_fallback(self, families: Iterable[str]) -> None:
+        """首选字体不变，其后追加备选字体（日文、中文字符用得上）；改完重新排版并量前缀宽度。"""
+        have = set(QFontDatabase.families())
+        extra = [f for f in families if f in have and f != self._font.family()]
+        self._font.setFamilies([self._font.family(), *extra])
+        self._prefix_w = QFontMetricsF(self._font).horizontalAdvance(PREFIX)
+        self._lines = []
+
     @property
     def font_family(self) -> str:
         return self._font.family()

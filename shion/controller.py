@@ -236,6 +236,15 @@ class PetController(QObject):
         self.save_position()
         self.sync()
 
+    def set_language(self, code: str) -> None:
+        """切换语言，立即生效并存档：之后的台词、菜单、状态文字都用新语言，旧气泡收起。"""
+        self.lines.set_language(code)
+        self.state.save.language = self.lines.lang
+        if self.bubble is not None:
+            self.bubble.set_font_fallback(self.lines.font_fallback)
+            self.bubble.dismiss()
+        self.scheduler.mark_dirty(self._now())
+
     def set_muted(self, muted: bool) -> None:
         self.state.save.bubble_muted = muted
         if muted and self.bubble is not None:
@@ -270,15 +279,16 @@ class PetController(QObject):
         save = self.state.save
         together = now - (save.first_run or now)
         days, hours = together.days, together.seconds // 3600
+        ui = self.lines.ui
         if days:
-            span = f"{days} 天 {hours} 小时"
+            span = ui("span_days", days=days, hours=hours)
         elif hours:
-            span = f"{hours} 小时 {together.seconds % 3600 // 60} 分钟"
+            span = ui("span_hours", hours=hours, minutes=together.seconds % 3600 // 60)
         else:
-            span = f"{together.seconds // 60} 分钟"
-        return (
-            f"已陪伴 {span} · 今天被摸 {save.stats['pats']} 次 · "
-            f"Claude 完成了 {save.stats['claude_tasks']} 个任务 · 好感度 {save.affection}"
+            span = ui("span_minutes", minutes=together.seconds // 60)
+        return ui(
+            "status", span=span, pats=save.stats["pats"],
+            tasks=save.stats["claude_tasks"], affection=save.affection,
         )
 
     def _show_status(self) -> None:
@@ -287,9 +297,10 @@ class PetController(QObject):
     # ------------------------------------------------------------ 菜单
     def build_menu(self) -> QMenu:
         menu = QMenu()
-        menu.addAction("夸夸 Claude").triggered.connect(self.praise)
+        ui = self.lines.ui
+        menu.addAction(ui("menu_praise")).triggered.connect(self.praise)
 
-        size_menu = menu.addMenu("大小")
+        size_menu = menu.addMenu(ui("menu_size"))
         group = QActionGroup(size_menu)
         group.setExclusive(True)
         cur = self.state.save.window.get("height", 200)
@@ -300,17 +311,27 @@ class PetController(QObject):
             group.addAction(act)
             act.triggered.connect(lambda _=False, h=h: self.set_size(h))
 
-        mute = menu.addAction("静音气泡")
+        mute = menu.addAction(ui("menu_mute"))
         mute.setCheckable(True)
         mute.setChecked(self.state.save.bubble_muted)
         mute.triggered.connect(self.set_muted)
 
-        auto = menu.addAction("开机自启（v1.0）")
+        lang_menu = menu.addMenu(ui("menu_language"))
+        lang_group = QActionGroup(lang_menu)
+        lang_group.setExclusive(True)
+        for code, name in self.lines.available_languages():
+            act = lang_menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(code == self.lines.lang)
+            lang_group.addAction(act)
+            act.triggered.connect(lambda _=False, c=code: self.set_language(c))
+
+        auto = menu.addAction(ui("menu_autostart"))
         auto.setEnabled(False)
 
         menu.addSeparator()
-        menu.addAction("关于").triggered.connect(self.show_about)
-        menu.addAction("退出").triggered.connect(self.quit)
+        menu.addAction(ui("menu_about")).triggered.connect(self.show_about)
+        menu.addAction(ui("menu_quit")).triggered.connect(self.quit)
         return menu
 
     def show_menu(self, pos: QPoint) -> None:
@@ -323,6 +344,6 @@ class PetController(QObject):
     def show_about(self) -> None:
         QMessageBox.about(
             self.window,
-            "关于 Shion",
-            f"Shion（知音）v{VERSION}\nClaude 的桌宠。\n\n非官方粉丝作品，与 Anthropic 无关。",
+            self.lines.ui("about_title"),
+            self.lines.ui("about_body", version=VERSION),
         )
