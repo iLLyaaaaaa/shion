@@ -64,7 +64,7 @@ def head_center_x(img: Image.Image) -> float:
 
 
 def main():
-    imgs = {p.stem: load_clean(p) for p in RAW.glob("*.png")}
+    imgs = {p.stem: load_clean(p) for p in RAW.glob("*.png") if not p.stem.endswith("_sheet")}  # *_sheet 由 process_sheets.py 处理
     base = FIG_H / imgs["idle"].height
     scales = {}
     for n in STANDING:
