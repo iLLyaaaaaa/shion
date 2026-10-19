@@ -3,8 +3,8 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- 下一步：**v0.1 第 2 步**（`animator.py` 程序动画）。第 1 步代码已完成并自测，但**真机验收项还没做**（见下）
-- 之后的顺序：2 → 4 → 5 → 把 server 回调接到 Qt 信号 → 审查
+- 下一步：**v0.1 第 4 步**（交互接入状态机）。第 1、2 步代码已完成并自测，但**真机验收项还没做**（见下）
+- 之后的顺序：4 → 5 → 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
 ## 已完成
@@ -13,8 +13,8 @@
 - [x] v0.1-3 状态机 + 持久化（`shion/state.py`，pytest 全部通过）
 - [x] v0.1-6 本地 HTTP 服务（`shion/server.py`，回调式，不依赖窗口；pytest 共 72 个通过）
 - [x] v0.1-1 骨架 / 透明置顶窗口 / 拖动下落 / `--snapshot`（pytest 共 94 个通过；**真机验收待用户**）
-- [ ] v0.1-2 程序动画 ← 下一步
-- [ ] v0.1-4 交互
+- [x] v0.1-2 程序动画（`shion/animator.py`；pytest 共 121 个通过；**真机验收待用户**）
+- [ ] v0.1-4 交互 ← 下一步
 - [ ] v0.1-5 气泡与台词
 - [ ] 把 server 回调接到 Qt 信号上（第 1 步之后）
 - [ ] v0.1 审查
@@ -31,6 +31,23 @@
 - [ ] 再开第二个 `python -m shion` 会直接退出，不出现第二只
 - [ ] 高分屏（缩放 150%）下清晰度、窗口大小正常
 没能真机验证透明点穿的原因：测试时电脑处于锁屏状态（`WindowFromPoint` 返回 LockScreenBackstopFrame）。实现用的是 `setMask`（按精灵 alpha 生成遮罩），不依赖 Windows 分层窗口的自动穿透。
+
+## 第 2 步：待用户验收（同样没手动测）
+自动验证过：animator 纯逻辑 14 个 pytest（呼吸 1.000~1.012 / 周期 3s、眨眼只在 idle、间隔 3~6s、连眨约 15%、压扁结束精确回 1、倾斜限幅 ±12° 且松手回 0、晃动幅度）；窗口层用离屏渲染检查锚点（呼吸、压扁时最低行 ±1px、水平不滑；dizzy 晃动时脚不滑、不被画布裁掉）、遮罩覆盖所有可见像素；`--snapshot` 看过 idle / dizzy 最大角度 / land 压扁的截图；真实运行 8 秒 CPU 约 1.6%（单核）。
+**需要用户在电脑前确认**：
+- [ ] 呼吸、眨眼看着自然，不跳位、不抖
+- [ ] 点一下身体有压扁弹回；松手落地有压扁
+- [ ] 拖动时向左右拖会随速度倾斜，松手后回正，头没被裁掉
+- [ ] 动画状态下透明区域仍然点穿（遮罩现在随角度/缩放更新，向外扩 4px，边缘点击略宽松）
+- [ ] 高分屏下画面清晰
+（dizzy / happy 的晃动已实现，要等第 4 步接上摸头、连戳后才能在真机看到）
+
+## 第 2 步留给后面步骤的接口（`shion/animator.py`、`pet_window.py`）
+- `Animator(rng)`：`set_state(name, now)`、`squash(now, "click"|"land")`、`set_drag(bool)`、`feed_velocity(vx, now)`、`frame(now) -> Frame(sprite, sx, sy, angle)`；时间都是传入的秒数，纯 Python
+- `PetWindow(height, clock, autostart)`：`set_state(name)`（取代第 1 步的 `set_sprite`，第 4 步接状态机时用它）、`advance_to(now)`、`render_frame()`、`displayed_sprite`、`frame`、`sprite_size`
+- **窗口现在是画布**：精灵左右各留 64px、上 8px、下 6px（`MARGIN_X/TOP/BOTTOM`），脚底中心在画布底边上方 6px。第 4 步的“头部 35%”命中区要用精灵坐标（减去 `MARGIN_X`、`MARGIN_TOP`）；`landing_geometry` 带了留边参数
+- 单击已触发 click 压扁，第 4 步接单击/连戳时不用再做；拖动时 Animator 自己切 drag 状态，松手后回 `_base_state`（第 4 步改成状态机的 `current()`）
+- `--snapshot` 新增 `--at 秒数`、`--squash click|land`
 
 ## 第 1 步留给后面步骤的接口（`shion/pet_window.py`、`app.py`）
 - `PetWindow(height=240)`：`set_sprite(name)`、`place_default()`、`start_fall()`、信号 `quit_requested`；落地后回到 `_base_sprite`（第 4 步接状态机后改成 `state.current()`）
@@ -63,6 +80,10 @@
 - `stop` 事件无论是否在 working 都会算一次任务完成
 
 ## 踩坑记录
+- `QWidget.grab()` 会被 `setMask` 裁剪，遮罩外的像素是未初始化内存（测试偶发角落有像素）；截图和测试改用 `render_frame()`
+- numpy 用 `frombuffer` 读 `QImage.constBits()` 时，QImage 一释放数据就悬空，必须 `.copy()`
+- 遮罩要覆盖实际绘制：角度取整 1° 在 250px 处有约 2px 误差，所以遮罩向外扩 4px
+- 呼吸每帧都变会让 60fps 重绘（CPU 约 8.6%）；把帧量化到 0.001 / 0.01° 后降到约 1.6%
 - `QRegion(QPixmap.mask().scaled(...))` 会报错，要先 `QBitmap.fromPixmap(...)`
 - Windows 下 Qt 窗口坐标是逻辑像素，用 `WindowFromPoint` 等 Win32 API 检查时要乘 `devicePixelRatio`；锁屏时它返回 LockScreenBackstopFrame，测不了
 - Git Bash 的长 heredoc 里夹中文/引号容易解析失败，写大文件用 Write 工具

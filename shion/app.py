@@ -60,18 +60,32 @@ def run() -> int:
     return code
 
 
-def snapshot(out: str, state: str = "idle", bubble: str | None = None) -> int:
-    """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。"""
+def snapshot(
+    out: str,
+    state: str = "idle",
+    bubble: str | None = None,
+    at: float = 0.0,
+    squash: str | None = None,
+) -> int:
+    """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
+
+    at：切到该状态后第几秒的那一帧（用来检查晃动、呼吸）。squash：在 0 秒触发压扁。
+    """
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication(sys.argv)
     if bubble:
         print("提示：气泡还没实现（第 5 步），--bubble 被忽略", file=sys.stderr)
-    win = PetWindow()
-    win.set_sprite(state)
-    ok = win.grab().save(out, "PNG")
+    t = [100.0]  # 假时钟，不用真的等
+    win = PetWindow(clock=lambda: t[0], autostart=False)
+    win.set_state(state)
+    if squash:
+        win._animator.squash(t[0], squash)
+    t[0] += at
+    win.advance_to(t[0])
+    ok = win.render_frame().save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)
         return 1
-    print(f"已保存 {out}（{win.width()}x{win.height()}）")
+    print(f"saved {out} ({win.width()}x{win.height()})")
     del app
     return 0

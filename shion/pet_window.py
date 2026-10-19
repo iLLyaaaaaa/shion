@@ -1,11 +1,21 @@
-"""透明置顶的桌宠窗口：显示精灵、拖动、松手重力下落。"""
+"""透明置顶的桌宠窗口：显示精灵、动画、拖动、松手重力下落。
+
+窗口画布比精灵大一圈（留边），这样倾斜、晃动时不会被裁掉。
+脚底中心固定在画布底边的中点，所有变换都以它为锚点。
+"""
 from __future__ import annotations
 
+import time
 from pathlib import Path
+from typing import Callable
 
-from PySide6.QtCore import QElapsedTimer, QPoint, QRect, QTimer, Qt, Signal
-from PySide6.QtGui import QBitmap, QGuiApplication, QPainter, QPixmap, QRegion
+from PySide6.QtCore import QPoint, QRect, QTimer, Qt, Signal
+from PySide6.QtGui import (
+    QBitmap, QGuiApplication, QImage, QPainter, QPixmap, QRegion, QTransform,
+)
 from PySide6.QtWidgets import QMenu, QWidget
+
+from shion.animator import Animator, Frame
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
 STATES = [
@@ -14,22 +24,41 @@ STATES = [
 ]
 
 DEFAULT_HEIGHT = 240
+MARGIN_X = 64  # 画布左右留边（倾斜 12° 时头部偏移约 50px）
+MARGIN_TOP = 8
+MARGIN_BOTTOM = 6  # 倾斜时一只脚会往下沉，留出空间不被裁掉
+MASK_GROW = 4  # 遮罩向外扩的像素，吸收角度/缩放量化的误差
+MASK_CACHE_MAX = 64
 DRAG_THRESHOLD = 6  # px，超过才算拖动
 GRAVITY = 2400.0  # px/s²
 FRAME_MS = 16
 
 
-def landing_geometry(avail: QRect, size_w: int, size_h: int, x: int) -> tuple[int, int]:
-    """把窗口 x 限制在可用区域内，返回 (x, 脚底贴底边时的 y)。"""
-    x = max(avail.left(), min(x, avail.right() + 1 - size_w))
-    floor_y = avail.bottom() + 1 - size_h
+def landing_geometry(
+    avail: QRect, size_w: int, size_h: int, x: int,
+    margin_x: int = 0, margin_bottom: int = 0,
+) -> tuple[int, int]:
+    """返回 (x, 脚底贴底边时的 y)。
+
+    x 被限制到让精灵本体（窗口左右各去掉 margin_x）不出可用区域；
+    脚底锚点在窗口底边上方 margin_bottom 处。
+    """
+    lo = avail.left() - margin_x
+    hi = avail.right() + 1 - size_w + margin_x
+    x = max(lo, min(x, hi))
+    floor_y = avail.bottom() + 1 - size_h + margin_bottom
     return x, floor_y
 
 
 class PetWindow(QWidget):
     quit_requested = Signal()
 
-    def __init__(self, height: int = DEFAULT_HEIGHT):
+    def __init__(
+        self,
+        height: int = DEFAULT_HEIGHT,
+        clock: Callable[[], float] = time.monotonic,
+        autostart: bool = True,
+    ):
         super().__init__()
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -37,53 +66,142 @@ class PetWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle("Shion")
 
+        self._clock = clock
         self._height = height
-        self._sprite_name = "idle"
-        self._pix = QPixmap()
-        self._base_sprite = "idle"  # 拖动结束后回到的精灵
+        self._pixmaps: dict[str, QPixmap] = {}
+        self._sw = 0  # 精灵逻辑宽高
+        self._sh = 0
+        self._load_sprites()
+        self.setFixedSize(self._sw + 2 * MARGIN_X, self._sh + MARGIN_TOP + MARGIN_BOTTOM)
+
+        self._animator = Animator()
+        self._base_state = "idle"  # 拖动结束后回到的状态
+        self._frame = Frame("idle")
+        self._mask_cache: dict[tuple, QRegion] = {}
+        self._mask_key: tuple | None = None
 
         # 拖动 / 下落
         self._press_global: QPoint | None = None
         self._grab_offset = QPoint()
         self._dragging = False
+        self._last_drag_x = 0
         self._falling = False
         self._vy = 0.0
         self._fy = 0.0  # 下落时的浮点 y
         self._fall_floor = 0
-        self._clock = QElapsedTimer()
+        self._last_tick = self._clock()
+
         self._timer = QTimer(self)
         self._timer.setInterval(FRAME_MS)
-        self._timer.timeout.connect(self._fall_tick)
+        self._timer.timeout.connect(self._on_timer)
 
-        self.set_sprite("idle")
+        self.set_state("idle")
+        if autostart:
+            self._timer.start()
 
     # ---- 精灵 ----
-    def set_sprite(self, name: str) -> None:
-        if name not in STATES:
-            raise ValueError(f"未知精灵：{name}")
+    def _load_sprites(self) -> None:
         screen = QGuiApplication.primaryScreen()
         dpr = screen.devicePixelRatio() if screen else 1.0
-        src = QPixmap(str(SPRITE_DIR / f"{name}.png"))
-        if src.isNull():
-            raise FileNotFoundError(SPRITE_DIR / f"{name}.png")
-        pix = src.scaledToHeight(round(self._height * dpr), Qt.SmoothTransformation)
-        pix.setDevicePixelRatio(dpr)
-        self._pix = pix
-        self._sprite_name = name
-        w, h = round(pix.width() / dpr), round(pix.height() / dpr)
-        self.setFixedSize(w, h)
-        # 只有不透明像素响应鼠标，透明区域点穿到下面的窗口
-        self.setMask(QRegion(QBitmap.fromPixmap(pix.mask().scaled(w, h))))
-        self.update()
+        for name in STATES:
+            src = QPixmap(str(SPRITE_DIR / f"{name}.png"))
+            if src.isNull():
+                raise FileNotFoundError(SPRITE_DIR / f"{name}.png")
+            pix = src.scaledToHeight(round(self._height * dpr), Qt.SmoothTransformation)
+            pix.setDevicePixelRatio(dpr)
+            self._pixmaps[name] = pix
+            self._sw = round(pix.width() / dpr)
+            self._sh = round(pix.height() / dpr)
+
+    @property
+    def sprite_size(self) -> tuple[int, int]:
+        return self._sw, self._sh
+
+    def set_state(self, name: str) -> None:
+        if name not in STATES:
+            raise ValueError(f"未知精灵：{name}")
+        if name != "drag":
+            self._base_state = name
+        now = self._clock()
+        self._animator.set_state(name, now)
+        self._refresh(now)
 
     @property
     def sprite_name(self) -> str:
-        return self._sprite_name
+        """当前底层状态（不含眨眼）。"""
+        return self._animator.state
+
+    @property
+    def displayed_sprite(self) -> str:
+        """此刻实际画出来的贴图（眨眼时是 blink）。"""
+        return self._frame.sprite
+
+    @property
+    def frame(self) -> Frame:
+        return self._frame
+
+    # ---- 绘制 ----
+    def _draw_sprite(self, p: QPainter, f: Frame) -> None:
+        p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM)  # 脚底中心
+        p.rotate(f.angle)
+        p.scale(f.sx, f.sy)
+        p.drawPixmap(-self._sw // 2, -self._sh, self._pixmaps[f.sprite])
 
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        p.drawPixmap(0, 0, self._pix)
+        p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+        self._draw_sprite(p, self._frame)
+
+    def render_frame(self) -> QImage:
+        """把当前帧画进一张透明 QImage（不受遮罩裁剪，截图和测试用）。"""
+        img = QImage(self.size(), QImage.Format_ARGB32_Premultiplied)
+        img.fill(0)
+        p = QPainter(img)
+        p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+        self._draw_sprite(p, self._frame)
+        p.end()
+        return img
+
+    def _mask_for(self, f: Frame) -> QRegion:
+        """遮罩 = 当前画出的不透明像素向外扩 MASK_GROW px。只有遮罩里的地方响应鼠标。"""
+        key = (f.sprite, round(f.angle), round(f.sx, 2), round(f.sy, 2))
+        if key == self._mask_key:
+            return self._mask_cache[key]
+        region = self._mask_cache.get(key)
+        if region is None:
+            q = Frame(f.sprite, key[2], key[3], float(key[1]))
+            img = QImage(self.size(), QImage.Format_ARGB32_Premultiplied)
+            img.fill(0)
+            p = QPainter(img)
+            p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+            g = MASK_GROW
+            for dx, dy in ((0, 0), (g, 0), (-g, 0), (0, g), (0, -g),
+                           (g, g), (-g, g), (g, -g), (-g, -g),
+                           (g // 2, 0), (-g // 2, 0), (0, g // 2), (0, -g // 2)):
+                p.save()
+                p.translate(dx, dy)
+                self._draw_sprite(p, q)
+                p.restore()
+            p.end()
+            region = QRegion(QBitmap.fromImage(img.createAlphaMask()))
+            if len(self._mask_cache) >= MASK_CACHE_MAX:
+                self._mask_cache.clear()
+            self._mask_cache[key] = region
+        self._mask_key = key
+        return region
+
+    def _refresh(self, now: float) -> None:
+        f = self._animator.frame(now)
+        # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
+        f = Frame(f.sprite, round(f.sx, 3), round(f.sy, 3), round(f.angle, 2))
+        if f == self._frame and self._mask_key is not None:
+            return
+        self._frame = f
+        old_key = self._mask_key
+        region = self._mask_for(f)
+        if self._mask_key != old_key:
+            self.setMask(region)
+        self.update()
 
     # ---- 位置 ----
     def _screen_avail(self, at: QPoint | None = None) -> QRect:
@@ -93,8 +211,27 @@ class PetWindow(QWidget):
     def place_default(self) -> None:
         """主屏可用区域右下角，脚底贴底边。"""
         avail = QGuiApplication.primaryScreen().availableGeometry()
-        x, y = landing_geometry(avail, self.width(), self.height(), avail.right() - self.width() - 24)
+        want_x = avail.right() + 1 - 24 - self._sw - MARGIN_X
+        x, y = landing_geometry(
+            avail, self.width(), self.height(), want_x, MARGIN_X, MARGIN_BOTTOM
+        )
         self.move(x, y)
+
+    # ---- 时钟 ----
+    def _on_timer(self) -> None:
+        self.advance_to(self._clock())
+
+    def advance_to(self, now: float) -> None:
+        """推进一帧：拖动速度、下落、动画。定时器和测试/截图都走这里。"""
+        dt = max(0.0, min(now - self._last_tick, 0.05))
+        self._last_tick = now
+        if self._dragging and dt > 0:
+            vx = (self.x() - self._last_drag_x) / dt
+            self._last_drag_x = self.x()
+            self._animator.feed_velocity(vx, now)
+        if self._falling:
+            self._fall_step(dt, now)
+        self._refresh(now)
 
     # ---- 鼠标：拖动 ----
     def mousePressEvent(self, e) -> None:
@@ -113,7 +250,12 @@ class PetWindow(QWidget):
             if (gp - self._press_global).manhattanLength() <= DRAG_THRESHOLD:
                 return
             self._dragging = True
-            self.set_sprite("drag")
+            now = self._clock()
+            self._animator.set_state("drag", now)
+            self._animator.set_drag(True)
+            self._last_drag_x = self.x()
+            self._last_tick = now
+            self._refresh(now)
             self.setCursor(Qt.ClosedHandCursor)
         self.move(gp - self._grab_offset)
 
@@ -123,9 +265,14 @@ class PetWindow(QWidget):
         was_dragging = self._dragging
         self._press_global = None
         self._dragging = False
+        self._animator.set_drag(False)
         self.unsetCursor()
+        now = self._clock()
         if was_dragging:
             self.start_fall()
+        else:
+            self._animator.squash(now, "click")
+            self._refresh(now)
 
     def contextMenuEvent(self, e) -> None:
         # 第 4 步会补全菜单；目前只有退出，方便结束程序
@@ -136,29 +283,29 @@ class PetWindow(QWidget):
     # ---- 下落 ----
     def start_fall(self) -> None:
         avail = self._screen_avail(self.geometry().center())
-        x, floor_y = landing_geometry(avail, self.width(), self.height(), self.x())
+        x, floor_y = landing_geometry(
+            avail, self.width(), self.height(), self.x(), MARGIN_X, MARGIN_BOTTOM
+        )
         self._fall_floor = floor_y
         self.move(x, min(self.y(), floor_y))  # 在底边以下就先拉回底边
         self._fy = float(self.y())
         self._vy = 0.0
         self._falling = True
-        self._clock.start()
-        self._timer.start()
-        self._fall_tick()
+        self._last_tick = self._clock()
+        self.advance_to(self._last_tick)
 
     def _stop_fall(self) -> None:
         self._falling = False
-        self._timer.stop()
 
-    def _fall_tick(self) -> None:
-        dt = min(self._clock.restart() / 1000.0, 0.05)
+    def _fall_step(self, dt: float, now: float) -> None:
         self._vy += GRAVITY * dt
         self._fy += self._vy * dt
         if self._fy >= self._fall_floor:
             self._fy = float(self._fall_floor)
             self.move(self.x(), self._fall_floor)
             self._stop_fall()
-            self.set_sprite(self._base_sprite)  # 落地压扁等动画是第 2 步
+            self._animator.set_state(self._base_state, now)
+            self._animator.squash(now, "land")
             return
         self.move(self.x(), round(self._fy))
 
