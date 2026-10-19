@@ -10,15 +10,16 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QPoint, QTimer, Qt, Signal
-from PySide6.QtGui import QActionGroup, QGuiApplication
+from PySide6.QtGui import QActionGroup, QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
+from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior
 from shion.effects import HeartOverlay
 from shion.lines import Lines
 from shion.pet_window import PetWindow
-from shion.state import PetState, Reaction, SaveScheduler
+from shion.state import ACTIVITY_LEVELS, EXPRESSIONS, PetState, Reaction, SaveScheduler
 
 log = logging.getLogger("shion.controller")
 
@@ -75,6 +76,8 @@ class PetController(QObject):
         self._say_fn = say or self._bubble_say
         self._pat_count = 0
         self._rng = random.Random()
+        self._idle = IdleBehavior()
+        self._menu_open = False
         self.activity = ActivityLog()
         self._last_activity_say: Optional[tuple[str, datetime]] = None
 
@@ -94,6 +97,8 @@ class PetController(QObject):
         w.drag_finished.connect(self._on_drag_finished)
         w.menu_requested.connect(self.show_menu)
         w.moved.connect(self._on_window_moved)
+        w.pressed.connect(self._on_pressed)
+        w.motion_finished.connect(self.save_position)
 
         self._watch_screens()
 
@@ -111,7 +116,15 @@ class PetController(QObject):
 
     def sync(self) -> None:
         """把状态机当前应显示的精灵同步给窗口（只在变化时切换，不打断呼吸相位）。"""
-        cur = self.state.current(self._now())
+        now = self._now()
+        cur = self.state.current(now)
+        calm = (
+            self.state.is_working(now) or bool(self.state.save.fixed_expression)
+            or cur == "sleep" or self.state.save.activity_level == "quiet"
+        )
+        self.window.set_calm(calm)
+        if calm and self.window.idle_motion_active:
+            self.window.stop_motion()
         if cur != self.window.sprite_name:
             self.window.set_state(cur)
 
@@ -119,6 +132,25 @@ class PetController(QObject):
         now = self._now()
         self.react(self.state.tick(now))
         self.sync()
+        action = self._idle.step(
+            self.window.monotonic_time(), self.state.can_idle(now)
+            and not self.window.motion_active and not self.window.is_falling
+            and not self.window.is_pressed and not self._menu_open,
+            self.state.save.activity_level,
+        )
+        if action == "turn":
+            self.window.turn()
+        elif action == "face":
+            self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1)
+        elif action == "jump":
+            self.window.jump(automatic=True)
+        elif action == "expression":
+            self.state.idle_expression(
+                self._rng.choices(IDLE_EXPRESSIONS, weights=IDLE_EXPRESSION_WEIGHTS, k=1)[0], now
+            )
+            self.sync()
+        elif action == "talk":
+            self.say_key("idle_talk")
         self.scheduler.poll(now)
 
     def react(self, reactions: list[Reaction]) -> None:
@@ -126,7 +158,10 @@ class PetController(QObject):
             if r.kind == "say":
                 self.say_key(r.key)
             elif r.kind == "nudge":
-                self.window.bounce()
+                if (not self.state.save.fixed_expression and not self.state.is_working(self._now())
+                        and self.state.current(self._now()) != "sleep"
+                        and self.state.save.activity_level != "quiet"):
+                    self.window.bounce()
 
     def say_key(self, key: str) -> None:
         if self.state.save.bubble_muted:
@@ -135,9 +170,10 @@ class PetController(QObject):
         if text:
             self.say(text)
 
-    def greet_startup(self, first_start: bool) -> None:
-        """首次介绍自己；以后每次启动有 10% 概率再介绍，遵守静音设置。"""
-        self.say_key("intro" if first_start or self._rng.random() < 0.10 else "greeting")
+    def greet_startup(self, first_start: bool, from_hook: bool = False) -> None:
+        """首次介绍自己；普通重启用 startup，hook 拉起留给 session_start 问候。"""
+        if first_start or not from_hook:
+            self.say_key("intro" if first_start else "startup")
 
     def say_text(self, text: str) -> None:
         """说一句现成的文字（遵守静音）。"""
@@ -159,11 +195,16 @@ class PetController(QObject):
             self.bubble.follow(self.window.body_rect())
 
     # ------------------------------------------------------------ 手势
+    def _on_pressed(self) -> None:
+        self._idle.next_at = None
+
     def _on_hover(self) -> None:
         self.react(self.state.interact(self._now()))
         self.sync()
 
     def _on_pat(self) -> None:
+        self.window.stop_motion()
+        self._on_pressed()
         self._status_timer.stop()
         reactions = self.state.pat(self._now())
         self._pat_count += 1
@@ -171,10 +212,12 @@ class PetController(QObject):
             reactions = [Reaction("say", "pat")]
         self.react(reactions)
         if self.overlay is not None:
-            self.overlay.burst(self.window.head_anchor(), self._rng.choice((1, 2)))
+            self.overlay.burst(self.window.head_anchor())
         self.sync()
 
     def _on_click(self) -> None:
+        self.window.stop_motion()
+        self._on_pressed()
         self._status_timer.stop()
         self.react(self.state.click(self._now()))
         self.sync()
@@ -185,12 +228,14 @@ class PetController(QObject):
         self.sync()
 
     def _on_drag_started(self) -> None:
+        self.window.stop_motion()
+        self._on_pressed()
         self._status_timer.stop()
         self.react(self.state.drag_start(self._now()))
         self.sync()
 
     def _on_drag_finished(self) -> None:
-        self.react(self.state.drag_end(self._now()))
+        self.react(self.state.drag_end(self._now(), shaken=self.window.consume_shaken()))
         self.save_position()
         self.sync()
 
@@ -239,6 +284,7 @@ class PetController(QObject):
         """窗口跑出所有屏幕就回默认位置，否则重新贴底。拖动/下落中不动。"""
         if self.window.is_dragging or self.window.is_falling:
             return
+        self.window.stop_motion()
         x, y, w, h = self.window.body_rect()
         cx, cy = x + w // 2, y + h // 2
         if any(rx <= cx < rx + rw and ry <= cy < ry + rh for rx, ry, rw, rh in self._screen_rects()):
@@ -272,6 +318,35 @@ class PetController(QObject):
         if muted and self.bubble is not None:
             self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
+
+    def select_expression(self, name: str) -> None:
+        self.window.stop_motion()
+        self.state.select_expression(name, self._now())
+        self.sync()
+
+    def fix_expression(self, fixed: bool) -> None:
+        self.window.stop_motion()
+        self.state.fix_expression(fixed, self._now())
+        self.sync()
+
+    def set_activity(self, level: str) -> None:
+        if level not in ACTIVITY_LEVELS:
+            return
+        self.state.save.activity_level = level
+        self._idle.next_at = None
+        self.scheduler.mark_dirty(self._now())
+        self.sync()
+
+    def do_action(self, name: str) -> None:
+        self.react(self.state.interact(self._now()))
+        self._idle.next_at = None
+        if name in ("walk", "cross"):
+            self.window.walk(cross=name == "cross", rng=self._rng)
+        elif name == "jump":
+            self.window.jump()
+        elif name == "turn":
+            self.window.turn()
+        self.sync()
 
     # ------------------------------------------------------------ 来自 Claude 的事件
     def handle_event(self, etype: str, detail: Optional[str] = None) -> None:
@@ -317,6 +392,7 @@ class PetController(QObject):
         self.sync()
 
     def quit(self) -> None:
+        self.window.stop_motion()
         try:
             self.scheduler.flush()  # 内部不抛异常；这里再兜一层，保证一定能退出
         except Exception:
@@ -337,10 +413,13 @@ class PetController(QObject):
             span = ui("span_hours", hours=hours, minutes=together.seconds % 3600 // 60)
         else:
             span = ui("span_minutes", minutes=together.seconds // 60)
-        return ui(
+        text = ui(
             "status", span=span, pats=save.stats["pats"],
             tasks=save.stats["claude_tasks"], affection=save.affection,
         )
+        if save.fixed_expression:
+            text += "\n" + ui("expression_fixed")
+        return text
 
     def _show_status(self) -> None:
         text = self.status_text()
@@ -354,6 +433,37 @@ class PetController(QObject):
         menu = QMenu()
         ui = self.lines.ui
         menu.addAction(ui("menu_praise")).triggered.connect(self.praise)
+
+        expression_menu = menu.addMenu(ui("menu_expression"))
+        expression_group = QActionGroup(expression_menu)
+        expression_group.setExclusive(True)
+        cur_expression = self.state.current(self._now())
+        for name in EXPRESSIONS:
+            act = expression_menu.addAction(ui("expression_" + name))
+            act.setCheckable(True)
+            act.setChecked(name == cur_expression)
+            expression_group.addAction(act)
+            act.triggered.connect(lambda _=False, n=name: self.select_expression(n))
+        expression_menu.addSeparator()
+        fixed = expression_menu.addAction(ui("menu_fix_expression"))
+        fixed.setCheckable(True)
+        fixed.setChecked(bool(self.state.save.fixed_expression))
+        fixed.triggered.connect(self.fix_expression)
+        expression_menu.addAction(ui("menu_auto_expression")).triggered.connect(lambda: self.fix_expression(False))
+
+        activity_menu = menu.addMenu(ui("menu_activity"))
+        activity_group = QActionGroup(activity_menu)
+        activity_group.setExclusive(True)
+        for level in ACTIVITY_LEVELS:
+            act = activity_menu.addAction(ui("activity_" + level))
+            act.setCheckable(True)
+            act.setChecked(level == self.state.save.activity_level)
+            activity_group.addAction(act)
+            act.triggered.connect(lambda _=False, lv=level: self.set_activity(lv))
+
+        action_menu = menu.addMenu(ui("menu_action"))
+        for name in ("walk", "cross", "jump", "turn"):
+            action_menu.addAction(ui("action_" + name)).triggered.connect(lambda _=False, n=name: self.do_action(n))
 
         size_menu = menu.addMenu(ui("menu_size"))
         group = QActionGroup(size_menu)
@@ -395,11 +505,17 @@ class PetController(QObject):
         return menu
 
     def show_menu(self, pos: QPoint) -> None:
+        self.window.stop_motion()
+        self._idle.next_at = None
         self.react(self.state.interact(self._now()))
         self.sync()
         menu = self.build_menu()
-        menu.exec(pos)
-        menu.deleteLater()
+        self._menu_open = True
+        try:
+            menu.exec(pos)
+        finally:
+            self._menu_open = False
+            menu.deleteLater()
 
     def show_about(self) -> None:
         QMessageBox.about(

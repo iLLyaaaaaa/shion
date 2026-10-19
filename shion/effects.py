@@ -13,7 +13,13 @@ from PySide6.QtWidgets import QWidget
 from shion.animator import ease_out
 
 LIFETIME = 1.0  # 秒
-RISE = 70.0  # px
+RISE = 45.0  # px
+SPAWN_INTERVAL = 0.6
+MAX_PARTICLES = 3
+HEART_SIZE = 18.0
+HEART_SPREAD = 25.0
+HEART_DRIFT = 15.0
+HEART_SCALE = (0.8, 1.2)
 ORANGE = QColor("#F58236")
 
 
@@ -29,17 +35,21 @@ class Particles:
     def __init__(self, rng: Optional[random.Random] = None):
         self._rng = rng or random.Random()
         self._ps: list[Particle] = []
+        self._last_spawn = -float("inf")
 
     def spawn(self, now: float, n: int = 1) -> None:
-        for _ in range(n):
-            self._ps.append(
-                Particle(
-                    born=now,
-                    x0=self._rng.uniform(-25, 25),
-                    drift=self._rng.uniform(-15, 15),
-                    size=self._rng.uniform(0.8, 1.2),
-                )
+        self.update(now)
+        if n <= 0 or now - self._last_spawn < SPAWN_INTERVAL or len(self._ps) >= MAX_PARTICLES:
+            return
+        self._last_spawn = now
+        self._ps.append(
+            Particle(
+                born=now,
+                x0=self._rng.uniform(-HEART_SPREAD, HEART_SPREAD),
+                drift=self._rng.uniform(-HEART_DRIFT, HEART_DRIFT),
+                size=self._rng.uniform(*HEART_SCALE),
             )
+        )
 
     def update(self, now: float) -> None:
         self._ps = [p for p in self._ps if now - p.born < LIFETIME]
@@ -130,5 +140,5 @@ class HeartOverlay(QWidget):
             c.setAlphaF(max(0.0, min(1.0, alpha)))
             p.setBrush(c)
             p.setPen(Qt.NoPen)
-            p.drawPath(heart_path(22 * scale))
+            p.drawPath(heart_path(HEART_SIZE * scale))
             p.restore()

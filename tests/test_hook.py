@@ -10,9 +10,7 @@ import pytest
 from shion.server import ShionServer
 
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "shion_hook.py"
-PRAISE_LINE = (
-    "[Shion 桌宠] 自你上次回复后，用户通过摸 Shion 的头表扬了你 2 次。可以自然地回应，不必刻意。"
-)
+PRAISE_LINE = "[诗音] 用户觉得你刚才做得很好。"
 
 
 @pytest.fixture
@@ -153,6 +151,30 @@ def test_prompt_with_corrupt_save_still_injects(env):
     (tmp / "state.json").write_text("{坏的", encoding="utf-8")
     state["praise"] = 2
     assert run_hook("UserPromptSubmit", srv.port, tmp).stdout.decode("utf-8").strip() == PRAISE_LINE
+
+
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+@pytest.mark.parametrize("count", [1, 9])
+def test_praise_is_one_localized_sentence_without_count(env, lang, count):
+    from shion.lines import Lines
+    srv, _, state, tmp = env
+    (tmp / "state.json").write_text(json.dumps({"language": lang}), encoding="utf-8")
+    state["praise"] = count
+    r = run_hook("UserPromptSubmit", srv.port, tmp)
+    assert r.returncode == 0 and r.stderr == b""
+    assert r.stdout.decode("utf-8") == Lines(lang).ui("hook_praise") + "\n"
+    assert state["praise"] == 0
+
+
+def test_launch_sets_source_only_on_child_environment(monkeypatch):
+    h = load_hook()
+    calls = []
+    before = os.environ.get("SHION_LAUNCHED_BY_HOOK")
+    monkeypatch.setattr(h.subprocess, "Popen", lambda *args, **kwargs: calls.append((args, kwargs)))
+    h.launch_shion()
+    assert len(calls) == 1
+    assert calls[0][1]["env"]["SHION_LAUNCHED_BY_HOOK"] == "1"
+    assert os.environ.get("SHION_LAUNCHED_BY_HOOK") == before
 
 
 def test_server_down_is_silent_and_fast(tmp_path):

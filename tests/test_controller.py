@@ -68,6 +68,7 @@ def test_pat_shows_happy_counts_and_spawns_hearts_then_returns_to_idle(env):
     assert env.win.sprite_name == "happy"
     assert env.state.save.affection == 1
     assert env.state.save.stats["pats"] == 1
+    assert env.state.save.pending_praise == 0
     assert env.overlay.particles.active
     env.advance(2.0)
     assert env.win.sprite_name == "idle"
@@ -81,12 +82,12 @@ def test_pat_occasionally_says_a_pat_line(env):
     assert len(env.said) < 5  # 不是每次都说
 
 
-@pytest.mark.parametrize("first,roll,key", [(True, 0.99, "intro"), (False, 0.099, "intro"), (False, 0.10, "greeting"), (False, 0.99, "greeting")])
-def test_startup_intro_probability_and_first_launch(env, monkeypatch, first, roll, key):
-    monkeypatch.setattr(env.ctl._rng, "random", lambda: roll)
-    env.ctl.greet_startup(first)
-    assert len(env.said) == 1
-    assert env.said[0] in env.ctl.lines._lines[key]
+@pytest.mark.parametrize("first,hook,key", [(True, False, "intro"), (False, False, "startup"), (True, True, "intro"), (False, True, None)])
+def test_startup_source_and_first_launch(env, first, hook, key):
+    env.ctl.greet_startup(first, from_hook=hook)
+    assert len(env.said) == (1 if key else 0)
+    if key:
+        assert env.said[0] in env.ctl.lines._lines[key]
 
 
 def test_startup_greeting_respects_mute(env):
@@ -101,19 +102,15 @@ def test_controller_timers_are_precise(env):
     assert env.ctl._status_timer.timerType() == Qt.PreciseTimer
 
 
-def test_five_clicks_in_3s_is_stop_ten_in_5s_is_dizzy(env):
-    for _ in range(5):
-        env.win.clicked.emit()
-        env.advance(0.3)
-    assert env.win.sprite_name == "stop"
-    env.advance(2.5)
-    assert env.win.sprite_name == "idle"
-    env.advance(10)  # 清掉点击记录
-    for _ in range(10):
+def test_random_poke_reaction_reaches_window_and_dialogue(env, monkeypatch):
+    monkeypatch.setattr(env.state._rng, "random", lambda: 0.6)
+    for _ in range(3):
         env.win.clicked.emit()
         env.advance(0.3)
     assert env.win.sprite_name == "dizzy"
     assert any(t in Lines()._lines["dizzy"] for t in env.said)
+    env.advance(3.1)
+    assert env.win.sprite_name == "idle"
 
 
 def test_drag_signals_switch_sprite_and_save_position(env):
@@ -156,7 +153,7 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["夸夸 Claude", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["做得好", "表情", "活跃度", "动作", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
@@ -165,7 +162,7 @@ def test_menu_contents(env):
 
 def test_menu_praise_claude_shows_proud(env):
     menu = env.ctl.build_menu()  # 要留着引用，菜单被回收后动作也没了
-    find_action(menu, "夸夸 Claude").trigger()
+    find_action(menu, "做得好").trigger()
     assert env.win.sprite_name == "proud"
     assert env.data.affection == 3
     assert env.data.pending_praise == 1
@@ -418,7 +415,7 @@ def test_muted_events_still_change_state_but_say_nothing(env):
 
 def test_take_praise_returns_and_clears(env):
     for _ in range(3):
-        env.win.patted.emit()
+        env.ctl.praise()
     assert env.ctl.take_praise() == 3
     assert env.ctl.take_praise() == 0
 
@@ -528,7 +525,7 @@ def test_switch_language_applies_immediately_and_saves(env):
     assert env.data.language == "en"
     menu2 = env.ctl.build_menu()
     assert [a.text() for a in menu2.actions() if not a.isSeparator()][:3] == [
-        "Praise Claude", "Size", "Mute speech bubbles",
+        "Well done", "Expression", "Activity",
     ]
     assert "Together for 0m" in env.ctl.status_text(T0)
     assert "Pats today: 0" in env.ctl.status_text(T0)

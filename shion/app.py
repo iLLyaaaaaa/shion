@@ -133,7 +133,7 @@ def run() -> int:
     controller.restore_position()
     win.show()
     log.info("Shion 启动，存档：%s", save_path)
-    controller.greet_startup(first_start)
+    controller.greet_startup(first_start, from_hook=os.environ.get("SHION_LAUNCHED_BY_HOOK") == "1")
     if not server_ok:
         controller.say(lines.ui("port_busy", port=port))
     code = app.exec()
@@ -150,6 +150,8 @@ def snapshot(
     squash: str | None = None,
     lang: str = "zh",
     from_state: str | None = None,
+    mirror: bool = False,
+    jump: bool = False,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -167,6 +169,10 @@ def snapshot(
         win.set_state(state)
     if squash:
         win._animator.squash(t[0], squash)
+    if mirror:
+        win.face(-1)
+    if jump:
+        win.jump()
     t[0] += at
     win.advance_to(t[0])
     img = win.render_frame()

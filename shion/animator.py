@@ -18,8 +18,6 @@ BLINK_DURATION = 0.120
 DOUBLE_BLINK_CHANCE = 0.15
 DOUBLE_BLINK_GAP = 0.150  # 第一次眨眼结束到第二次开始
 TRANSITION = 0.120
-IDLE_MIN, IDLE_MAX = 6.0, 15.0
-IDLE_DURATION = 1.2
 
 SQUASH = {  # kind -> (时长 s, 最扁 sy)
     "click": (0.20, 0.92),
@@ -52,11 +50,6 @@ def ease_out(t: float) -> float:
     return 1.0 - (1.0 - t) ** 3
 
 
-def smooth_step(t: float) -> float:
-    t = max(0.0, min(1.0, t))
-    return t * t * (3.0 - 2.0 * t)
-
-
 def squash_scale(kind: str, elapsed: float) -> float:
     """压扁曲线，返回 sy。结束后精确为 1.0。
 
@@ -77,7 +70,6 @@ def squash_scale(kind: str, elapsed: float) -> float:
 class Animator:
     def __init__(self, rng: random.Random | None = None):
         self._rng = rng or random.Random()
-        self._idle_rng = random.Random(self._rng.getrandbits(64))
         self._state = "idle"
         self._t0 = 0.0
         # 眨眼：下一次眨眼开始的时间；以及当前眨眼区间（可能有第二次）
@@ -94,10 +86,7 @@ class Animator:
         self._initialized = False
         self._from_layers: tuple[tuple[str, float], ...] = ()
         self._from_pose: Frame | None = None
-        self._next_idle = math.inf
-        self._idle_start = math.inf
-        self._idle_kind = "tilt"
-        self._idle_sign = 1
+        self.calm = False
 
     # ---- 状态 ----
     @property
@@ -114,8 +103,6 @@ class Animator:
         self._t0 = now
         self._blinks = []
         self._schedule_blink(now)
-        self._next_idle = now + self._idle_rng.uniform(IDLE_MIN, IDLE_MAX)
-        self._idle_start = math.inf
         if previous:
             self.squash(now, "switch")
         elif immediate:
@@ -193,22 +180,6 @@ class Animator:
             weights[sprite] = weights.get(sprite, 0.0) + weight * mix
         return tuple((sprite, weight) for sprite, weight in weights.items() if weight > 1e-9)
 
-    def _idle_angle(self, now: float) -> float:
-        if self._state != "idle":
-            return 0.0
-        while now >= self._next_idle:
-            self._idle_start = self._next_idle
-            self._idle_kind = self._idle_rng.choice(("tilt", "sway"))
-            self._idle_sign = self._idle_rng.choice((-1, 1))
-            self._next_idle += self._idle_rng.uniform(IDLE_MIN, IDLE_MAX)
-        p = (now - self._idle_start) / IDLE_DURATION
-        if not 0 <= p < 1:
-            return 0.0
-        if self._idle_kind == "tilt":
-            envelope = smooth_step(p / 0.35) if p < 0.35 else 1.0 - smooth_step((p - 0.35) / 0.65)
-            return self._idle_sign * 1.8 * envelope
-        return self._idle_sign * 1.5 * math.sin(2 * math.pi * p) * math.sin(math.pi * p) ** 2
-
     # ---- 合成 ----
     def frame(self, now: float) -> Frame:
         sprite = "blink" if self._blinking(now) else self._state
@@ -216,14 +187,13 @@ class Animator:
         sx = 1.0
         angle = 0.0
 
-        if self._state in BREATH_STATES:
+        if self._state in BREATH_STATES or self.calm:
             t = now - self._t0
             sy *= 1.0 + (BREATH_AMP / 2) * (1.0 - math.cos(2 * math.pi * t / BREATH_PERIOD))
 
-        if self._state in SWAY:
+        if self._state in SWAY and not self.calm:
             amp, period = SWAY[self._state]
             angle += amp * math.sin(2 * math.pi * (now - self._t0) / period)
-        angle += self._idle_angle(now)
 
         self._update_tilt(now)
         angle += self._tilt

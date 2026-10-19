@@ -45,12 +45,28 @@ def request(path: str, payload=None):
 
 
 def inject_praise_enabled() -> bool:
+    return read_save().get("inject_praise", True) is not False
+
+
+def read_save() -> dict:
     try:
         directory = os.environ.get("SHION_DATA_DIR")
         path = (Path(directory) if directory else Path(os.environ["APPDATA"]) / "Shion") / "state.json"
-        return json.loads(path.read_text(encoding="utf-8")).get("inject_praise", True) is not False
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:
-        return True
+        return {}
+
+
+def praise_line() -> str:
+    """只用标准库读三语 UI 文本，不加载 Qt。"""
+    lang = read_save().get("language")
+    lang = lang if lang in ("zh", "en", "ja") else "zh"
+    try:
+        raw = json.loads((ROOT / "assets" / "lines" / f"{lang}.json").read_text(encoding="utf-8"))
+        return raw["ui"]["hook_praise"]
+    except Exception:
+        return "[诗音] 用户觉得你刚才做得很好。"
 
 
 def launch_shion() -> None:
@@ -63,6 +79,7 @@ def launch_shion() -> None:
             subprocess.Popen(
                 [str(exe), "-m", "shion"], cwd=str(ROOT), creationflags=flags | extra,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env={**os.environ, "SHION_LAUNCHED_BY_HOOK": "1"},
             )
             return
         except OSError:
@@ -164,8 +181,7 @@ def main() -> None:
         result = request("/praise/take", {})
         count = result.get("count", 0) if isinstance(result, dict) else 0
         if isinstance(count, int) and count > 0 and inject_praise_enabled():
-            line = (f"[Shion 桌宠] 自你上次回复后，用户通过摸 Shion 的头表扬了你 {count} 次。"
-                    "可以自然地回应，不必刻意。\n")
+            line = praise_line() + "\n"
             sys.stdout.buffer.write(line.encode("utf-8"))
             sys.stdout.buffer.flush()
 

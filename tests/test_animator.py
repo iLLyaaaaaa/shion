@@ -215,17 +215,12 @@ def test_switch_eases_from_current_angle_without_snapping():
     assert a.frame(0.35).angle == 0
 
 
-def test_idle_gestures_are_small_scheduled_and_stop_outside_idle():
-    a = make()
-    first = a._next_idle
-    assert A.IDLE_MIN <= first <= A.IDLE_MAX
-    angles = [a.frame(first + i * 0.01).angle for i in range(121)]
-    assert max(abs(x) for x in angles) > 0.5
-    assert max(abs(x) for x in angles) <= 1.8
-    assert angles[0] == pytest.approx(0) and angles[-1] == pytest.approx(0)
-    assert A.IDLE_MIN <= a._next_idle - first <= A.IDLE_MAX
-    a.set_state("working", first + 2)
-    assert a.frame(first + 20).angle == 0
+@pytest.mark.parametrize("name", ["happy", "dizzy", "working", "sleep", "idle"])
+def test_calm_mode_keeps_breath_without_sway(name):
+    a = make(name)
+    a.calm = True
+    assert a.frame(1.5).angle == 0
+    assert a.frame(1.5).sy == pytest.approx(1.012)
 
 
 def test_animation_result_does_not_depend_on_dropped_frames():

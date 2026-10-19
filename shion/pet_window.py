@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PySide6.QtCore import QPoint, QRect, QTimer, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QBitmap, QGuiApplication, QImage, QPainter, QPixmap, QRegion, QTransform,
 )
 from PySide6.QtWidgets import QWidget
 
 from shion.animator import Animator, Frame
+from shion.behavior import JUMP_DURATION, JUMP_HEIGHT, ShakeTracker, Walk
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
 STATES = [
@@ -29,7 +30,7 @@ STATES = [
 DEFAULT_HEIGHT = 200
 HEAD_FRAC = 0.45  # 精灵上方多少比例算头部（摸头判定区）
 MARGIN_X = 64  # 画布左右留边（倾斜 12° 时头部偏移约 50px）
-MARGIN_TOP = 8
+MARGIN_TOP = round(JUMP_HEIGHT) + 8  # 给原地跳留出空间
 MARGIN_BOTTOM = 6  # 倾斜时一只脚会往下沉，留出空间不被裁掉
 MASK_GROW = 4  # 遮罩向外扩的像素，吸收角度/缩放量化的误差
 MASK_CACHE_MAX = 64
@@ -64,6 +65,8 @@ class PetWindow(QWidget):
     drag_finished = Signal()  # 松手后落地时发出
     menu_requested = Signal(QPoint)  # 全局坐标
     moved = Signal()  # 窗口位置变了（气泡跟随用）
+    pressed = Signal()  # 左键按下即中断自主运动
+    motion_finished = Signal()  # 自主行走结束/中断后保存位置
 
     def __init__(
         self,
@@ -82,6 +85,7 @@ class PetWindow(QWidget):
         self._clock = clock
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
+        self._mirrored_pixmaps: dict[str, QPixmap] = {}
         self._sw = 0  # 精灵逻辑宽高
         self._sh = 0
         self._load_sprites()
@@ -111,6 +115,13 @@ class PetWindow(QWidget):
         self._fall_start = 0.0
         self._fall_y0 = 0.0
         self._last_tick = self._clock()
+        self._shake = ShakeTracker()
+        self._walk: Walk | None = None
+        self._walk_floor = 0
+        self._jump_start: float | None = None
+        self._automatic_jump = False
+        self._jump_offset = 0.0
+        self._facing = 1  # 原图朝向；+1 向右，-1 为镜像
 
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
@@ -126,6 +137,7 @@ class PetWindow(QWidget):
         """改显示大小，脚底中心在屏幕上的位置不变。"""
         if height == self._height:
             return
+        self.stop_motion()
         feet_x = self.x() + self.width() / 2
         feet_y = self.y() + self.height() - MARGIN_BOTTOM
         self._height = height
@@ -184,6 +196,9 @@ class PetWindow(QWidget):
             pix = src.scaledToHeight(round(self._height * dpr), Qt.SmoothTransformation)
             pix.setDevicePixelRatio(dpr)
             self._pixmaps[name] = pix
+            mirrored = pix.transformed(QTransform().scale(-1, 1), Qt.FastTransformation)
+            mirrored.setDevicePixelRatio(dpr)
+            self._mirrored_pixmaps[name] = mirrored
             self._sw = round(pix.width() / dpr)
             self._sh = round(pix.height() / dpr)
 
@@ -215,29 +230,32 @@ class PetWindow(QWidget):
     # ---- 绘制 ----
     def _draw_sprite(self, p: QPainter, f: Frame) -> None:
         p.save()
-        p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM)  # 脚底中心
-        p.rotate(f.angle)
+        p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM - self._jump_offset)
+        p.rotate(f.angle)  # 倾斜是屏幕方向，镜像不应反转拖动速度的倾斜方向
         p.scale(f.sx, f.sy)
+        pixmaps = self._pixmaps if self._facing > 0 else self._mirrored_pixmaps
+        target = QRectF(-self._sw / 2, -self._sh, self._sw, self._sh)
         layers = f.layers or ((f.sprite, 1.0),)
         if all(weight == 1.0 for _, weight in layers):
             for name, _ in layers:
-                p.drawPixmap(-self._sw // 2, -self._sh, self._pixmaps[name])
+                pix = pixmaps[name]
+                p.drawPixmap(target, pix, QRectF(pix.rect()))
         else:
             # 在预乘 RGBA 上加权，避免 SourceOver 使重叠身体闪透。
             # numpy 是项目现有依赖；整数权重总和固定，保持不透明像素 alpha=255。
-            pix = self._pixmaps[f.sprite]
+            pix = pixmaps[f.sprite]
             accum = np.zeros((pix.height(), pix.width() * 4), dtype=np.uint32)
             remaining = 65536
             for index, (name, weight) in enumerate(layers):
                 iw = remaining if index == len(layers) - 1 else min(remaining, round(weight * 65536))
                 remaining -= iw
-                src = self._pixmaps[name].toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
+                src = pixmaps[name].toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
                 pixels = np.frombuffer(src.constBits(), dtype=np.uint8).reshape(src.height(), src.bytesPerLine())
                 accum += pixels.astype(np.uint32) * iw
             pixels = ((accum + 32768) >> 16).astype(np.uint8)
             mix = QImage(pixels.data, pix.width(), pix.height(), pix.width() * 4, QImage.Format_ARGB32_Premultiplied).copy()
             mix.setDevicePixelRatio(pix.devicePixelRatio())
-            p.drawImage(-self._sw // 2, -self._sh, mix)
+            p.drawImage(target, mix, QRectF(mix.rect()))
         p.restore()
 
     def paintEvent(self, _event) -> None:
@@ -258,7 +276,7 @@ class PetWindow(QWidget):
     def _mask_for(self, f: Frame) -> QRegion:
         """遮罩 = 当前画出的不透明像素向外扩 MASK_GROW px。只有遮罩里的地方响应鼠标。"""
         names = tuple(sorted(name for name, weight in f.layers or ((f.sprite, 1.0),) if weight > 0))
-        key = (names, round(f.angle), round(f.sx, 2), round(f.sy, 2))
+        key = (names, round(f.angle), round(f.sx, 2), round(f.sy, 2), self._facing, round(self._jump_offset))
         if key == self._mask_key:
             return self._mask_cache[key]
         region = self._mask_cache.get(key)
@@ -290,7 +308,8 @@ class PetWindow(QWidget):
         f = self._animator.frame(now)
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
         f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
-        if f == self._frame and self._mask_key is not None:
+        if (f == self._frame and self._mask_key is not None
+                and self._mask_key[4:] == (self._facing, round(self._jump_offset))):
             return
         self._frame = f
         old_key = self._mask_key
@@ -314,6 +333,9 @@ class PetWindow(QWidget):
         self.move(x, y)
 
     # ---- 时钟 ----
+    def monotonic_time(self) -> float:
+        return self._clock()
+
     def _on_timer(self) -> None:
         self.advance_to(self._clock())
 
@@ -321,6 +343,20 @@ class PetWindow(QWidget):
         """推进一帧：拖动速度、下落、动画。定时器和测试/截图都走这里。"""
         dt = max(0.0, now - self._last_tick)
         self._last_tick = now
+        if self._walk is not None:
+            x, jump, direction, finished = self._walk.sample(now)
+            self._facing = direction
+            self.move(round(x), self._walk_floor)
+            self._jump_offset = jump
+            if finished:
+                self._walk = None
+                self._jump_offset = 0.0
+                self.motion_finished.emit()
+        elif self._jump_start is not None:
+            p = (now - self._jump_start) / JUMP_DURATION
+            self._jump_offset = JUMP_HEIGHT * math.sin(math.pi * max(0.0, p)) if p < 1 else 0.0
+            if p >= 1:
+                self._jump_start = None
         if self._dragging and dt > 0:
             vx = (self.x() - self._last_drag_x) / dt
             self._last_drag_x = self.x()
@@ -342,6 +378,8 @@ class PetWindow(QWidget):
     def mousePressEvent(self, e) -> None:
         if e.button() != Qt.LeftButton:
             return
+        self.stop_motion()
+        self.pressed.emit()
         self._caught_fall = self._falling
         self._stop_fall()
         self._press_global = e.globalPosition().toPoint()
@@ -375,6 +413,7 @@ class PetWindow(QWidget):
         if not self._dragging:
             self._dragging = True
             now = self._clock()
+            self._shake.reset(self._press_global.x())
             self._animator.set_drag(True, now)
             self._last_drag_x = self.x()
             self._last_tick = now
@@ -382,6 +421,7 @@ class PetWindow(QWidget):
             if not self._drag_active:
                 self._drag_active = True
                 self.drag_started.emit()
+        self._shake.feed(gp.x(), self._clock())
         self.move(gp - self._grab_offset)
 
     def _pat_step(self, gp: QPoint) -> None:
@@ -418,7 +458,68 @@ class PetWindow(QWidget):
                 self.double_clicked.emit()
 
     def contextMenuEvent(self, e) -> None:
+        self.stop_motion()
         self.menu_requested.emit(e.globalPos())
+
+    # ---- 原地动作 / 沿任务栏行走 ----
+    @property
+    def facing(self) -> int:
+        return self._facing
+
+    def face(self, direction: int) -> None:
+        self._facing = 1 if direction >= 0 else -1
+        self._refresh(self._clock())
+
+    def turn(self) -> None:
+        self.face(-self._facing)
+
+    def set_calm(self, calm: bool) -> None:
+        self._animator.calm = calm
+
+    @property
+    def motion_active(self) -> bool:
+        return self._walk is not None or self._jump_start is not None
+
+    @property
+    def idle_motion_active(self) -> bool:
+        return self._jump_start is not None and self._automatic_jump
+
+    @property
+    def is_pressed(self) -> bool:
+        return self._press_global is not None
+
+    def stop_motion(self) -> None:
+        walking = self._walk is not None
+        self._walk = None
+        self._jump_start = None
+        self._jump_offset = 0.0
+        self._refresh(self._clock())
+        if walking:
+            self.motion_finished.emit()
+
+    def jump(self, *, automatic: bool = False) -> None:
+        if self._dragging or self._falling:
+            return
+        self.stop_motion()
+        self._automatic_jump = automatic
+        self._jump_start = self._clock()
+
+    def walk(self, *, cross: bool = False, rng=None) -> None:
+        if self._dragging or self._falling:
+            return
+        self.stop_motion()
+        self.snap_to_floor()
+        avail = self._screen_avail(self.geometry().center())
+        lo = avail.left() - MARGIN_X
+        hi = avail.right() + 1 - self.width() + MARGIN_X
+        self._walk_floor = self.y()
+        self._walk = Walk(self.x(), lo, hi, self._clock(), cross=cross, rng=rng)
+        self.advance_to(self._clock())
+
+    def consume_shaken(self) -> bool:
+        shaken = self._shake.shaken
+        self._shake.reset(0.0)
+        return shaken
 
     # ---- 下落 ----
     def bounce(self) -> None:

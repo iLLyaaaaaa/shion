@@ -125,14 +125,14 @@ def test_bad_requests_get_400_and_change_nothing(rig):
 
 def test_praise_take_returns_count_then_zero(rig):
     for _ in range(3):
-        rig.env.win.patted.emit()
+        rig.env.ctl.praise()
     assert rig.call("POST", "/praise/take", {}) == (200, {"count": 3})
     assert rig.call("POST", "/praise/take", {}) == (200, {"count": 0})
 
 
 def test_concurrent_praise_take_is_atomic(rig):
     for _ in range(5):
-        rig.env.win.patted.emit()
+        rig.env.ctl.praise()
     futs = [rig.pool.submit(rig.request, "POST", "/praise/take", {}) for _ in range(20)]
     counts = [rig.wait(f)[1]["count"] for f in futs]
     assert sum(counts) == 5  # 不多领也不漏领
@@ -154,7 +154,7 @@ def test_praise_request_that_timed_out_does_not_lose_the_count(qapp, tmp_path):
     r = Rig(tmp_path, take_timeout=0.2)
     try:
         for _ in range(3):
-            r.env.win.patted.emit()
+            r.env.ctl.praise()
         fut = r.pool.submit(r.request, "POST", "/praise/take", {})
         fut.result(timeout=5)  # GUI 线程没泵事件 → 超时 500
         assert fut.result()[0] == 500

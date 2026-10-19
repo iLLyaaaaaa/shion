@@ -9,7 +9,7 @@ def test_spawn_and_items_rise_and_fade():
     assert p.active
     first = p.items(10.0)
     mid = p.items(10.0 + LIFETIME / 2)
-    assert len(first) == len(mid) == 3
+    assert len(first) == len(mid) == 1  # 请求多颗也只允许一颗
     for (x0, y0, s, a0), (x1, y1, _, a1) in zip(first, mid):
         assert y0 == 0 and y1 < y0  # 向上
         assert abs(y1) <= RISE
@@ -44,3 +44,15 @@ def test_particle_motion_eases_out_and_skips_expired_frames():
     assert p.items(0.75) == direct
     p.update(2)
     assert not p.active
+
+
+def test_particle_rate_limit_and_total_cap(monkeypatch):
+    import shion.effects as e
+    monkeypatch.setattr(e, "LIFETIME", 10)
+    p = Particles()
+    for t in (0, 0.1, 0.59, 0.6, 1.2, 1.8, 2.4):
+        p.spawn(t, 100)
+    assert len(p.items(2.4)) == 3
+    assert [x.born for x in p._ps] == [0, 0.6, 1.2]
+    p.spawn(20)
+    assert len(p.items(20)) == 1

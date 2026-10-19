@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections import deque
+import random
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -19,6 +19,9 @@ log = logging.getLogger("shion.state")
 
 # 有持续时间的临时状态（同时也是 react 事件允许的表情名）
 TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
+EXPRESSIONS = ("happy", "proud", "stop", "dizzy", "working", "done", "sleep", "idle", "neglect2")
+ACTIVITY_LEVELS = ("quiet", "normal", "lively")
+SAVE_VERSION = 2  # v1 的 pending_praise 混有摸头记录，升级时清空一次
 
 MIN_HEIGHT, MAX_HEIGHT = 120, 600  # 存档里的显示高度范围（右键菜单只提供 160~320）
 SAVE_RETRY = timedelta(seconds=30)  # 写盘失败后多久再试
@@ -50,15 +53,18 @@ class Config:
     nudge_after: timedelta = timedelta(minutes=5)
     nudge_max: int = 2
 
-    # 连戳 / 戳到爆
-    stop_clicks: int = 5
-    stop_window: timedelta = timedelta(seconds=3)
-    dizzy_clicks: int = 10
-    dizzy_window: timedelta = timedelta(seconds=5)
-
-    # 摸头换来的“待夸奖”计数：每个窗口内最多 +N
-    praise_per_window: int = 5
-    praise_window: timedelta = timedelta(seconds=60)
+    poke_gap: timedelta = timedelta(seconds=1.5)
+    poke_early: int = 3
+    poke_late: int = 5
+    poke_early_stop: float = 0.60
+    poke_early_dizzy: float = 0.20
+    poke_late_stop: float = 0.55
+    poke_late_dizzy: float = 0.40
+    shake_dizzy_for: timedelta = timedelta(seconds=2.5)
+    expression_for: timedelta = timedelta(seconds=5)
+    idle_expression_for: timedelta = timedelta(seconds=2)
+    pat_affection: int = 1
+    praise_affection: int = 3
 
     @classmethod
     def debug(cls) -> "Config":
@@ -110,6 +116,7 @@ def _bool(value, default: bool) -> bool:
 
 @dataclass
 class SaveData:
+    schema_version: int = SAVE_VERSION
     first_run: Optional[datetime] = None
     affection: int = 0
     last_attended: Optional[datetime] = None
@@ -120,9 +127,12 @@ class SaveData:
     inject_praise: bool = True
     privacy_mode: bool = False  # 只显示状态，不显示文件名/命令/回复内容
     language: Optional[str] = None  # None = 还没选过，首次启动时跟随系统语言
+    fixed_expression: Optional[str] = None
+    activity_level: str = "normal"
 
     def to_dict(self) -> dict:
         return {
+            "schema_version": self.schema_version,
             "first_run": self.first_run.isoformat(timespec="seconds") if self.first_run else None,
             "affection": self.affection,
             "last_attended": self.last_attended.isoformat(timespec="seconds") if self.last_attended else None,
@@ -133,6 +143,8 @@ class SaveData:
             "inject_praise": self.inject_praise,
             "privacy_mode": self.privacy_mode,
             "language": self.language,
+            "fixed_expression": self.fixed_expression,
+            "activity_level": self.activity_level,
         }
 
     @classmethod
@@ -141,6 +153,7 @@ class SaveData:
         d = cls()
         if not isinstance(raw, dict):
             return d
+        d.schema_version = _int(raw.get("schema_version"), 1, minimum=1)
         d.first_run = _parse_dt(raw.get("first_run"))
         d.last_attended = _parse_dt(raw.get("last_attended"))
         d.affection = _int(raw.get("affection"), 0)
@@ -150,6 +163,10 @@ class SaveData:
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
+        expr = raw.get("fixed_expression")
+        d.fixed_expression = expr if expr in EXPRESSIONS else None
+        level = raw.get("activity_level")
+        d.activity_level = level if level in ACTIVITY_LEVELS else "normal"
 
         stats = raw.get("stats")
         if isinstance(stats, dict):
@@ -268,10 +285,12 @@ class PetState:
         now: datetime,
         config: Optional[Config] = None,
         on_change: Optional[Callable[[datetime], None]] = None,
+        rng: Optional[random.Random] = None,
     ):
         self.config = config or Config()
         self.save = data
         self._on_change = on_change
+        self._rng = rng or random.Random()
 
         self._dragging = False
         self._temp: Optional[tuple[str, datetime]] = None  # (状态名, 到期时间)
@@ -280,9 +299,15 @@ class PetState:
         self._nudges = 0
         self._last_activity = now  # 最近一次鼠标交互或 Claude 事件（用于睡眠）
         self._woken_date = None  # 今天夜里是否已被叫醒过
-        self._clicks: deque[datetime] = deque()
-        self._praise_marks: deque[datetime] = deque()
+        self._poke_count = 0
+        self._last_poke: Optional[datetime] = None
+        self._manual: Optional[tuple[str, datetime]] = None
+        self._idle_expression: Optional[tuple[str, datetime]] = None
         self._last_logged: Optional[str] = None
+        if self.save.schema_version < SAVE_VERSION:
+            self.save.pending_praise = 0
+            self.save.schema_version = SAVE_VERSION
+            self._changed(now)
 
         if self.save.first_run is None:
             self.save.first_run = now
@@ -295,16 +320,60 @@ class PetState:
     # ------------------------------------------------------------ 查询
 
     def current(self, now: datetime) -> str:
-        """当前应显示的精灵名。优先级：drag > 临时反应 > working > sleep > 底层状态。"""
+        """优先级：drag > 固定/手动表情 > 临时反应 > working > sleep > 待机/底层。"""
         if self._dragging:
             return "drag"
+        if self.save.fixed_expression:
+            return self.save.fixed_expression
+        if self._manual and now < self._manual[1]:
+            return self._manual[0]
         if self._temp and now < self._temp[1]:
             return self._temp[0]
         if self._working_until and now < self._working_until:
             return "working"
         if self._is_asleep(now):
             return "sleep"
+        if self._idle_expression and now < self._idle_expression[1]:
+            return self._idle_expression[0]
         return ("idle", "neglect1", "neglect2")[self._neglect_level(now)]
+
+    def is_working(self, now: datetime) -> bool:
+        return self._working_until is not None and now < self._working_until
+
+    def can_idle(self, now: datetime) -> bool:
+        return (
+            not self._dragging and not self.is_working(now)
+            and not self.save.fixed_expression and not self._is_asleep(now)
+            and not (self._manual and now < self._manual[1])
+            and not (self._temp and now < self._temp[1])
+        )
+
+    def select_expression(self, name: str, now: datetime) -> None:
+        if name not in EXPRESSIONS:
+            return
+        self._touch(now, attend=False)
+        if name in ("stop", "dizzy"):
+            self._poke_count, self._last_poke = 0, None
+        if self.save.fixed_expression:
+            self.save.fixed_expression = name
+            self._changed(now)
+        else:
+            self._manual = (name, now + self.config.expression_for)
+
+    def fix_expression(self, fixed: bool, now: datetime) -> None:
+        if fixed:
+            name = self.current(now)
+            self.save.fixed_expression = name if name in EXPRESSIONS else "idle"
+        else:
+            self.save.fixed_expression = None
+            self._temp = None
+        self._manual = None
+        self._idle_expression = None
+        self._changed(now)
+
+    def idle_expression(self, name: str, now: datetime) -> None:
+        if self.can_idle(now) and name in ("happy", "idle"):
+            self._idle_expression = (name, now + self.config.idle_expression_for)
 
     # ------------------------------------------------------------ 输入
 
@@ -339,30 +408,29 @@ class PetState:
     def drag_start(self, now: datetime) -> list[Reaction]:
         reactions = self._touch(now, attend=True)
         self._dragging = True
+        self._poke_count, self._last_poke = 0, None
         if not reactions:
             reactions.append(_say("drag"))
         self._log_state(now)
         return reactions
 
-    def drag_end(self, now: datetime) -> list[Reaction]:
+    def drag_end(self, now: datetime, shaken: bool = False) -> list[Reaction]:
         self._dragging = False
         reactions = self._touch(now, attend=True)
+        if shaken:
+            self._temp = ("dizzy", now + self.config.shake_dizzy_for)
+            self._poke_count, self._last_poke = 0, None
+            reactions.append(_say("dizzy"))
         self._log_state(now)
         return reactions
 
     def pat(self, now: datetime) -> list[Reaction]:
         """摸头一次（界面层累计移动 40px 算一次）。"""
         reactions = self._touch(now, attend=True)
-        self.save.affection += 1
+        self.save.affection += self.config.pat_affection
         self.save.stats["pats"] += 1
         self._set_temp("happy", now)
 
-        window = self.config.praise_window
-        while self._praise_marks and now - self._praise_marks[0] >= window:
-            self._praise_marks.popleft()
-        if len(self._praise_marks) < self.config.praise_per_window:
-            self._praise_marks.append(now)
-            self.save.pending_praise += 1
         self._changed(now)
         self._log_state(now)
         return reactions
@@ -370,28 +438,34 @@ class PetState:
     def click(self, now: datetime) -> list[Reaction]:
         """单击身体一次。"""
         reactions = self._touch(now, attend=True)
-        self._clicks.append(now)
-        while self._clicks and now - self._clicks[0] >= self.config.dizzy_window:
-            self._clicks.popleft()
-
         cfg = self.config
-        recent_stop = sum(1 for t in self._clicks if now - t < cfg.stop_window)
-        if len(self._clicks) >= cfg.dizzy_clicks:
-            self._clicks.clear()
-            self._set_temp("dizzy", now)
-            reactions.append(_say("dizzy"))
-        elif recent_stop >= cfg.stop_clicks and not self._temp_active("stop", now):
-            self._set_temp("stop", now)
-            reactions.append(_say("stop"))
+        if self._last_poke is None or now - self._last_poke > cfg.poke_gap:
+            self._poke_count = 0
+        self._last_poke = now
+        self._poke_count += 1
+        result = None
+        if self._poke_count >= cfg.poke_early:
+            late = self._poke_count >= cfg.poke_late
+            stop = cfg.poke_late_stop if late else cfg.poke_early_stop
+            dizzy = cfg.poke_late_dizzy if late else cfg.poke_early_dizzy
+            roll = self._rng.random()
+            if roll < stop:
+                result = "stop"
+            elif roll < round(stop + dizzy, 12):
+                result = "dizzy"
+        if result:
+            self._poke_count, self._last_poke = 0, None
+            self._set_temp(result, now)
+            reactions.append(_say(result))
         elif not reactions:
             reactions.append(_say("poke"))
         self._log_state(now)
         return reactions
 
     def praise_claude(self, now: datetime) -> list[Reaction]:
-        """右键菜单“夸夸 Claude”。"""
+        """右键菜单“做得好”：只有这里产生待转达表扬。"""
         reactions = self._touch(now, attend=False)
-        self.save.affection += 3
+        self.save.affection += self.config.praise_affection
         self.save.pending_praise += 1
         self._set_temp("proud", now)
         self._changed(now)
@@ -433,11 +507,14 @@ class PetState:
             self._changed(now)
             reactions.append(_say("claude_done"))
         elif etype == "tool_error":
+            self._poke_count, self._last_poke = 0, None
             self._temp = ("dizzy", now + self.config.tool_error_for)
             reactions.append(_say("tool_error"))
         elif etype == "notification":
             reactions.append(_say("claude_waiting"))
         elif etype == "react":
+            if detail in ("stop", "dizzy"):
+                self._poke_count, self._last_poke = 0, None
             self._temp = (detail, now + self.config.react_for)
         self._log_state(now)
         return reactions
@@ -451,6 +528,7 @@ class PetState:
         prev_level = self._neglect_level(now)
 
         self._last_activity = now
+        self._idle_expression = None
         if self._in_night(now):
             self._woken_date = now.date()
         if attend:
@@ -485,10 +563,9 @@ class PetState:
         return 0
 
     def _set_temp(self, name: str, now: datetime) -> None:
+        if name in ("stop", "dizzy"):
+            self._poke_count, self._last_poke = 0, None
         self._temp = (name, now + self.config.temp_duration(name))
-
-    def _temp_active(self, name: str, now: datetime) -> bool:
-        return bool(self._temp and self._temp[0] == name and now < self._temp[1])
 
     def _roll_stats(self, now: datetime) -> None:
         today = now.date().isoformat()

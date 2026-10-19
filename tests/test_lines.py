@@ -11,7 +11,7 @@ from shion.lines import (
 NEEDED = {
     "poke", "stop", "dizzy", "drag", "wake", "neglect_return", "praise_menu",
     "claude_working", "claude_done", "pat", "greeting", "claude_waiting",
-    "intro",
+    "intro", "startup", "idle_talk",
 }
 
 

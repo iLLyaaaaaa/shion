@@ -253,33 +253,29 @@ def test_normal_click_pokes(pet):
     assert keys(pet.click(T0)) == ["poke"]
 
 
-def test_five_clicks_in_3s_triggers_stop(pet):
-    r = click_n(pet, 5, T0, 0.5)  # 0, 0.5, 1, 1.5, 2
-    assert keys(r) == ["stop"]
-    assert pet.current(T0 + sec(2.5)) == "stop"
-    assert pet.current(T0 + sec(4.1)) == "idle"
+@pytest.mark.parametrize("count,roll,expected", [
+    (1, 0, "poke"), (2, 0, "poke"),
+    (3, 0, "stop"), (3, 0.599999, "stop"), (3, 0.60, "dizzy"),
+    (3, 0.799999, "dizzy"), (3, 0.80, "poke"),
+    (4, 0.60, "dizzy"), (4, 0.80, "poke"),
+    (5, 0, "stop"), (5, 0.549999, "stop"), (5, 0.55, "dizzy"),
+    (5, 0.949999, "dizzy"), (5, 0.95, "poke"), (6, 0.55, "dizzy"),
+])
+def test_poke_probability_boundaries(pet, monkeypatch, count, roll, expected):
+    monkeypatch.setattr(pet._rng, "random", lambda: 0.99)
+    click_n(pet, count - 1, T0, 0.2)
+    monkeypatch.setattr(pet._rng, "random", lambda: roll)
+    r = pet.click(T0 + sec((count - 1) * 0.2))
+    assert keys(r) == [expected]
+    if expected != "poke":
+        assert pet._poke_count == 0
+        assert keys(pet.click(T0 + sec(count * 0.2))) == ["poke"]
 
 
-def test_five_clicks_too_slow_no_stop(pet):
-    r = click_n(pet, 5, T0, 1.0)  # 0..4s，3 秒窗口里最多 3 次
-    assert keys(r) == ["poke"]
-
-
-def test_ten_clicks_in_5s_triggers_dizzy(pet):
-    r = click_n(pet, 10, T0, 0.4)  # 0..3.6s
-    assert keys(r) == ["dizzy"]
-    assert pet.current(T0 + sec(4)) == "dizzy"
-    assert pet.current(T0 + sec(7)) == "idle"
-
-
-def test_dizzy_clears_click_history(pet):
-    click_n(pet, 10, T0, 0.4)
-    assert keys(pet.click(T0 + sec(4))) == ["poke"]
-
-
-def test_ten_clicks_over_6s_no_dizzy(pet):
-    r = click_n(pet, 10, T0, 0.6)  # 0..5.4s，5 秒窗口内只有 9 次
-    assert "dizzy" not in keys(r)
+@pytest.mark.parametrize("gap,expected", [(1.5, "stop"), (1.500001, "poke")])
+def test_poke_gap_inclusive_and_resets(pet, monkeypatch, gap, expected):
+    monkeypatch.setattr(pet._rng, "random", lambda: 0)
+    assert keys(click_n(pet, 3, T0, gap)) == [expected]
 
 
 # ---- 摸头 ----
@@ -289,21 +285,21 @@ def test_pat_counts(pet):
     pet.pat(T0 + sec(1))
     assert pet.save.affection == 2
     assert pet.save.stats["pats"] == 2
-    assert pet.save.pending_praise == 2
+    assert pet.save.pending_praise == 0
 
 
-def test_pat_praise_capped_per_minute(pet):
+def test_pat_never_adds_praise(pet):
     for i in range(8):
         pet.pat(T0 + sec(i))
-    assert pet.save.pending_praise == 5
+    assert pet.save.pending_praise == 0
     assert pet.save.affection == 8  # 好感不受限
     pet.pat(T0 + sec(61))  # 窗口滑过之后又能加
-    assert pet.save.pending_praise == 6
+    assert pet.save.pending_praise == 0
 
 
 def test_take_praise_clears(pet):
-    pet.pat(T0)
-    pet.pat(T0 + sec(1))
+    pet.praise_claude(T0)
+    pet.praise_claude(T0 + sec(1))
     assert pet.take_praise() == 2
     assert pet.take_praise() == 0
     assert pet.save.pending_praise == 0
@@ -412,3 +408,80 @@ def test_nudge_cancelled_by_attention_and_wake(pet):
     p.claude_event("stop", None, T0)
     p.interact(T0 + timedelta(minutes=16))  # 睡着后被唤醒：不会立刻冒出催促
     assert p.tick(T0 + timedelta(minutes=16, seconds=1)) == []
+
+
+def test_manual_expression_expires_at_five_seconds(pet):
+    pet.select_expression("sleep", T0)
+    assert pet.current(T0 + sec(4.999)) == "sleep"
+    assert pet.current(T0 + sec(5)) == "idle"
+    pet.select_expression("drag", T0 + sec(5))
+    assert pet.current(T0 + sec(5)) == "idle"  # 非菜单表情被忽略
+
+
+@pytest.mark.parametrize("event", ["pat", "click", "working", "stop", "tool_error"])
+def test_fixed_expression_survives_reactions_but_dialogue_and_stats_continue(pet, event):
+    pet.select_expression("proud", T0)
+    pet.fix_expression(True, T0)
+    if event in ("pat", "click"):
+        r = getattr(pet, event)(T0 + sec(1))
+    else:
+        r = pet.claude_event(event, None, T0 + sec(1))
+    assert pet.current(T0 + sec(1)) == "proud"
+    if event != "pat":
+        assert r
+    pet.drag_start(T0 + sec(2))
+    assert pet.current(T0 + sec(2)) == "drag"
+    pet.drag_end(T0 + sec(3), shaken=True)
+    assert pet.current(T0 + sec(3)) == "proud"
+    pet.select_expression("happy", T0 + sec(4))
+    assert pet.save.fixed_expression == "happy"
+    pet.fix_expression(False, T0 + sec(5))
+    assert pet.save.fixed_expression is None
+    assert pet.current(T0 + sec(5)) == ("working" if event == "working" else "idle")
+
+
+def test_shaken_landing_dizzy_duration_and_dialogue(pet):
+    pet.drag_start(T0)
+    assert pet.current(T0 + sec(5)) == "drag"
+    assert keys(pet.drag_end(T0 + sec(5), shaken=True)) == ["dizzy"]
+    assert pet.current(T0 + sec(7.499)) == "dizzy"
+    assert pet.current(T0 + sec(7.5)) == "idle"
+
+
+def test_legacy_praise_migrates_once_without_resetting_other_data():
+    raw = SaveData(affection=50, pending_praise=8).to_dict()
+    raw.pop("schema_version")
+    data = SaveData.from_dict(raw)
+    dirty = []
+    p = PetState(data, T0, on_change=dirty.append)
+    assert dirty and data.pending_praise == 0 and data.affection == 50
+    p.praise_claude(T0)
+    q = PetState(SaveData.from_dict(data.to_dict()), T0)
+    assert q.save.pending_praise == 1
+
+
+def test_idle_expression_does_not_postpone_sleep_or_count_as_attention(pet):
+    pet.idle_expression("happy", T0)
+    assert pet.current(T0 + sec(1)) == "happy"
+    assert pet.current(T0 + sec(2)) == "idle"
+    assert pet.save.affection == 0 and pet.save.last_attended == T0
+    assert pet.current(T0 + sec(900)) == "sleep"
+
+
+@pytest.mark.parametrize("block", ["working", "fixed", "sleep", "drag", "manual", "reaction"])
+def test_idle_eligibility_uses_real_state_even_when_expression_is_different(pet, block):
+    if block == "working":
+        pet.claude_event("working", None, T0)
+        pet.pat(T0)  # 画面是 happy，Claude 实际仍在工作
+    elif block == "fixed":
+        pet.fix_expression(True, T0)
+    elif block == "sleep":
+        assert not pet.can_idle(T0 + sec(900))
+        return
+    elif block == "drag":
+        pet.drag_start(T0)
+    elif block == "manual":
+        pet.select_expression("idle", T0)
+    else:
+        pet.pat(T0)
+    assert not pet.can_idle(T0)

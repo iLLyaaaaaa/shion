@@ -7,6 +7,8 @@
     "display_name": "Shion"
   },
   "lines": {
+    "startup": ["I'm back to keep you company~", "Shion's here. Let's have a good day!", "Hello again! My little spot on your desktop is still here."],
+    "idle_talk": ["Remember to take a break today.", "I'll keep you company~", "Hmm... something sweet would be nice.", "I'm not waiting for head pats!"],
     "poke": [
       "Hm?",
       "Hey, what's with the poking?",
@@ -25,7 +27,7 @@
     "pat": [
       "...hehe.",
       "I guess one more pat is fine.",
-      "I'll tell Claude you said so!",
+      "That feels nice...",
       "Shion loves head pats... I-I mean, it's fine, I guess."
     ],
     "praise_menu": [
@@ -77,7 +79,30 @@
     ]
   },
   "ui": {
-    "menu_praise": "Praise Claude",
+    "menu_praise": "Well done",
+    "menu_expression": "Expression",
+    "menu_fix_expression": "Keep current expression",
+    "menu_auto_expression": "Resume automatic expressions",
+    "expression_fixed": "Expression is fixed",
+    "expression_happy": "Happy",
+    "expression_proud": "Proud",
+    "expression_stop": "Shy, hands off",
+    "expression_dizzy": "Dizzy",
+    "expression_working": "Working",
+    "expression_done": "All done",
+    "expression_sleep": "Sleeping",
+    "expression_idle": "Daydreaming",
+    "expression_neglect2": "Feeling hurt",
+    "menu_activity": "Activity",
+    "activity_quiet": "Quiet",
+    "activity_normal": "Normal",
+    "activity_lively": "Lively",
+    "menu_action": "Actions",
+    "action_walk": "Take a short walk",
+    "action_cross": "Walk to the other side of the screen",
+    "action_jump": "Jump",
+    "action_turn": "Turn around",
+    "hook_praise": "[Shion] The user thinks you did a great job just now.",
     "menu_size": "Size",
     "menu_mute": "Mute speech bubbles",
     "menu_autostart": "Start with Windows (v1.0)",

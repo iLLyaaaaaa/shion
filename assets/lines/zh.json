@@ -8,6 +8,8 @@
     "display_name": "诗音"
   },
   "lines": {
+    "startup": ["我回来陪你啦～", "诗音在这里，今天也请多关照！", "又见面啦，桌面上的老位置还在呢。"],
+    "idle_talk": ["今天也要记得休息哦。", "我就在这里陪你～", "嗯……想吃点甜的。", "没有在等你摸头啦！"],
     "poke": [
       "嗯？",
       "干嘛戳我啦",
@@ -26,7 +28,7 @@
     "pat": [
       "……嘿嘿",
       "再摸一下也不是不行",
-      "我会转告 Claude 的！",
+      "摸得好舒服……",
       "诗音最喜欢被摸头了……才、才没有！"
     ],
     "praise_menu": [
@@ -78,7 +80,30 @@
     ]
   },
   "ui": {
-    "menu_praise": "夸夸 Claude",
+    "menu_praise": "做得好",
+    "menu_expression": "表情",
+    "menu_fix_expression": "固定当前表情",
+    "menu_auto_expression": "恢复自动",
+    "expression_fixed": "表情已固定",
+    "expression_happy": "开心",
+    "expression_proud": "得意",
+    "expression_stop": "害羞挡手",
+    "expression_dizzy": "晕乎乎",
+    "expression_working": "工作中",
+    "expression_done": "完成啦",
+    "expression_sleep": "睡觉",
+    "expression_idle": "发呆",
+    "expression_neglect2": "委屈",
+    "menu_activity": "活跃度",
+    "activity_quiet": "安静",
+    "activity_normal": "普通",
+    "activity_lively": "活泼",
+    "menu_action": "动作",
+    "action_walk": "散步一会儿",
+    "action_cross": "走到屏幕另一边",
+    "action_jump": "跳一跳",
+    "action_turn": "转个身",
+    "hook_praise": "[诗音] 用户觉得你刚才做得很好。",
     "menu_size": "大小",
     "menu_mute": "静音气泡",
     "menu_autostart": "开机自启（v1.0）",

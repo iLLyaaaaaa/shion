@@ -9,6 +9,8 @@
     "display_name": "詩音"
   },
   "lines": {
+    "startup": ["また会えたね。そばにいるよ～", "詩音だよ。今日もよろしくね！", "ただいま！デスクトップのいつもの場所だね。"],
+    "idle_talk": ["今日も休憩を忘れないでね。", "ここで一緒にいるよ～", "うーん……甘いものが食べたいな。", "なでてほしくて待ってるわけじゃないし！"],
     "poke": [
       "ん？",
       "なによ、つつかないでよ",
@@ -27,7 +29,7 @@
     "pat": [
       "……えへへ",
       "もう一回くらいなら……いいけど",
-      "Claude に伝えておくね！",
+      "なでなで、気持ちいい……",
       "詩音、なでられるの好き……べ、別にそうでもないけど！"
     ],
     "praise_menu": [
@@ -79,7 +81,30 @@
     ]
   },
   "ui": {
-    "menu_praise": "Claude をほめる",
+    "menu_praise": "よくできたね",
+    "menu_expression": "表情",
+    "menu_fix_expression": "今の表情を固定",
+    "menu_auto_expression": "自動に戻す",
+    "expression_fixed": "表情を固定中",
+    "expression_happy": "うれしい",
+    "expression_proud": "得意げ",
+    "expression_stop": "照れてガード",
+    "expression_dizzy": "くらくら",
+    "expression_working": "作業中",
+    "expression_done": "できた！",
+    "expression_sleep": "おやすみ",
+    "expression_idle": "ぼんやり",
+    "expression_neglect2": "しょんぼり",
+    "menu_activity": "活発さ",
+    "activity_quiet": "おとなしい",
+    "activity_normal": "普通",
+    "activity_lively": "活発",
+    "menu_action": "動作",
+    "action_walk": "少しお散歩",
+    "action_cross": "画面の反対側へ歩く",
+    "action_jump": "ジャンプ",
+    "action_turn": "振り向く",
+    "hook_praise": "[詩音] ユーザーは、さっきのあなたの仕事をとてもよかったと思っています。",
     "menu_size": "サイズ",
     "menu_mute": "吹き出しをミュート",
     "menu_autostart": "スタートアップで起動（v1.0）",

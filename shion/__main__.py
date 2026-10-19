@@ -16,12 +16,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--at", type=float, default=0.0, help="截图用：切到该状态后第几秒的那一帧")
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
+    p.add_argument("--mirror", action="store_true", help="截图用：水平镜像，脚底锚点不变")
+    p.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
     args = p.parse_args(argv)
 
     from shion import app
 
     if args.snapshot:
-        return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang, args.from_state)
+        return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang, args.from_state, args.mirror, args.jump)
     return app.run()
 
 

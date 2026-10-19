@@ -17,9 +17,17 @@ def test_round_trip(tmp_path):
         window={"x": 10, "y": 20, "height": 320},
         bubble_muted=True,
         inject_praise=False,
+        fixed_expression="dizzy",
+        activity_level="lively",
     )
     save(p, d)
     assert load(p) == d
+
+
+def test_behavior_settings_reject_invalid_values():
+    for value in (None, "drag", "blink", "neglect1", [], {}, 5, True):
+        d = SaveData.from_dict({"fixed_expression": value, "activity_level": value})
+        assert d.fixed_expression is None and d.activity_level == "normal"
 
 
 def test_missing_file_gives_defaults(tmp_path):
