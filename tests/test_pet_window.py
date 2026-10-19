@@ -203,14 +203,114 @@ def test_mask_superset_while_tilted(fwin):
 
 
 # ---- 鼠标 ----
-def test_small_movement_is_not_a_drag(win):
+HEAD = QPoint(MARGIN_X + 60, MARGIN_TOP + 20)  # 头部（上 35% 以内）
+
+
+class Rec:
+    """记录窗口发出的信号。"""
+
+    def __init__(self, w):
+        self.log = []
+        for name in ("hovered", "patted", "clicked", "double_clicked", "drag_started", "drag_finished"):
+            getattr(w, name).connect(lambda n=name: self.log.append(n))
+
+    def count(self, name):
+        return self.log.count(name)
+
+
+def drag_horizontally(w, start, total, step=8):
+    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, start)
+    pos = start
+    for _ in range(total // step):
+        pos = pos + QPoint(step, 0)
+        QTest.mouseMove(w, pos)
+    return pos
+
+
+def test_hover_cursor_open_hand_on_head_only(win):
+    win.show()
+    QTest.mouseMove(win, HEAD)
+    assert win.cursor().shape() == Qt.OpenHandCursor
+    QTest.mouseMove(win, BODY + QPoint(0, 40))
+    assert win.cursor().shape() != Qt.OpenHandCursor
+
+
+def test_small_movement_is_a_click_not_a_drag(win):
+    r = Rec(win)
     win.place_default()
     QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
     QTest.mouseMove(win, BODY + QPoint(3, 0))
     assert not win.is_dragging
-    assert win.sprite_name == "idle"
     QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(3, 0))
+    assert r.log == ["clicked"]
     assert not win.is_falling
+
+
+def test_head_pat_emits_one_per_40px_and_never_drags(win):
+    r = Rec(win)
+    win.place_default()
+    pos = drag_horizontally(win, HEAD, 48)  # 48px -> 1 次
+    assert r.count("patted") == 1
+    pos = pos + QPoint(-8, 0)
+    for _ in range(9):  # 再往回移 72px，累计 120px -> 共 3 次
+        pos = pos + QPoint(-8, 0)
+        QTest.mouseMove(win, pos)
+    assert r.count("patted") == 3
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, pos)
+    assert not win.is_dragging and not win.is_falling
+    assert r.count("drag_started") == 0
+    assert r.count("clicked") == 0  # 摸头不算单击
+
+
+def test_head_press_without_moving_is_a_click(win):
+    r = Rec(win)
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, HEAD)
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, HEAD)
+    assert r.log == ["clicked"]
+
+
+def test_body_drag_signals_and_falls_to_floor(win, qapp):
+    r = Rec(win)
+    win.place_default()
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    floor_y = avail.bottom() + 1 - win.height() + MARGIN_BOTTOM
+    win.show()
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
+    # 向上拖 300px，必须先越过 6px 阈值
+    QTest.mouseMove(win, BODY + QPoint(0, -300))
+    assert win.is_dragging
+    assert r.count("drag_started") == 1 and r.count("patted") == 0
+    assert win.y() < floor_y - 100
+
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(0, -300))
+    assert win.is_falling
+    assert r.count("drag_finished") == 0  # 还没落地
+    deadline = time.monotonic() + 3
+    while win.is_falling and time.monotonic() < deadline:
+        QTest.qWait(20)
+    assert not win.is_falling
+    assert win.y() == floor_y  # 脚底贴底，不越界
+    assert r.count("drag_finished") == 1
+
+
+def test_double_click_emits_click_then_double(win):
+    r = Rec(win)
+    # Windows 的真实顺序：按下、松开、双击事件（代替第二次按下）、松开
+    QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, BODY)
+    QTest.mouseDClick(win, Qt.LeftButton, Qt.NoModifier, BODY)  # offscreen 下只发双击事件
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY)
+    assert r.log == ["clicked", "clicked", "double_clicked"]
+
+
+def test_right_click_requests_menu(win):
+    got = []
+    win.menu_requested.connect(got.append)
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QApplication as QA
+
+    ev = QContextMenuEvent(QContextMenuEvent.Mouse, BODY, QPoint(500, 500))
+    QA.sendEvent(win, ev)
+    assert got == [QPoint(500, 500)]
 
 
 def test_click_triggers_squash(fwin):
@@ -223,43 +323,24 @@ def test_click_triggers_squash(fwin):
     assert fwin.frame.sy == 1.0
 
 
-def test_drag_switches_sprite_and_release_falls_to_floor(win, qapp):
-    win.place_default()
-    avail = QGuiApplication.primaryScreen().availableGeometry()
-    floor_y = avail.bottom() + 1 - win.height() + MARGIN_BOTTOM
-    win.show()
-    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
-    # 向上拖 300px，必须先越过 6px 阈值
-    QTest.mouseMove(win, BODY + QPoint(0, -300))
-    assert win.is_dragging
-    assert win.sprite_name == "drag"
-    assert win.y() < floor_y - 100
-
-    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(0, -300))
-    assert win.is_falling
-    deadline = time.monotonic() + 3
-    while win.is_falling and time.monotonic() < deadline:
-        QTest.qWait(20)
-    assert not win.is_falling
-    assert win.y() == floor_y  # 脚底贴底，不越界
-    assert win.sprite_name == "idle"
-
-
 def test_landing_triggers_squash_then_settles(fwin):
+    r = Rec(fwin)
     avail = QGuiApplication.primaryScreen().availableGeometry()
     fwin.move(avail.left() + 50, avail.top())
     fwin.set_state("drag")
+    fwin._drag_active = True
     fwin.start_fall()
     for _ in range(200):
         if not fwin.is_falling:
             break
         at(fwin, 1 / 60)
     assert not fwin.is_falling
-    assert fwin.sprite_name == "idle"
+    assert r.count("drag_finished") == 1
     at(fwin, 0.05)
     assert fwin.frame.sy < 1.0  # 落地压扁
+    fwin.set_state("neglect2")
     at(fwin, 0.5)
-    assert fwin.frame.sy == pytest.approx(1.0, abs=0.013)  # 只剩呼吸
+    assert fwin.frame.sy == 1.0
 
 
 def test_tilt_while_dragging_then_resets_after_release(fwin):
@@ -280,6 +361,20 @@ def test_tilt_while_dragging_then_resets_after_release(fwin):
     assert fwin.frame.angle == 0.0
 
 
+def test_catching_a_falling_pet_and_letting_go_resumes_fall(fwin):
+    r = Rec(fwin)
+    avail = QGuiApplication.primaryScreen().availableGeometry()
+    fwin.move(avail.left() + 50, avail.top())
+    fwin._drag_active = True
+    fwin.start_fall()
+    at(fwin, 0.1)
+    QTest.mousePress(fwin, Qt.LeftButton, Qt.NoModifier, BODY)
+    assert not fwin.is_falling
+    QTest.mouseRelease(fwin, Qt.LeftButton, Qt.NoModifier, BODY)
+    assert fwin.is_falling  # 没拖动就松手：接着落
+    assert r.count("clicked") == 0
+
+
 def test_release_below_floor_pulls_back_onto_screen(win, qapp):
     avail = QGuiApplication.primaryScreen().availableGeometry()
     win.move(avail.left() + 50, avail.bottom() + 200)  # 拖到屏幕外
@@ -288,14 +383,15 @@ def test_release_below_floor_pulls_back_onto_screen(win, qapp):
     assert win.y() + win.height() - MARGIN_BOTTOM <= avail.bottom() + 1
 
 
-def test_press_during_fall_stops_it(win, qapp):
-    avail = QGuiApplication.primaryScreen().availableGeometry()
-    win.move(avail.left() + 50, avail.top())
-    win.start_fall()
-    assert win.is_falling
-    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
-    assert not win.is_falling
-    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY)
+def test_set_height_keeps_feet_center_and_snaps_to_floor(win):
+    win.place_default()
+    before = (win.x() + win.width() / 2, win.y() + win.height() - MARGIN_BOTTOM)
+    win.set_height(320)
+    assert win.sprite_size[1] == 320
+    assert win.height() == 320 + MARGIN_TOP + MARGIN_BOTTOM
+    after = (win.x() + win.width() / 2, win.y() + win.height() - MARGIN_BOTTOM)
+    assert abs(after[0] - before[0]) <= 1 and abs(after[1] - before[1]) <= 1
+    assert win.mask().contains(QPoint(win.width() // 2, win.height() // 2))
 
 
 def test_single_instance_second_acquire_fails(qapp):

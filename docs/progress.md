@@ -3,8 +3,8 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- 下一步：**v0.1 第 4 步**（交互接入状态机）。第 1、2 步代码已完成并自测，但**真机验收项还没做**（见下）
-- 之后的顺序：4 → 5 → 把 server 回调接到 Qt 信号 → 审查
+- 下一步：**v0.1 第 5 步**（`bubble.py` 终端气泡，替换控制器里的 QToolTip 临时出口）。第 1、2、4 步代码已完成并自测，但**真机验收项还没做**（见下）
+- 之后的顺序：5 → 把 server 回调接到 Qt 信号 → 审查
 - 环境：`.venv` 已建好（Python 3.10.11，requirements.txt 已装），`shion/`、`tests/` 包已建。git 仓库已初始化，本仓库 `user.email` 已是 noreply 邮箱
 
 ## 已完成
@@ -14,8 +14,8 @@
 - [x] v0.1-6 本地 HTTP 服务（`shion/server.py`，回调式，不依赖窗口；pytest 共 72 个通过）
 - [x] v0.1-1 骨架 / 透明置顶窗口 / 拖动下落 / `--snapshot`（pytest 共 94 个通过；**真机验收待用户**）
 - [x] v0.1-2 程序动画（`shion/animator.py`；pytest 共 121 个通过；**真机验收待用户**）
-- [ ] v0.1-4 交互 ← 下一步
-- [ ] v0.1-5 气泡与台词
+- [x] v0.1-4 交互接入状态机（`shion/controller.py`、`effects.py`、`lines.py`、`assets/lines/zh.json`；pytest 共 151 个通过；**真机验收待用户**）
+- [ ] v0.1-5 气泡与台词 ← 下一步（台词库 zh.json / lines.py 已在第 4 步做好，只剩 bubble.py）
 - [ ] 把 server 回调接到 Qt 信号上（第 1 步之后）
 - [ ] v0.1 审查
 - [ ] v0.2 Claude Code hooks
@@ -31,6 +31,26 @@
 - [ ] 再开第二个 `python -m shion` 会直接退出，不出现第二只
 - [ ] 高分屏（缩放 150%）下清晰度、窗口大小正常
 没能真机验证透明点穿的原因：测试时电脑处于锁屏状态（`WindowFromPoint` 返回 LockScreenBackstopFrame）。实现用的是 `setMask`（按精灵 alpha 生成遮罩），不依赖 Windows 分层窗口的自动穿透。
+
+## 第 4 步：待用户验收（同样没手动测）
+自动验证过：窗口手势（头部悬停是张开的手、头部左右移动每 40px 一次 patted 且不会拖动、身体拖动发 drag_started/落地发 drag_finished、单击、双击顺序 clicked→double_clicked、右键发菜单信号、抓住下落中的桌宠再松手会继续落、改大小保持脚底不动）；控制器（摸头→happy+爱心+好感度、5 连戳→stop、10 连戳→dizzy、拖动含下落全程是 drag、菜单各项、静音、双击等待间隔后才显示状态、存档防抖/退出 flush/重启恢复大小、位置恢复与越界回退、睡眠唤醒台词、冷落回归台词）；真实运行 4 秒：存档和日志写到了数据目录，正常退出；爱心粒子截图看过。
+**需要用户在电脑前逐项上手玩**（`.venv\Scripts\python -m shion`；`SHION_DEBUG=1` 会缩短冷落/睡眠阈值并在控制台打日志）：
+- [ ] 头部按住左右摩挲：happy + 摇头 + 爱心，手感合适；头部按住不会把桌宠拖走
+- [ ] 身体单击压扁；5 连戳→stop 傲娇；10 连戳→dizzy 晃
+- [ ] 身体拖动→drag 图，松手落地回 idle；重启后位置（x）和大小恢复
+- [ ] 双击：约半秒后出现「已陪伴… 今天被摸… 好感度…」提示
+- [ ] 右键菜单：夸夸 Claude（proud）、大小四档（切换后仍贴任务栏）、静音气泡、开机自启灰色、关于、退出
+- [ ] 台词目前用 **QToolTip 暂代气泡**，可能因为窗口没有焦点而不显示或位置不对——这个第 5 步会换成真气泡，先看看能不能看到就行
+- [ ] 爱心窗口完全点不到（不挡鼠标）
+- [ ] 睡着（15 分钟无操作，或 `SHION_DEBUG=1` 下 1 分钟）后悬停会唤醒并说起床台词
+- [ ] 存档位置：`%APPDATA%\Shion\state.json`，日志：`%APPDATA%\Shion\shion.log`
+
+## 第 4 步留给后面步骤的接口
+- `PetController(window, state, scheduler, lines=None, overlay=None, now_fn=datetime.now, say=None, autostart=True)`：信号 `quit_requested`；`react(reactions)`、`say_key(key)`、`say(text)`、`sync()`、`tick()`、`set_size/set_muted/praise/quit`、`restore_position()`、`build_menu()`、`status_text()`
+- **第 5 步只需把 `say` 的出口换成气泡**：控制器的 `_tooltip_say` 是暂代；构造时传 `say=` 回调即可覆盖；静音在 `say_key` 里已处理，双击状态不受静音影响
+- **接 server（下一步之后）**：`controller.state.claude_event(...)` 的返回值交给 `controller.react(...)`，再 `controller.sync()`；注意要在 GUI 线程调用（用信号切线程），`take_praise` 要同步返回
+- `PetWindow` 不再自己决定精灵：新增信号 `hovered/patted/clicked/double_clicked/drag_started/drag_finished/menu_requested`，`set_height()`、`snap_to_floor()`、`head_anchor()`；状态机的 `current()` 由控制器同步给 `set_state`
+- `app.run()` 已接好存档（`SaveScheduler`）、日志、`SHION_DEBUG`、`SHION_DATA_DIR`（环境变量，覆盖数据目录，测试用）
 
 ## 第 2 步：待用户验收（同样没手动测）
 自动验证过：animator 纯逻辑 14 个 pytest（呼吸 1.000~1.012 / 周期 3s、眨眼只在 idle、间隔 3~6s、连眨约 15%、压扁结束精确回 1、倾斜限幅 ±12° 且松手回 0、晃动幅度）；窗口层用离屏渲染检查锚点（呼吸、压扁时最低行 ±1px、水平不滑；dizzy 晃动时脚不滑、不被画布裁掉）、遮罩覆盖所有可见像素；`--snapshot` 看过 idle / dizzy 最大角度 / land 压扁的截图；真实运行 8 秒 CPU 约 1.6%（单核）。
@@ -80,6 +100,8 @@
 - `stop` 事件无论是否在 working 都会算一次任务完成
 
 ## 踩坑记录
+- `QTest.mouseDClick` 在 offscreen 下只发一个双击事件，没有按下/松开；测试里要手动补 `mouseRelease`
+- 测试里 `QMenu` 临时对象一旦被回收，里面的 `QAction` 就失效（RuntimeError），要留引用
 - `QWidget.grab()` 会被 `setMask` 裁剪，遮罩外的像素是未初始化内存（测试偶发角落有像素）；截图和测试改用 `render_frame()`
 - numpy 用 `frombuffer` 读 `QImage.constBits()` 时，QImage 一释放数据就悬空，必须 `.copy()`
 - 遮罩要覆盖实际绘制：角度取整 1° 在 250px 处有约 2px 误差，所以遮罩向外扩 4px

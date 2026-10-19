@@ -13,7 +13,7 @@ from PySide6.QtCore import QPoint, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QBitmap, QGuiApplication, QImage, QPainter, QPixmap, QRegion, QTransform,
 )
-from PySide6.QtWidgets import QMenu, QWidget
+from PySide6.QtWidgets import QWidget
 
 from shion.animator import Animator, Frame
 
@@ -29,6 +29,7 @@ MARGIN_TOP = 8
 MARGIN_BOTTOM = 6  # 倾斜时一只脚会往下沉，留出空间不被裁掉
 MASK_GROW = 4  # 遮罩向外扩的像素，吸收角度/缩放量化的误差
 MASK_CACHE_MAX = 64
+PAT_DISTANCE = 40  # px，摸头累计移动多少算一次
 DRAG_THRESHOLD = 6  # px，超过才算拖动
 GRAVITY = 2400.0  # px/s²
 FRAME_MS = 16
@@ -51,7 +52,13 @@ def landing_geometry(
 
 
 class PetWindow(QWidget):
-    quit_requested = Signal()
+    hovered = Signal()  # 鼠标进入（只唤醒）
+    patted = Signal()  # 在头部左右移动，每累计 40px 一次
+    clicked = Signal()  # 按下到松开几乎没动
+    double_clicked = Signal()  # 在对应的 clicked 之后发出
+    drag_started = Signal()
+    drag_finished = Signal()  # 松手后落地时发出
+    menu_requested = Signal(QPoint)  # 全局坐标
 
     def __init__(
         self,
@@ -65,6 +72,7 @@ class PetWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle("Shion")
+        self.setMouseTracking(True)
 
         self._clock = clock
         self._height = height
@@ -75,7 +83,6 @@ class PetWindow(QWidget):
         self.setFixedSize(self._sw + 2 * MARGIN_X, self._sh + MARGIN_TOP + MARGIN_BOTTOM)
 
         self._animator = Animator()
-        self._base_state = "idle"  # 拖动结束后回到的状态
         self._frame = Frame("idle")
         self._mask_cache: dict[tuple, QRegion] = {}
         self._mask_key: tuple | None = None
@@ -86,6 +93,13 @@ class PetWindow(QWidget):
         self._dragging = False
         self._last_drag_x = 0
         self._falling = False
+        self._drag_active = False  # 已发 drag_started、尚未落地
+        self._caught_fall = False  # 这次按下抓住了正在下落的桌宠
+        self._pat_mode = False
+        self._pat_accum = 0.0
+        self._pat_last_x = 0
+        self._moved = False  # 按下后移动超过阈值
+        self._double = False
         self._vy = 0.0
         self._fy = 0.0  # 下落时的浮点 y
         self._fall_floor = 0
@@ -100,6 +114,42 @@ class PetWindow(QWidget):
             self._timer.start()
 
     # ---- 精灵 ----
+    def set_height(self, height: int) -> None:
+        """改显示大小，脚底中心在屏幕上的位置不变。"""
+        if height == self._height:
+            return
+        feet_x = self.x() + self.width() / 2
+        feet_y = self.y() + self.height() - MARGIN_BOTTOM
+        self._height = height
+        self._load_sprites()
+        self.setFixedSize(self._sw + 2 * MARGIN_X, self._sh + MARGIN_TOP + MARGIN_BOTTOM)
+        self.move(round(feet_x - self.width() / 2), round(feet_y - self.height() + MARGIN_BOTTOM))
+        self._mask_cache.clear()
+        self._mask_key = None
+        self._refresh(self._clock())
+
+    @property
+    def sprite_height(self) -> int:
+        return self._height
+
+    def snap_to_floor(self) -> None:
+        """x 限制在屏幕内、脚底贴底边（改大小、恢复存档位置后用）。"""
+        avail = self._screen_avail(self.geometry().center())
+        x, y = landing_geometry(
+            avail, self.width(), self.height(), self.x(), MARGIN_X, MARGIN_BOTTOM
+        )
+        self.move(x, y)
+
+    def head_anchor(self) -> QPoint:
+        """头顶中心（全局坐标），给爱心和提示定位。"""
+        return self.mapToGlobal(QPoint(self.width() // 2, MARGIN_TOP + int(self._sh * 0.08)))
+
+    def _is_head(self, pos: QPoint) -> bool:
+        """鼠标是否在精灵上方 35%（按未变换的精灵坐标）。"""
+        sx = pos.x() - MARGIN_X
+        sy = pos.y() - MARGIN_TOP
+        return 0 <= sx < self._sw and 0 <= sy < self._sh * 0.35
+
     def _load_sprites(self) -> None:
         screen = QGuiApplication.primaryScreen()
         dpr = screen.devicePixelRatio() if screen else 1.0
@@ -120,8 +170,6 @@ class PetWindow(QWidget):
     def set_state(self, name: str) -> None:
         if name not in STATES:
             raise ValueError(f"未知精灵：{name}")
-        if name != "drag":
-            self._base_state = name
         now = self._clock()
         self._animator.set_state(name, now)
         self._refresh(now)
@@ -233,52 +281,95 @@ class PetWindow(QWidget):
             self._fall_step(dt, now)
         self._refresh(now)
 
-    # ---- 鼠标：拖动 ----
+    # ---- 鼠标 ----
+    def enterEvent(self, _e) -> None:
+        self.hovered.emit()
+
+    def _update_hover_cursor(self, pos: QPoint) -> None:
+        if self._is_head(pos):
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.LeftButton:
-            self._stop_fall()
-            self._press_global = e.globalPosition().toPoint()
-            self._grab_offset = self._press_global - self.pos()
-            self._dragging = False
-            e.accept()
+        if e.button() != Qt.LeftButton:
+            return
+        self._caught_fall = self._falling
+        self._stop_fall()
+        self._press_global = e.globalPosition().toPoint()
+        self._grab_offset = self._press_global - self.pos()
+        self._dragging = False
+        self._moved = False
+        self._pat_mode = self._is_head(e.position().toPoint())
+        self._pat_accum = 0.0
+        self._pat_last_x = self._press_global.x()
+        e.accept()
+
+    def mouseDoubleClickEvent(self, e) -> None:
+        self._double = True
+        self.mousePressEvent(e)
 
     def mouseMoveEvent(self, e) -> None:
         if self._press_global is None or not (e.buttons() & Qt.LeftButton):
+            self._update_hover_cursor(e.position().toPoint())
             return
         gp = e.globalPosition().toPoint()
-        if not self._dragging:
+        if not self._moved:
             if (gp - self._press_global).manhattanLength() <= DRAG_THRESHOLD:
+                if self._pat_mode:
+                    self._pat_step(gp)
                 return
+            self._moved = True
+        if self._pat_mode:
+            self._pat_step(gp)
+            return
+        if not self._dragging:
             self._dragging = True
             now = self._clock()
-            self._animator.set_state("drag", now)
             self._animator.set_drag(True)
             self._last_drag_x = self.x()
             self._last_tick = now
-            self._refresh(now)
             self.setCursor(Qt.ClosedHandCursor)
+            if not self._drag_active:
+                self._drag_active = True
+                self.drag_started.emit()
         self.move(gp - self._grab_offset)
+
+    def _pat_step(self, gp: QPoint) -> None:
+        self._pat_accum += abs(gp.x() - self._pat_last_x)
+        self._pat_last_x = gp.x()
+        while self._pat_accum >= PAT_DISTANCE:
+            self._pat_accum -= PAT_DISTANCE
+            self.patted.emit()
 
     def mouseReleaseEvent(self, e) -> None:
         if e.button() != Qt.LeftButton or self._press_global is None:
             return
         was_dragging = self._dragging
+        was_pat = self._pat_mode and self._moved
+        double = self._double
+        caught = self._caught_fall
         self._press_global = None
         self._dragging = False
+        self._pat_mode = False
+        self._double = False
+        self._caught_fall = False
         self._animator.set_drag(False)
-        self.unsetCursor()
+        self._update_hover_cursor(e.position().toPoint())
         now = self._clock()
         if was_dragging:
             self.start_fall()
-        else:
+        elif caught:
+            self.start_fall()  # 抓住下落中的桌宠又松开：继续落
+        elif not was_pat:
             self._animator.squash(now, "click")
             self._refresh(now)
+            self.clicked.emit()
+            if double:
+                self.double_clicked.emit()
 
     def contextMenuEvent(self, e) -> None:
-        # 第 4 步会补全菜单；目前只有退出，方便结束程序
-        menu = QMenu(self)
-        menu.addAction("退出").triggered.connect(self.quit_requested.emit)
-        menu.exec(e.globalPos())
+        self.menu_requested.emit(e.globalPos())
 
     # ---- 下落 ----
     def start_fall(self) -> None:
@@ -304,8 +395,10 @@ class PetWindow(QWidget):
             self._fy = float(self._fall_floor)
             self.move(self.x(), self._fall_floor)
             self._stop_fall()
-            self._animator.set_state(self._base_state, now)
             self._animator.squash(now, "land")
+            if self._drag_active:
+                self._drag_active = False
+                self.drag_finished.emit()
             return
         self.move(self.x(), round(self._fy))
 

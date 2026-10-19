@@ -4,11 +4,16 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QStandardPaths
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
+from shion import state as state_mod
+from shion.controller import PetController
+from shion.effects import HeartOverlay
 from shion.pet_window import PetWindow
 
 log = logging.getLogger("shion")
@@ -41,6 +46,25 @@ class SingleInstance(QObject):
             self._server = None
 
 
+def data_dir() -> Path:
+    """存档和日志目录：%APPDATA%/Shion（环境变量 SHION_DATA_DIR 可覆盖，测试用）。"""
+    override = os.environ.get("SHION_DATA_DIR")
+    if override:
+        return Path(override)
+    return Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+
+
+def setup_logging(directory: Path, debug: bool) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger("shion")
+    root.setLevel(logging.DEBUG if debug else logging.INFO)
+    fh = logging.FileHandler(directory / "shion.log", encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    root.addHandler(fh)
+    if debug:
+        root.addHandler(logging.StreamHandler())
+
+
 def run() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Shion")
@@ -51,11 +75,27 @@ def run() -> int:
         log.info("已有 Shion 在运行，退出")
         return 0
 
-    win = PetWindow()
-    win.quit_requested.connect(app.quit)
-    win.place_default()
+    debug = os.environ.get("SHION_DEBUG") == "1"
+    directory = data_dir()
+    setup_logging(directory, debug)
+    save_path = directory / "state.json"
+
+    now = datetime.now()
+    data = state_mod.load(save_path)
+    scheduler = state_mod.SaveScheduler(save_path, data)
+    config = state_mod.Config.debug() if debug else state_mod.Config()
+    pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty)
+
+    win = PetWindow(height=data.window.get("height", 240))
+    overlay = HeartOverlay()
+    controller = PetController(win, pet_state, scheduler, overlay=overlay, parent=app)
+    controller.quit_requested.connect(app.quit)
+    app.aboutToQuit.connect(scheduler.flush)
+    controller.restore_position()
     win.show()
+    log.info("Shion 启动，存档：%s", save_path)
     code = app.exec()
+    scheduler.flush()
     guard.release()
     return code
 
