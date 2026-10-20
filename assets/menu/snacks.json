@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "cookie",
+      "name": {
+        "zh": "饼干",
+        "en": "Cookie",
+        "ja": "クッキー"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "咔嚓……这块很香。才、才没有一直等你喂呢。",
+            "en": "Crunch… this one smells lovely. I wasn’t waiting for you to feed me, you know.",
+            "ja": "さくっ……いい香り。べ、別に待ってたわけじゃないからね。"
+          }
+        },
+        {
+          "text": {
+            "zh": "碎屑？帮诗音擦一下嘛……就这一次。",
+            "en": "Crumbs? Wipe them off for me… just this once.",
+            "ja": "食べこぼし？詩音の口元、拭いて……今回だけ。"
+          }
+        },
+        {
+          "text": {
+            "zh": "给你留半块……不许笑，是刚好吃不下那么多。",
+            "en": "I saved you half… no laughing. It just happened to be too much for me.",
+            "ja": "半分あげる……笑わないで。ちょうど多かっただけだから。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pudding",
+      "name": {
+        "zh": "布丁",
+        "en": "Pudding",
+        "ja": "プリン"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "软软的……嗯，好吃。你选的，勉强给个满分吧。",
+            "en": "So soft… mm, lovely. Since you chose it, I suppose it gets full marks.",
+            "ja": "やわらかい……うん、おいしい。あなたが選んだなら、満点にしてあげる。"
+          }
+        },
+        {
+          "text": {
+            "zh": "焦糖有一点点苦，不过和你一起吃就刚好。",
+            "en": "The caramel’s a little bitter, but sharing it with you makes it just right.",
+            "ja": "カラメルは少し苦いけど、あなたと一緒ならちょうどいいね。"
+          }
+        },
+        {
+          "text": {
+            "zh": "最后一口了……诗音可没有舍不得。",
+            "en": "Last spoonful… I’m not sad to see it go or anything.",
+            "ja": "最後のひと口……詩音、名残惜しくなんてないから。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "milk_tea",
+      "name": {
+        "zh": "奶茶",
+        "en": "Milk tea",
+        "ja": "ミルクティー"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "甜度刚刚好。你居然记得诗音喜欢什么呀。",
+            "en": "Just sweet enough. You actually remembered what I like.",
+            "ja": "ちょうどいい甘さ。詩音の好み、覚えててくれたんだ。"
+          }
+        },
+        {
+          "text": {
+            "zh": "慢慢喝……你也休息一会儿，别总逞强。",
+            "en": "Let’s sip slowly… take a break too. You don’t have to push yourself so hard.",
+            "ja": "ゆっくり飲もう……あなたも少し休んで。無理ばかりしないでね。"
+          }
+        },
+        {
+          "text": {
+            "zh": "这一口特别香……下次也可以一起喝。只是顺便哦。",
+            "en": "This sip is especially nice… we could share another next time. Just if you happen to be here.",
+            "ja": "このひと口、いい香り……また一緒に飲んでもいいよ。ついでだからね。"
+          }
+        }
+      ]
+    },
+    {
+      "id": "strawberry_cake",
+      "name": {
+        "zh": "草莓蛋糕",
+        "en": "Strawberry cake",
+        "ja": "いちごのケーキ"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "草莓要留到最后……才不是最喜欢，只是想慢慢吃。",
+            "en": "Saving the strawberry for last… it’s not my favourite or anything. I’m just taking my time.",
+            "ja": "いちごは最後に……大好物ってわけじゃないよ。ゆっくり食べたいだけ。"
+          }
+        },
+        {
+          "text": {
+            "zh": "奶油沾到了？不、不许盯着看……",
+            "en": "Cream on my face? D-don’t stare…",
+            "ja": "クリーム、ついてる？ じ、じっと見ないで……"
+          }
+        },
+        {
+          "text": {
+            "zh": "今天也不是什么特别的日子……不过有你在，好像也不错。",
+            "en": "Today isn’t a special occasion… but having you here makes it rather nice.",
+            "ja": "特別な日じゃないけど……あなたがいると、なんだかいい日だね。"
+          }
+        }
+      ]
+    }
+  ],
+  "full_response": {
+    "zh": "撑、撑不下了……",
+    "en": "I-I can’t eat another bite…",
+    "ja": "も、もう食べられない……"
+  }
+}

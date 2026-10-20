@@ -16,7 +16,9 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
 from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior
-from shion.effects import HeartOverlay
+from shion.effects import HeartOverlay, CrumbOverlay, MOUTH_FRACTION
+from shion.dialogue import DialoguePanel
+from shion.menu_content import MenuContent, localized
 from shion.lines import Lines
 from shion.panel import InputPanel, PermissionPanel
 from shion.remote import RemoteHub
@@ -79,6 +81,10 @@ class PetController(QObject):
         self._pause_timed_out = False
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
+        self._dialogue: Optional[DialoguePanel] = None
+        self._crumbs: Optional[CrumbOverlay] = None
+        self.menu_content = MenuContent()
+        self._autostart = autostart
         self._now_fn = now_fn
         self._say_fn = say or self._bubble_say
         self._pat_session = PatSession()
@@ -145,7 +151,8 @@ class PetController(QObject):
         action = self._idle.step(
             self.window.monotonic_time(), self.state.can_idle(now)
             and not self.window.motion_active and not self.window.is_falling
-            and not self.window.is_pressed and not self._menu_open,
+            and not self.window.is_pressed and not self._menu_open
+            and not (self._dialogue is not None and self._dialogue.isVisible()),
             self.state.save.activity_level,
         )
         if action == "turn":
@@ -162,6 +169,11 @@ class PetController(QObject):
         elif action == "talk":
             self.say_key("idle_talk")
         self.scheduler.poll(now)
+        if self._crumbs is not None and self._crumbs.isVisible():
+            self._crumbs.follow(self._mouth_anchor())
+        if self._dialogue is not None and self._dialogue.isVisible() and self._dialogue.busy != self.state.eating:
+            self._dialogue.busy = self.state.eating
+            self._dialogue.refresh()
 
     def react(self, reactions: list[Reaction], *, category: str | None = None) -> None:
         for r in reactions:
@@ -220,6 +232,10 @@ class PetController(QObject):
             self.bubble.follow(self.window.body_rect())
         if self._perm_panel is not None and self._perm_panel.isVisible():
             self._perm_panel.follow(self.window.body_rect())
+        if self._dialogue is not None and self._dialogue.isVisible():
+            self._dialogue.follow(self.window.body_rect())
+        if self._crumbs is not None and self._crumbs.isVisible():
+            self._crumbs.follow(self._mouth_anchor())
 
     # ------------------------------------------------------------ 手势
     def _on_pressed(self) -> None:
@@ -334,6 +350,8 @@ class PetController(QObject):
         if self.bubble is not None:
             self.bubble.set_font_fallback(self.lines.font_fallback)
             self.bubble.dismiss()
+        if self._dialogue is not None and self._dialogue.isVisible():
+            self._dialogue.refresh()
         self.scheduler.mark_dirty(self._now())
 
     def set_privacy(self, private: bool) -> None:
@@ -484,6 +502,8 @@ class PetController(QObject):
             if panel is not None and panel.isVisible():
                 panel.hide_request()
             return
+        if self._dialogue is not None:
+            self._dialogue.hide()
         if panel is None:
             family = self.bubble.font_family if self.bubble is not None else "Consolas"
             panel = self._perm_panel = PermissionPanel(family, clock=self.window.monotonic_time)
@@ -546,16 +566,22 @@ class PetController(QObject):
 
     def dispose(self) -> None:
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
-        for panel in (self._perm_panel, self._input_panel):
+        self.state.cancel_snack()
+        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs):
             if panel is not None:
                 panel.hide()
                 panel.setParent(None)
                 panel.deleteLater()
         self._perm_panel = self._input_panel = None
+        self._dialogue = self._crumbs = None
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:
         self.window.stop_motion()
+        self.state.cancel_snack()
+        for panel in (self._dialogue, self._crumbs):
+            if panel is not None:
+                panel.hide()
         if self._perm_panel is not None:
             self._perm_panel.hide_request()
         try:
@@ -594,9 +620,55 @@ class PetController(QObject):
         self.say(text)
 
     # ------------------------------------------------------------ 菜单
+    def _mouth_anchor(self) -> QPoint:
+        x, y, w, h = self.window.body_rect()
+        return QPoint(x + w // 2, y + round(h * MOUTH_FRACTION))
+
+    def open_dialogue(self) -> None:
+        if self.hub.permissions.pending():
+            return
+        self.window.stop_motion()
+        self._idle.next_at = None
+        if self._dialogue is None:
+            family = self.bubble.font_family if self.bubble is not None else "Consolas"
+            self._dialogue = DialoguePanel(self.menu_content, self.lines, family)
+            self._dialogue.chosen.connect(self.choose_dialogue)
+        self._dialogue.open(self.window.body_rect(), busy=self.state.eating)
+
+    def choose_dialogue(self, kind: str, ident: str) -> None:
+        if kind not in ("snacks", "talks"):
+            return
+        item = self.menu_content.find(kind, ident)
+        if item is None:
+            return
+        now = self._now()
+        if kind == "snacks":
+            if self.state.eating:
+                return
+            if not self.state.start_snack(now):
+                self.state.menu_talk(now)
+                self.say_text(localized(self.menu_content.full, self.lines.lang),
+                              priority=Priority.MEDIUM, category="snack_full")
+                self.sync()
+                return
+            self.window.stop_motion()
+            if self._crumbs is None:
+                self._crumbs = CrumbOverlay(clock=self.window.monotonic_time, autostart=self._autostart)
+            self._crumbs.start(self._mouth_anchor(), self.state.save.window["height"],
+                               self.state.config.eating_for.total_seconds())
+        response = item.responses[0]
+        if not self.state.save.bubble_muted and self._speech.allows(
+                self.window.monotonic_time(), Priority.MEDIUM, "dialogue"):
+            response = self.menu_content.pick(kind, item, self.lines.lang)
+            self.say_text(localized(response.text, self.lines.lang), priority=Priority.MEDIUM, category="dialogue")
+        if kind == "talks":
+            self.state.menu_talk(now, response.expression, sleep=item.action == "sleep")
+        self.sync()
+
     def build_menu(self) -> QMenu:
         menu = QMenu()
         ui = self.lines.ui
+        menu.addAction(ui("menu_talk")).triggered.connect(self.open_dialogue)
         remote_menu = menu.addMenu(ui("menu_remote"))
         if self.state.paused:
             remote_menu.addAction(ui("menu_resume")).triggered.connect(lambda: self.resume_work())

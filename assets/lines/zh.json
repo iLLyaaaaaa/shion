@@ -154,6 +154,13 @@
     "act_error": "出错了：{target}",
     "act_done": "做完了",
     "act_start": "开始了新对话",
-    "act_error_plain": "出错了"
+    "act_error_plain": "出错了",
+    "menu_talk": "对话",
+    "dialogue_snacks": "喂零食",
+    "dialogue_back": "返回",
+    "dialogue_close": "关闭",
+    "dialogue_hint": "点击此窗口后可用数字键选择；Esc 关闭",
+    "dialogue_unavailable": "内容暂不可用",
+    "dialogue_eating": "正在吃零食……"
   }
 }

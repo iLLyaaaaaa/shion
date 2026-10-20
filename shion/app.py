@@ -228,11 +228,41 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
     app = QApplication.instance() or QApplication(sys.argv)
     lines = Lines(lang)
     ui = lines.ui
-    family = BubbleWindow().font_family
+    font_bubble = BubbleWindow()
+    font_bubble.set_font_fallback(lines.font_fallback)
+    family = font_bubble.font_family
     body = (400, 400, 100, 100)
-    if kind == "input":
+    if kind == "eating":
+        from shion.effects import CrumbOverlay, MOUTH_FRACTION
+        win = PetWindow(autostart=False)
+        win.set_state("happy", animate=False)
+        img = win.render_frame()
+        t = [100.0]
+        panel = CrumbOverlay(clock=lambda: t[0], autostart=False)
+        panel.start(win.head_anchor(), 200)
+        for elapsed in (0.16, 0.32, 0.35):
+            t[0] = 100.0 + elapsed
+            panel.tick()
+        crumbs = QImage(panel.size(), QImage.Format_ARGB32_Premultiplied)
+        crumbs.fill(0)
+        panel.render(crumbs)
+        p = QPainter(img)
+        sw, sh = win.sprite_size
+        p.drawImage(MARGIN_X + sw // 2 - panel.SIZE // 2, MARGIN_TOP + round(sh * MOUTH_FRACTION) - 40, crumbs)
+        p.end()
+        win.close()
+    elif kind in ("dialogue", "snacks"):
+        from shion.dialogue import DialoguePanel
+        from shion.menu_content import MenuContent
+        panel = DialoguePanel(MenuContent(), lines, family)
+        panel.open(body)
+        if kind == "snacks":
+            panel._choose("page", "snacks")
+        img = panel.grab().toImage()
+    elif kind == "input":
         panel = InputPanel(family)
         panel.open(ui("panel_bad_title"), ui("panel_send"), ui("panel_cancel"), body)
+        img = panel.grab().toImage()
     else:
         t = [0.0]
         panel = PermissionPanel(family, clock=lambda: t[0])
@@ -247,7 +277,8 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
             panel._toggle.click()
         t[0] += ARM_DELAY + 0.1
         panel.refresh_enabled()
-    img = panel.grab().toImage()
+        img = panel.grab().toImage()
+    font_bubble.close()
     panel.hide()
     panel.setParent(None)
     panel.deleteLater()  # 在这里（GUI 线程）立刻销毁，别留给别的线程里的垃圾回收

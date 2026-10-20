@@ -155,6 +155,13 @@
     "act_error": "エラー：{target}",
     "act_done": "完了",
     "act_start": "セッション開始",
-    "act_error_plain": "エラー"
+    "act_error_plain": "エラー",
+    "menu_talk": "お話",
+    "dialogue_snacks": "おやつをあげる",
+    "dialogue_back": "戻る",
+    "dialogue_close": "閉じる",
+    "dialogue_hint": "このウィンドウをクリック後、数字キーで選択・Escで閉じる",
+    "dialogue_unavailable": "コンテンツを読み込めません",
+    "dialogue_eating": "おやつを食べているよ……"
   }
 }

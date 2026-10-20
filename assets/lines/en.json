@@ -153,6 +153,13 @@
     "act_error": "Error: {target}",
     "act_done": "Finished",
     "act_start": "Started a session",
-    "act_error_plain": "Error"
+    "act_error_plain": "Error",
+    "menu_talk": "Talk",
+    "dialogue_snacks": "Give a snack",
+    "dialogue_back": "Back",
+    "dialogue_close": "Close",
+    "dialogue_hint": "Click this window to use number keys; Esc closes",
+    "dialogue_unavailable": "Content unavailable",
+    "dialogue_eating": "Enjoying a snack…"
   }
 }

@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "headpat",
+      "name": {
+        "zh": "摸摸头",
+        "en": "Headpat",
+        "ja": "なでなで"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "只准摸一会儿哦……嗯，再一会儿也行。",
+            "en": "Just for a moment, okay… mm, a little longer is fine too.",
+            "ja": "少しだけだよ……うん、もう少しでもいいけど。"
+          },
+          "expression": "happy"
+        },
+        {
+          "text": {
+            "zh": "头发会乱的……不过，是你的话就算了。",
+            "en": "You’ll mess up my hair… but since it’s you, I’ll let it slide.",
+            "ja": "髪が乱れちゃう……でも、あなたなら許してあげる。"
+          },
+          "expression": "happy"
+        },
+        {
+          "text": {
+            "zh": "诗音又不是小孩子……别停呀。",
+            "en": "I’m not a little kid, you know… don’t stop yet.",
+            "ja": "詩音、子どもじゃないんだから……まだやめないで。"
+          },
+          "expression": "happy"
+        }
+      ]
+    },
+    {
+      "id": "goodnight",
+      "name": {
+        "zh": "晚安",
+        "en": "Good night",
+        "ja": "おやすみ"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "晚安。你也早点睡……诗音可不想明天看见你打哈欠。",
+            "en": "Good night. You should sleep soon too… I don’t want to see you yawning tomorrow.",
+            "ja": "おやすみ。あなたも早く寝てね……明日、あくびばかりは嫌だから。"
+          }
+        },
+        {
+          "text": {
+            "zh": "那诗音先睡啦……明天也要来哦。",
+            "en": "Then I’ll turn in… come see me tomorrow too, okay?",
+            "ja": "じゃあ、詩音は先に寝るね……明日も会いに来てよ。"
+          }
+        },
+        {
+          "text": {
+            "zh": "被子盖好，别着凉……只是顺口提醒你。晚安。",
+            "en": "Keep your blanket on, don’t catch a chill… just a passing reminder. Good night.",
+            "ja": "布団、ちゃんとかけてね……ついでに言っただけ。おやすみ。"
+          }
+        }
+      ],
+      "action": "sleep"
+    },
+    {
+      "id": "well_done",
+      "name": {
+        "zh": "今天辛苦了",
+        "en": "You worked hard today",
+        "ja": "今日もお疲れさま"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "你也是。今天做得很好……诗音一直有看到哦。",
+            "en": "You too. You did well today… I noticed, you know.",
+            "ja": "あなたもね。今日はよく頑張ったよ……詩音、ちゃんと見てたから。"
+          },
+          "expression": "proud"
+        },
+        {
+          "text": {
+            "zh": "终于肯休息了？坐一会儿吧，诗音陪着你。",
+            "en": "Finally taking a break? Sit for a while. I’ll stay with you.",
+            "ja": "やっと休む気になった？ 少し座って。詩音がそばにいるから。"
+          },
+          "expression": "proud"
+        },
+        {
+          "text": {
+            "zh": "辛苦啦。不是每件事都要今天做完……明天再一起努力。",
+            "en": "Good work. You don’t have to finish everything today… we can try again together tomorrow.",
+            "ja": "お疲れさま。全部、今日終わらせなくてもいいよ……明日また一緒に頑張ろう。"
+          },
+          "expression": "proud"
+        }
+      ]
+    },
+    {
+      "id": "stay_with_me",
+      "name": {
+        "zh": "陪我一下",
+        "en": "Stay with me",
+        "ja": "少しそばにいて"
+      },
+      "responses": [
+        {
+          "text": {
+            "zh": "嗯，诗音在呢……才不是特意等你的。",
+            "en": "Mm, I’m here… I wasn’t waiting especially for you or anything.",
+            "ja": "うん、詩音はここにいるよ……あなたを待ってたわけじゃないけど。"
+          },
+          "expression": "happy"
+        },
+        {
+          "text": {
+            "zh": "不用急着说话。就这样待一会儿，也挺好的。",
+            "en": "No need to say anything right away. Staying like this for a while is nice too.",
+            "ja": "無理に話さなくていいよ。こうして一緒にいるだけでも、いいから。"
+          },
+          "expression": "happy"
+        },
+        {
+          "text": {
+            "zh": "今天有点累吗？靠近一点吧……只许你一个人哦。",
+            "en": "A little tired today? Come closer… this is just for you, okay?",
+            "ja": "今日は少し疲れた？ もう少し近くにおいで……あなただけだよ。"
+          },
+          "expression": "happy"
+        }
+      ]
+    }
+  ]
+}

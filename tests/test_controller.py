@@ -195,7 +195,7 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["工作遥控", "表情", "活跃度", "动作", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
@@ -574,8 +574,8 @@ def test_switch_language_applies_immediately_and_saves(env):
     find_action(find_action(menu, "语言").menu(), "English").trigger()
     assert env.data.language == "en"
     menu2 = env.ctl.build_menu()
-    assert [a.text() for a in menu2.actions() if not a.isSeparator()][:3] == [
-        "Work remote", "Expression", "Activity",
+    assert [a.text() for a in menu2.actions() if not a.isSeparator()][:4] == [
+        "Talk", "Work remote", "Expression", "Activity",
     ]
     assert "Together for 0m" in env.ctl.status_text(T0)
     assert "Pats today: 0" in env.ctl.status_text(T0)

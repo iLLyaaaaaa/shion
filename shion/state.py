@@ -21,7 +21,7 @@ log = logging.getLogger("shion.state")
 TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
 EXPRESSIONS = ("happy", "proud", "stop", "dizzy", "working", "done", "sleep", "idle", "neglect2")
 ACTIVITY_LEVELS = ("quiet", "normal", "lively")
-SAVE_VERSION = 3  # v1 的 pending_praise 混有摸头记录，升级时丢弃；v2 的 pending_praise 迁移成反馈队列里的“做得好”
+SAVE_VERSION = 4  # v4 增加独立的每日喂食统计；保留 v1/v2 的反馈迁移
 FEEDBACK_MAX = 5  # 反馈队列最多几条，满了丢最早的
 FEEDBACK_TEXT_MAX = 200
 REMOTE_DEFAULTS = {"pause_timeout": 1800, "permission_timeout": 120}  # 秒
@@ -68,6 +68,9 @@ class Config:
     idle_expression_for: timedelta = timedelta(seconds=2)
     pat_affection: int = 1
     praise_affection: int = 3
+    snack_affection: int = 2
+    snack_limit: int = 5
+    eating_for: timedelta = timedelta(seconds=2)
 
     @classmethod
     def debug(cls) -> "Config":
@@ -144,6 +147,7 @@ class SaveData:
     language: Optional[str] = None  # None = 还没选过，首次启动时跟随系统语言
     fixed_expression: Optional[str] = None
     activity_level: str = "normal"
+    snacks: dict = field(default_factory=lambda: {"date": "", "count": 0})
 
     def to_dict(self) -> dict:
         return {
@@ -161,6 +165,7 @@ class SaveData:
             "language": self.language,
             "fixed_expression": self.fixed_expression,
             "activity_level": self.activity_level,
+            "snacks": dict(self.snacks),
         }
 
     @classmethod
@@ -190,6 +195,11 @@ class SaveData:
         d.fixed_expression = expr if expr in EXPRESSIONS else None
         level = raw.get("activity_level")
         d.activity_level = level if level in ACTIVITY_LEVELS else "normal"
+        snacks = raw.get("snacks")
+        if isinstance(snacks, dict):
+            date = snacks.get("date")
+            d.snacks = {"date": date if isinstance(date, str) else "",
+                        "count": min(_int(snacks.get("count"), 0), 5)}
 
         stats = raw.get("stats")
         if isinstance(stats, dict):
@@ -328,6 +338,8 @@ class PetState:
         self._idle_expression: Optional[tuple[str, datetime]] = None
         self._last_logged: Optional[str] = None
         self.paused = False  # 用户在诗音上点了“暂停”（不存档）
+        self._menu_sleep = False
+        self._eating_until: Optional[datetime] = None
         if self.save.schema_version < SAVE_VERSION:
             self.save.schema_version = SAVE_VERSION
             self._changed(now)
@@ -350,6 +362,8 @@ class PetState:
             return self.save.fixed_expression
         if self._manual and now < self._manual[1]:
             return self._manual[0]
+        if self._eating_until is not None:
+            return "happy"
         if self._temp and now < self._temp[1]:
             return self._temp[0]
         if self.paused:
@@ -368,6 +382,7 @@ class PetState:
     def can_idle(self, now: datetime) -> bool:
         return (
             not self._dragging and not self.is_working(now)
+            and self._eating_until is None
             and not self.save.fixed_expression and not self._is_asleep(now)
             and not (self._manual and now < self._manual[1])
             and not (self._temp and now < self._temp[1])
@@ -405,6 +420,12 @@ class PetState:
     def tick(self, now: datetime) -> list[Reaction]:
         """定时调用：清理到期的临时状态和 working，日期翻天时清零统计；返回“催你回来”等主动反应。"""
         self._roll_stats(now)
+        if self._eating_until is not None and now >= self._eating_until:
+            self._eating_until = None
+            if self.save.snacks["count"] < self.config.snack_limit:
+                self.save.snacks["count"] += 1
+                self.save.affection += self.config.snack_affection
+                self._changed(now)
         if self._temp and now >= self._temp[1]:
             self._temp = None
         if self._working_until and now >= self._working_until:
@@ -429,6 +450,31 @@ class PetState:
         reactions = self._touch(now, attend=False)
         self._log_state(now)
         return reactions
+
+    @property
+    def eating(self) -> bool:
+        return self._eating_until is not None
+
+    def start_snack(self, now: datetime) -> bool:
+        self._roll_stats(now)
+        if self.eating or self.save.snacks["count"] >= self.config.snack_limit:
+            return False
+        self._touch(now, attend=True)  # 回应由菜单提供，不另说唤醒台词
+        self._eating_until = now + self.config.eating_for
+        return True
+
+    def cancel_snack(self) -> None:
+        self._eating_until = None
+
+    def menu_talk(self, now: datetime, expression: Optional[str] = None, sleep: bool = False) -> None:
+        self._touch(now, attend=True)
+        if sleep:
+            self._menu_sleep = True
+            self._temp = None
+        elif expression in TEMP_STATES:
+            self._set_temp(expression, now)
+        elif expression in ("idle", "neglect2"):
+            self._temp = (expression, now + self.config.react_for)
 
     def drag_start(self, now: datetime) -> list[Reaction]:
         reactions = self._touch(now, attend=True)
@@ -565,6 +611,7 @@ class PetState:
         """任何交互的公共入口：翻日、唤醒、刷新“被理会”时间。"""
         self._roll_stats(now)
         was_asleep = self._is_asleep(now)
+        self._menu_sleep = False
         prev_level = self._neglect_level(now)
 
         self._last_activity = now
@@ -584,6 +631,8 @@ class PetState:
         return []
 
     def _is_asleep(self, now: datetime) -> bool:
+        if self._menu_sleep:
+            return True
         if now - self._last_activity >= self.config.sleep_idle:
             return True
         return self._in_night(now) and self._woken_date != now.date()
@@ -609,6 +658,9 @@ class PetState:
 
     def _roll_stats(self, now: datetime) -> None:
         today = now.date().isoformat()
+        if self.save.snacks.get("date") != today:
+            self.save.snacks = {"date": today, "count": 0}
+            self._changed(now)
         if self.save.stats.get("date") != today:
             self.save.stats = {"date": today, "pats": 0, "claude_tasks": 0}
             self._changed(now)

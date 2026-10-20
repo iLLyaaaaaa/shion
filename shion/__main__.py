@@ -17,8 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
     p.add_argument("--mirror", action="store_true", help="截图用：水平镜像，脚底锚点不变")
-    p.add_argument("--panel", choices=["permission", "input"], default=None,
-                   help="截图用：只画遥控面板（permission = 同意/否决，input = 有问题输入框）")
+    p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating"], default=None,
+                   help="截图用：授权、反馈、对话首页、零食列表或吃零食效果")
     p.add_argument("--panel-text", default="git status", help="截图用：同意/否决面板里显示的内容")
     p.add_argument("--panel-more", type=int, default=0, help="截图用：“还有 N 个”")
     p.add_argument("--panel-expand", action="store_true", help="截图用：展开长内容")

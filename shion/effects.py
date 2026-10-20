@@ -22,6 +22,7 @@ HEART_SPREAD = 25.0
 HEART_DRIFT = 15.0
 HEART_SCALE = (0.8, 1.2)
 ORANGE = QColor("#F58236")
+MOUTH_FRACTION = 0.45
 
 
 @dataclass
@@ -147,3 +148,75 @@ class HeartOverlay(QWidget):
             p.setPen(Qt.NoPen)
             p.drawPath(heart_path(HEART_SIZE * scale))
             p.restore()
+
+
+class Crumbs:
+    """有上限的碎屑，掉帧时不补发；时间全部由调用方传入。"""
+
+    LIFETIME = 0.65
+    INTERVAL = 0.16
+    MAX = 18
+
+    def __init__(self, rng=None):
+        self._rng = rng or random.Random()
+        self._ps = []
+        self._until = 0.0
+        self._last = -float("inf")
+
+    def start(self, now: float, duration: float = 2.0) -> None:
+        self._ps.clear()
+        self._until = now + duration
+        self._last = -float("inf")
+        self.update(now)
+
+    def update(self, now: float) -> None:
+        self._ps = [p for p in self._ps if now - p[0] < self.LIFETIME]
+        if now < self._until and now - self._last >= self.INTERVAL:
+            self._last = now
+            for _ in range(min(3, self.MAX - len(self._ps))):
+                self._ps.append((now, self._rng.uniform(-24, 24), self._rng.uniform(3, 5)))
+
+    @property
+    def active(self) -> bool:
+        return bool(self._ps)
+
+    def items(self, now: float):
+        result = []
+        for born, drift, size in self._ps:
+            t = (now - born) / self.LIFETIME
+            if 0 <= t < 1:
+                result.append((drift * ease_out(t), 50 * t * t, size, 1 - t))
+        return result
+
+
+class CrumbOverlay(HeartOverlay):
+    """嘴边碎屑；沿用透明、不抢焦点和点穿的窗口设置。"""
+
+    def __init__(self, clock=time.perf_counter, autostart=True):
+        super().__init__(clock=clock, autostart=autostart)
+        self._particles = Crumbs()
+        self._scale = 1.0
+
+    def start(self, anchor: QPoint, height: int, duration: float = 2.0) -> None:
+        self._scale = height / 200
+        self._particles.start(self._clock(), duration)
+        self.follow(anchor)
+        self.show()
+        if self._autostart:
+            self._timer.start()
+        self.update()
+
+    def follow(self, anchor: QPoint) -> None:
+        self._anchor = anchor
+        self.move(anchor.x() - self.SIZE // 2, anchor.y() - 40)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        for x, y, size, alpha in self._particles.items(self._clock()):
+            color = QColor("#E5B77B")
+            color.setAlphaF(alpha)
+            p.setBrush(color)
+            p.drawEllipse(QPointF(self.SIZE / 2 + x * self._scale, 40 + y * self._scale),
+                          size * self._scale / 2, size * self._scale / 2)
