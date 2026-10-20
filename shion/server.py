@@ -23,6 +23,7 @@ MAX_BODY = 4096
 MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/参数
 REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+INTERNAL_STOPPED = "work_stopped"  # 只由服务线程在 hook 取走“停下”时发给界面，外部不能伪造
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -120,9 +121,15 @@ class _Handler(BaseHTTPRequestHandler):
         if detail is not None and not isinstance(detail, str):
             self._send(400, {"error": "detail 必须是字符串或 null"})
             return
+        if etype == INTERNAL_STOPPED:
+            self._send(400, {"error": "内部事件，不能从外部发送"})
+            return
         if etype == "prompt":
             # 用户在 CC 里说话就解除暂停；在服务线程里直接做，紧接着的工具调用不会再被误挡
             self.server.hub.resume()
+        if etype in ("prompt", "stop"):
+            # 新一轮开始或这一轮已经结束：没用上的“停下”作废，不能挡住下一轮
+            self.server.hub.cancel_stop()
         try:
             self.server.on_event(etype, detail)
         except Exception:
@@ -145,14 +152,21 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, {"text": text})
 
     def _post_pause_wait(self):
-        """长轮询：暂停中最多等 wait 秒。只读，不能借此改变暂停状态。"""
+        """检查点长轮询：暂停中最多等 wait 秒；有“停下”请求时取走它。
+        不能借此开始暂停或请求停下，只能等待和取走用户在诗音上做的决定。"""
         data = self._read_json()
         if data is None:
             return
         wait = data.get("wait", 0) if isinstance(data, dict) else 0
         if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait):
             wait = 0
-        self._send(200, {"paused": self.server.hub.wait_while_paused(wait)})
+        paused, stop = self.server.hub.wait_gate(wait)
+        if stop:
+            try:
+                self.server.on_event(INTERNAL_STOPPED, None)
+            except Exception:
+                log.exception("on_event 回调出错")
+        self._send(200, {"paused": paused, "stop": stop})
 
 
     # ---- 同意 / 否决 ----

@@ -44,6 +44,7 @@ def test_merge_into_empty():
     assert out["hooks"]["PreToolUse"][0]["matcher"] == "*"
     assert out["hooks"]["PostToolUse"][0]["matcher"] == "*"
     assert out["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == 1900  # 比暂停上限长
+    assert out["hooks"]["PostToolUse"][0]["hooks"][0]["timeout"] == 1900  # PostToolUse 也是暂停检查点
     assert out["hooks"]["SessionStart"][0]["hooks"][0]["timeout"] == 15
 
 

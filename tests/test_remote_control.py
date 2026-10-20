@@ -58,14 +58,14 @@ def server():
 
 def test_pause_wait_reports_state(server):
     srv, _, hub = server
-    assert post(srv, "/pause/wait", {"wait": 0}) == (200, {"paused": False})
+    assert post(srv, "/pause/wait", {"wait": 0}) == (200, {"paused": False, "stop": False})
     hub.pause()
-    assert post(srv, "/pause/wait", {"wait": 0}) == (200, {"paused": True})
+    assert post(srv, "/pause/wait", {"wait": 0}) == (200, {"paused": True, "stop": False})
     t0 = time.monotonic()
-    assert post(srv, "/pause/wait", {"wait": 0.3}) == (200, {"paused": True})
+    assert post(srv, "/pause/wait", {"wait": 0.3}) == (200, {"paused": True, "stop": False})
     assert time.monotonic() - t0 >= 0.25
     threading.Timer(0.2, hub.resume).start()
-    assert post(srv, "/pause/wait", {"wait": 10}) == (200, {"paused": False})
+    assert post(srv, "/pause/wait", {"wait": 10}) == (200, {"paused": False, "stop": False})
 
 
 @pytest.mark.parametrize("wait", ["10", None, True, [], {}, float("nan"), float("inf")])
@@ -73,7 +73,7 @@ def test_pause_wait_ignores_bad_wait_values(server, wait):
     srv, _, hub = server
     hub.pause()
     t0 = time.monotonic()
-    assert post(srv, "/pause/wait", {"wait": wait}) == (200, {"paused": True})
+    assert post(srv, "/pause/wait", {"wait": wait}) == (200, {"paused": True, "stop": False})
     assert time.monotonic() - t0 < 3  # 坏值当 0 处理，不会挂住
 
 
@@ -213,12 +213,12 @@ def test_muted_pause_shows_no_bubble_but_still_pauses(pet):
 def test_menu_offers_pause_or_resume(pet):
     menu = pet.ctl.build_menu()
     remote = find_action(menu, "工作遥控").menu()
-    assert [a.text() for a in remote.actions()] == ["暂停工作", "做得好", "有问题……"]
+    assert [a.text() for a in remote.actions()] == ["停下工作", "暂停工作", "做得好", "有问题……"]
     find_action(remote, "暂停工作").trigger()
     assert pet.ctl.hub.is_paused
     menu2 = pet.ctl.build_menu()
     remote2 = find_action(menu2, "工作遥控").menu()
-    assert [a.text() for a in remote2.actions()] == ["继续工作", "做得好", "有问题……"]
+    assert [a.text() for a in remote2.actions()] == ["停下工作", "继续工作", "做得好", "有问题……"]
     find_action(remote2, "继续工作").trigger()
     assert not pet.ctl.hub.is_paused
 

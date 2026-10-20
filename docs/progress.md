@@ -3,8 +3,9 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-20 工作遥控改进已实现**：暂停检查点从 PreToolUse 扩到 PreToolUse + PostToolUse；新增“停下”（`continue: false`，只生效一次）。完整测试 **723 passed、1 skipped**，真实 `claude -p` 四个场景通过；菜单、气泡和真实 CC 界面表现 **待用户验收**，见下方本轮记录。用户已授权记录待验收后 commit，不 push。
 - **2026-10-20 动作更新已实现**：可变帧数组、八帧走路（60px/s、110ms/帧）、四阶段跳跃（最高 45px）、拖动变速循环和 SHION_DEBUG 实际绘制 FPS，见下方本轮记录。完整测试 **702 passed、1 skipped**，原生 Windows 150% 专项 **70 passed**；动态观感、真实桌面点穿与 FPS 显示 **待用户验收**。用户已授权记录待验收后 commit，不等待亲眼验收，不 push；不推进好感度或内容包开发。
-- **2026-10-20 v0.4 对话菜单已实现**：三语 JSON 零食与预设、点击后数字键选择、每日五次喂食额度、happy + 碎屑、晚安睡眠，见本轮记录。真实桌面焦点和动态观感 **待用户验收**；用户已授权记录后 commit，不等待亲眼验收、不 push。下一开发步骤为 v0.5 内容包。
+- **2026-10-20 v0.4 对话菜单已实现**：三语 JSON 零食与预设、点击后数字键选择、每日五次喂食额度、happy + 碎屑、晚安睡眠，见本轮记录。真实桌面焦点和动态观感 **待用户验收**；用户已授权记录后 commit，不等待亲眼验收、不 push。下一开发步骤：**先由用户集中真机验收 v0.2.1～v0.4**，然后 v0.4.1 好感度系统，再 v0.5 内容包。
 - **2026-10-20 计划确认与完成提醒修正已实现**：ExitPlanMode 不再由诗音接管，只发高优先级三语计划提醒并跳一下；Stop 不再发送/显示回复内容。界面三语文字均不含“Claude”，hooks 备份已忽略。真实 CC 计划确认、三语气泡及跳跃观感 **待用户验收**，见下方本轮清单；用户明确授权先记录待验收再 commit，不 push。
 - **v0.2.1 及此前的真机验收已通过**：依据用户 2026-10-19 明确反馈，除本次列出的交互问题外，旧清单均已验收；各历史节已更新标记。下方历史实现记录中的旧戳规则/摸头表扬以本次规则为准。
 - **新版行走分帧素材已提交，爱心参数已调整**，验证结果见 2026-10-20 节；行走/跳跃、气泡仲裁与爱心的动态观感和真实桌面点穿仍 **待用户验收**。用户明确授权补测试、更新记录后 commit，不等待本轮真机验收；不 push。
@@ -12,6 +13,29 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。本次未安装/卸载 hooks。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-20：工作遥控改进（PostToolUse 检查点 + 停下）
+- **官方字段确认**（code.claude.com/docs/en/hooks 通用输出字段）：`continue`（默认 true，false 时 hook 运行后 Claude 完全停止处理，优先于事件专属决定）、`stopReason`（continue 为 false 时显示给用户，留在对话里）；文档写明对 PreToolUse 和 PostToolUse 都有效。不模拟按键、不切窗口。
+- **RemoteHub**：新增 `request_stop / cancel_stop / stop_requested` 和 `wait_gate(seconds) -> (paused, stop)`；停下在 `wait_gate` 里被原子取走，并行 hook 只有一个能拿到。停下不改暂停标记。
+- **服务器**：`/pause/wait` 返回 `{"paused", "stop"}`；取走停下时服务线程发内部事件 `work_stopped`（`/event` 里伪造它返回 400）。`prompt` 和 `stop` 事件作废没用上的停下。HTTP 仍然无法开始暂停或请求停下（有测试）。
+- **hook**：`pause_gate` 返回 `None` / `("stop", 理由)` / `("timeout", 理由)`。PostToolUse 变成检查点：先过检查点再取反馈；停下或暂停超时输出 `{"continue": false, "stopReason": …}`，停下时反馈留给下一次 UserPromptSubmit。PreToolUse 停下输出 `continue: false` + `permissionDecision: deny`（双保险，不发 working），暂停超时保持原来的 deny。`stopReason` 按存档语言取 `ui.hook_stop`（`deny_message` 抽成通用的 `ui_text`）。PostToolUse 总时限改为暂停上限 + 30 秒。
+- **hooks 配置**：`PostToolUse` 超时 5 → 1900 秒；**项目级 `.claude/settings.local.json` 已重新安装**（备份 `settings.local.json.shion-backup-20261020-125451-616079` 在同目录，未提交）；用户级仍没动。**正在运行的诗音要重启一次**才会用上新服务器（旧服务器不返回 `stop`，新 hook 照常按暂停处理，不会出错）。
+- **界面**：工作遥控子菜单第一项“停下工作”；请求后菜单显示灰色“正在停下……”，气泡“好，下一个空当就停下～”；生效后常驻气泡“已经停下了，在 CC 里说一声就能继续”，直到 CC 里说话或在诗音上点暂停/继续。三语（menu_stop / menu_stop_pending / stop_requested / work_stopped / hook_stop）均已补齐，不含“Claude”。
+- **测试**：新增 `tests/test_stop_work.py` 21 项（hub 只取一次/并行只一个/暂停中被唤醒，服务器字段与防伪造，hook 子进程 Pre/Post 停下、Post 暂停等待后才送反馈、Post 暂停超时、英文理由、连不上放行，控制器菜单/气泡/静音）；改了旧测试的 `/pause/wait` 返回值、菜单顺序、`pause_gate` 返回值、安装超时。完整 `.venv\Scripts\python -m pytest -q` **723 passed、1 skipped**。
+- **真实 `claude -p`（2.1.289，haiku，隔离端口和数据目录，假桌宠 = ShionServer + RemoteHub，脚本在会话 scratchpad）**，任务“逐个读 a/b/c.txt 再写 SUMMARY”：
+  1. 读 c.txt 时点停下 → c.txt 的 PostToolUse 返回 continue:false，**没有写总结**，0.6 秒后 CC 退出；
+  2. 读 a.txt 时点停下 → 只读了 a.txt，b/c 都没读；
+  3. 第一次工具调用前点停下 → PreToolUse 拦住，Read 没执行（tool_result 是 “PreToolUse:Read hook error: 用户通过诗音让这一轮工作停下……”），没发 working；
+  4. 读 c.txt 时点暂停、8 秒后继续 → c.txt 的 PostToolUse 原地等了 8 秒（14.5s→22.2s），继续后才写出 SUMMARY。
+- **踩坑**：①`continue: false` 结束这一轮后**不触发 Stop hook**，所以不会误说“做完啦”，也不计完成任务；②`-p` 的 stream-json 里看不到 stopReason（交互界面应该会显示，待验收）；③haiku 偶尔不按指令只读一个文件就结束，重跑即可，与 hook 无关；④在 PowerShell 里跑 pytest 时 `test_install_hooks.py` 有个用例会因子进程输出按 GBK 解码失败，设 `PYTHONUTF8=1` 即通过（旧问题，与本次无关）。
+- **限制**：停下/暂停都要等到下一个检查点；后面没有工具调用、正在写的长段文字拦不住。子代理内部 hook 返回 continue:false 时是否连带结束主代理，本轮没测。
+- **待用户验收**：
+  - [ ] 右键 → 工作遥控：第一项是“停下工作”，点后变灰色“正在停下……”，气泡“好，下一个空当就停下～”
+  - [ ] 在 CC 终端版里让它做多步任务，中途点停下：这一轮在下一个工具前后结束，CC 里显示的停止理由文字是否合适；诗音常驻“已经停下了，在 CC 里说一声就能继续”，在 CC 里说话后消失
+  - [ ] 同上，在桌面端 Code 标签页里再试一次
+  - [ ] 暂停：工具做完后（写总结之前）也能停住；点继续后接着写
+  - [ ] 切到英文、日文，看三句新台词和菜单文字
+  - [ ] 先重启一次诗音（用上新服务器）
 
 ## 2026-10-20：八帧走路、四阶段跳跃、变速拖动与 FPS
 - **素材先提交**：`4d72c4c`，只含三张 raw 分帧图、walk_1～8 / jump_1～4 / drag_1～4 和 `tools/process_sheets.py`，共 20 个文件。只读检查切出 8 / 4 / 4 帧，16 张生成图可解码且为 448×512 RGBA。提交前完整基线 **657 passed、1 skipped、2 条原有 Pillow 弃用警告**。后续功能没有改动或重新生成这些图片，脚本仅同步用途说明。
@@ -225,6 +249,7 @@
 - [x] v0.2.1 状态感知（pytest 共 321 个通过；**真机已验收（2026-10-19）**）
 - [x] v0.3 Claude Code 遥控（pytest 共 583 个通过；**真机验收待用户确认**）
 - [x] v0.4 诗音的对话菜单（零食、预设对话，不调用模型；**待用户验收**）
+- [ ] v0.4.1 好感度系统（等 v0.2.1～v0.4 真机验收完成后再做）
 - [ ] v0.5 内容包
 - [ ] v1.0 发布
 

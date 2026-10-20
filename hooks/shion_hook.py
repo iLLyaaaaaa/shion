@@ -3,7 +3,8 @@
 只用标准库。无论发生什么都返回 0、不输出多余内容，绝不能影响 Claude Code。
 用法：shion_hook.py <SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PostToolUseFailure|PermissionRequest|Stop|Notification>
 
-暂停/继续：PreToolUse 在用户点了“暂停”时一直等；诗音没开、连不上、出错一律放行。
+暂停/继续：PreToolUse 和 PostToolUse 两个检查点在用户点了“暂停”时一直等；诗音没开、连不上、出错一律放行。
+停下：用户在诗音上点了“停下”，下一个检查点输出 continue=false 结束这一轮（只生效一次）。
 同意/否决：PermissionRequest 把要执行的内容交给诗音，等用户在诗音上点按钮；只有收到明确的 allow 才输出 allow，
 其余一切情况（诗音没开、超时、出错、返回内容不对）都不输出任何决定，交回 CC 自己的授权框。
 ExitPlanMode 仅发送 plan_ready 提醒，不登记授权请求，计划确认始终由 CC 自己处理。
@@ -71,6 +72,7 @@ def remote_setting(name: str, default: int, low: int, high: int) -> int:
 
 PAUSE_POLL = 25.0  # 每次长轮询最多等多久（服务端上限 30 秒）
 PAUSE_REASON = "用户暂停了工作，请停下并等待用户指示"
+STOP_REASON = "用户通过诗音让这一轮工作停下，请等待用户指示"
 
 
 def pause_limit() -> int:
@@ -78,23 +80,27 @@ def pause_limit() -> int:
 
 
 def pause_gate(limit: float, poll: float = PAUSE_POLL):
-    """暂停期间一直等。返回 None = 放行；返回字符串 = 超时，要拒绝这次工具调用（理由）。
+    """检查点（PreToolUse / PostToolUse）。暂停期间一直等。
 
-    诗音没开、请求失败、返回内容不对，都按“没暂停”处理，绝不把 CC 卡住。
+    返回 None = 放行；("stop", 理由) = 用户在诗音上点了“停下”，要结束这一轮；
+    ("timeout", 理由) = 暂停等满上限。
+    诗音没开、请求失败、返回内容不对，都按“没暂停、没停下”处理，绝不把 CC 卡住。
     """
     result = request("/pause/wait", {"wait": 0})
-    if not isinstance(result, dict) or result.get("paused") is not True:
-        return None
     deadline = time.monotonic() + limit
     while True:
+        if not isinstance(result, dict):
+            return None
+        if result.get("stop") is True:
+            return ("stop", ui_text("hook_stop", STOP_REASON))
+        if result.get("paused") is not True:
+            return None
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             request("/event", {"type": "pause_timeout"})
-            return PAUSE_REASON
+            return ("timeout", PAUSE_REASON)
         wait = min(poll, remaining)
         result = request("/pause/wait", {"wait": wait}, timeout=wait + 3)
-        if not isinstance(result, dict) or result.get("paused") is not True:
-            return None
 
 
 PERMISSION_POLL = 10.0
@@ -130,14 +136,20 @@ def describe_permission(tool_name, tool_input, limit: int = DETAIL_LIMIT) -> str
         return _clip(ti, limit)
 
 
-def deny_message() -> str:
+def ui_text(key: str, default: str) -> str:
+    """按存档语言读 assets/lines 里的 ui 文字（给 CC 看的理由），读不到就用默认中文。"""
     lang = read_save().get("language")
     lang = lang if lang in ("zh", "en", "ja") else "zh"
     try:
         raw = json.loads((ROOT / "assets" / "lines" / f"{lang}.json").read_text(encoding="utf-8"))
-        return raw["ui"]["hook_deny"]
+        text = raw["ui"][key]
+        return text if isinstance(text, str) and text else default
     except Exception:
-        return "用户通过诗音否决了这个操作"
+        return default
+
+
+def deny_message() -> str:
+    return ui_text("hook_deny", "用户通过诗音否决了这个操作")
 
 
 def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL):
@@ -282,6 +294,11 @@ def main() -> None:
     if name == "SessionStart":
         ensure_running()
     if name == "PostToolUse":
+        # 检查点：工具做完、开始写文字之前也能停住；继续以后才取反馈，停下时反馈留给下一次 UserPromptSubmit
+        gate = pause_gate(pause_limit())
+        if gate is not None:
+            emit({"continue": False, "stopReason": gate[1]})
+            return
         text = take_feedback()
         if text:
             emit({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}})
@@ -292,12 +309,15 @@ def main() -> None:
             emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
         return
     if name == "PreToolUse":
-        reason = pause_gate(pause_limit())
-        if reason is not None:
-            emit({"hookSpecificOutput": {
+        gate = pause_gate(pause_limit())
+        if gate is not None:
+            kind, reason = gate
+            deny = {"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
                 "permissionDecisionReason": reason,
-            }})
+            }}
+            # 停下：continue=false 结束这一轮（官方：优先于事件专属决定），同时 deny 保证这次工具不执行
+            emit({"continue": False, "stopReason": reason, **deny} if kind == "stop" else deny)
             return
     detail = build_detail(name, data)
     request("/event", {"type": etype} if detail is None else {"type": etype, "detail": detail[:MAX_DETAIL]})
@@ -320,8 +340,8 @@ if __name__ == "__main__":
     worker = threading.Thread(target=_guarded_main, daemon=True)
     worker.start()
     event = sys.argv[1:2]
-    # PreToolUse 可能要等用户点“继续”，总时限 = 暂停上限 + 余量；其余事件很快
-    worker.join(12 if event == ["SessionStart"] else (pause_limit() + 30 if event == ["PreToolUse"] else (permission_limit() + 10 if event == ["PermissionRequest"] else (6.0 if event in (["PostToolUse"], ["UserPromptSubmit"]) else 2.5))))
+    # PreToolUse / PostToolUse 可能要等用户点“继续”，总时限 = 暂停上限 + 余量；其余事件很快
+    worker.join(12 if event == ["SessionStart"] else (pause_limit() + 30 if event in (["PreToolUse"], ["PostToolUse"]) else (permission_limit() + 10 if event == ["PermissionRequest"] else (6.0 if event == ["UserPromptSubmit"] else 2.5))))
     try:
         sys.stdout.flush()
     except BaseException:

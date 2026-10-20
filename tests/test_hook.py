@@ -215,8 +215,7 @@ def test_pause_gate_times_out_with_deny_and_reports_it(env, monkeypatch):
     monkeypatch.setenv("SHION_PORT", str(srv.port))
     h = load_hook()
     srv.hub.pause()
-    reason = h.pause_gate(0.5, poll=0.2)
-    assert reason == "用户暂停了工作，请停下并等待用户指示"
+    assert h.pause_gate(0.5, poll=0.2) == ("timeout", "用户暂停了工作，请停下并等待用户指示")
     assert ("pause_timeout", None) in events
 
 
@@ -244,7 +243,7 @@ def test_pre_tool_use_prints_deny_json_after_pause_timeout(env):
 
 def test_pause_gate_bad_server_response_means_no_pause(monkeypatch):
     h = load_hook()
-    for bad in (None, [], {"paused": "yes"}, {"paused": 1}, {}):
+    for bad in (None, [], {"paused": "yes"}, {"paused": 1}, {}, {"stop": "yes"}, {"stop": 1}):
         monkeypatch.setattr(h, "request", lambda *a, _bad=bad, **k: _bad)
         assert h.pause_gate(5, poll=0.1) is None
 

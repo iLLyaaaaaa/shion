@@ -79,6 +79,7 @@ class PetController(QObject):
         self.bubble = bubble
         self.hub = hub or RemoteHub()
         self._pause_timed_out = False
+        self._work_stopped = False  # hook 已经按“停下”结束了这一轮，等用户在 CC 里说话
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
         self._dialogue: Optional[DialoguePanel] = None
@@ -407,7 +408,11 @@ class PetController(QObject):
         if etype == "pause_timeout":
             self._on_pause_timeout()
             return
+        if etype == "work_stopped":
+            self._on_work_stopped()
+            return
         if etype == "prompt":
+            self._clear_stopped()
             self._sync_pause()  # 服务线程已经在 hub 里解除了暂停
         ui = self.lines.ui
         entry = make_entry(etype, detail, now)
@@ -434,9 +439,34 @@ class PetController(QObject):
             self._last_activity_say = (text, now)
 
     # ------------------------------------------------------------ 遥控：暂停 / 反馈
-    def pause_work(self) -> None:
-        """下一次工具调用前让 Claude 停住（hook 在 hub 上等待）。"""
+    def stop_work(self) -> None:
+        """下一个检查点（工具调用前或做完后）让这一轮结束；只生效一次，hook 取走后自动清除。"""
         self.react(self.state.interact(self._now()))
+        self.hub.request_stop()
+        if not self.state.save.bubble_muted:
+            self._speech.dismiss()
+            self.say(self.lines.ui("stop_requested"), priority=Priority.MEDIUM, category="stop_requested")
+        self.sync()
+
+    def _on_work_stopped(self) -> None:
+        """服务线程报告：hook 已经取走“停下”，这一轮结束了。"""
+        self._work_stopped = True
+        self._speech.dismiss()
+        self.refresh_pause_bubble()
+
+    def _clear_stopped(self) -> None:
+        if not self._work_stopped:
+            return
+        self._work_stopped = False
+        if self._speech.sticky:
+            self._speech.dismiss()
+            if self.bubble is not None:
+                self.bubble.dismiss()
+
+    def pause_work(self) -> None:
+        """下一个检查点（工具调用前或做完后）让 Claude 停住（hook 在 hub 上等待）。"""
+        self.react(self.state.interact(self._now()))
+        self._clear_stopped()
         self._pause_timed_out = False
         self.hub.pause()
         self.state.paused = True
@@ -446,6 +476,7 @@ class PetController(QObject):
 
     def resume_work(self, *, quiet: bool = False) -> None:
         self.hub.resume()
+        self._clear_stopped()
         self._leave_pause()
         if not quiet:
             self.say_key("resumed")
@@ -476,11 +507,14 @@ class PetController(QObject):
 
     def refresh_pause_bubble(self) -> None:
         """暂停期间让“暂停中”一直挂着；被别的台词盖掉后，等那句说完再恢复。"""
-        if not self.state.paused or self.state.save.bubble_muted:
+        if not (self.state.paused or self._work_stopped) or self.state.save.bubble_muted:
             return
         if self.window.monotonic_time() < self._speech.until:
             return
-        key = "paused_timeout" if self._pause_timed_out else "paused_status"
+        if self._work_stopped:
+            key = "work_stopped"
+        else:
+            key = "paused_timeout" if self._pause_timed_out else "paused_status"
         self.say(self.lines.ui(key), priority=Priority.MEDIUM, category="paused", sticky=True)
 
     # ------------------------------------------------------------ 遥控：同意 / 否决
@@ -670,6 +704,10 @@ class PetController(QObject):
         ui = self.lines.ui
         menu.addAction(ui("menu_talk")).triggered.connect(self.open_dialogue)
         remote_menu = menu.addMenu(ui("menu_remote"))
+        if self.hub.stop_requested:
+            remote_menu.addAction(ui("menu_stop_pending")).setEnabled(False)
+        else:
+            remote_menu.addAction(ui("menu_stop")).triggered.connect(self.stop_work)
         if self.state.paused:
             remote_menu.addAction(ui("menu_resume")).triggered.connect(lambda: self.resume_work())
         else:

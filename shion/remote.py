@@ -18,6 +18,7 @@ class RemoteHub:
     def __init__(self) -> None:
         self._cond = threading.Condition()
         self._paused = False
+        self._stop = False
         self.permissions = PermissionQueue()
 
     # ---- 暂停 / 继续 ----
@@ -42,6 +43,34 @@ class RemoteHub:
         with self._cond:
             self._cond.wait_for(lambda: not self._paused, timeout=seconds)
             return self._paused
+
+    # ---- 停下（只生效一次） ----
+    @property
+    def stop_requested(self) -> bool:
+        with self._cond:
+            return self._stop
+
+    def request_stop(self) -> None:
+        with self._cond:
+            self._stop = True
+            self._cond.notify_all()
+
+    def cancel_stop(self) -> None:
+        with self._cond:
+            self._stop = False
+            self._cond.notify_all()
+
+    def wait_gate(self, seconds: float) -> tuple[bool, bool]:
+        """检查点：最多等 seconds 秒，直到不再暂停或有人请求停下。返回 (仍在暂停, 这次要停下)。
+
+        停下请求在这里被原子地取走：并行的多个 hook 只有一个会拿到，之后自动清除。
+        停下不改变暂停标记。
+        """
+        seconds = max(0.0, min(float(seconds), MAX_WAIT))
+        with self._cond:
+            self._cond.wait_for(lambda: self._stop or not self._paused, timeout=seconds)
+            stop, self._stop = self._stop, False
+            return self._paused, stop
 
 
 # ---------------------------------------------------------------- 授权请求
