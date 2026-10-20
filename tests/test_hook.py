@@ -210,16 +210,17 @@ def test_prompt_event_releases_pause_from_the_server_thread(env):
     assert srv.hub.is_paused is False
 
 
-def test_pause_gate_times_out_with_deny_and_reports_it(env, monkeypatch):
+def test_pause_gate_times_out_as_end_and_reports_it(env, monkeypatch):
     srv, events, _, tmp = env
     monkeypatch.setenv("SHION_PORT", str(srv.port))
+    monkeypatch.setenv("SHION_DATA_DIR", str(tmp))  # 不读真实存档的语言
     h = load_hook()
     srv.hub.pause()
-    assert h.pause_gate(0.5, poll=0.2) == ("timeout", "用户暂停了工作，请停下并等待用户指示")
+    assert h.pause_gate(0.5, poll=0.2) == ("timeout", "用户很久没有回应，这一轮先结束，请等待用户指示")
     assert ("pause_timeout", None) in events
 
 
-def test_pre_tool_use_prints_deny_json_after_pause_timeout(env):
+def test_pre_tool_use_ends_turn_after_pause_timeout(env):
     srv, events, _, tmp = env
     srv.hub.pause()
     code = (
@@ -233,9 +234,9 @@ def test_pre_tool_use_prints_deny_json_after_pause_timeout(env):
         env={**os.environ, "SHION_PORT": str(srv.port), "SHION_DATA_DIR": str(tmp)},
     )
     out = json.loads(r.stdout.decode("utf-8"))
-    assert out == {"hookSpecificOutput": {
+    assert out == {"continue": False, "stopReason": "用户很久没有回应，这一轮先结束，请等待用户指示", "hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
-        "permissionDecisionReason": "用户暂停了工作，请停下并等待用户指示",
+        "permissionDecisionReason": "用户很久没有回应，这一轮先结束，请等待用户指示",
     }}
     assert ("pause_timeout", None) in events
     assert not any(t == "working" for t, _ in events)  # 被拒绝的这次不算开工

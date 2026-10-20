@@ -1,7 +1,7 @@
 """带输入框/按钮的终端风格小面板（和气泡同样的配色和字体）。
 
 用途：InputPanel 写“有问题”的反馈（一行输入框，用户主动打开，所以可以拿键盘焦点）；
-PermissionPanel 接管同意/否决（自动弹出，不抢焦点）。
+PermissionPanel 接管同意/否决、HoldPanel 在检查点选“继续/结束这一轮”（都自动弹出，不抢焦点）。
 """
 from __future__ import annotations
 
@@ -256,3 +256,105 @@ class PermissionPanel(QWidget):
         if self._rid is None or not self.armed():
             return
         self.decided.emit(self._rid, allow)
+
+
+HOLD_BUTTON_H = 44
+
+
+class HoldPanel(QWidget):
+    """检查点等待面板：工作停在检查点时弹出，两个大按钮“继续”/“结束这一轮”。
+
+    规则同 PermissionPanel：不抢键盘焦点、只响应鼠标、出现后 ARM_DELAY 秒内点击无效。
+    """
+
+    chosen = Signal(str)  # "continue" | "end"
+
+    def __init__(self, font_family: str = "Consolas", clock: Callable[[], float] = time.monotonic):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setObjectName("panel")
+        self.setFixedWidth(PANEL_WIDTH)
+        self.setStyleSheet(
+            STYLE + f"""
+            * {{ font-family: '{font_family}'; }}
+            QPushButton#continue {{ background: {BORDER.name()}; color: #0A0A0A; font-weight: bold; }}
+            QPushButton#continue:disabled, QPushButton#end:disabled {{ background: #333; color: #777;
+                                                                      border-color: #444; }}
+            """
+        )
+        self._clock = clock
+        self._armed_at = 0.0
+        self._open = False
+
+        self._title = QLabel()
+        self._title.setWordWrap(True)
+        self._continue = MouseOnlyButton()
+        self._continue.setObjectName("continue")
+        self._end = MouseOnlyButton()
+        self._end.setObjectName("end")
+        for b in (self._continue, self._end):
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setMinimumHeight(HOLD_BUTTON_H)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self._end, 1)
+        buttons.addWidget(self._continue, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.addWidget(self._title)
+        layout.addLayout(buttons)
+
+        self._continue.clicked.connect(lambda: self._click("continue"))
+        self._end.clicked.connect(lambda: self._click("end"))
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self.refresh_enabled)
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    def armed(self) -> bool:
+        return self._clock() >= self._armed_at
+
+    def show_hold(self, texts: dict[str, str], body: tuple[int, int, int, int]) -> None:
+        """弹出面板；按钮 ARM_DELAY 秒后才生效。"""
+        self._open = True
+        self._armed_at = self._clock() + ARM_DELAY
+        self._title.setText(texts["title"])
+        self._continue.setText(texts["continue"])
+        self._end.setText(texts["end"])
+        self.adjustSize()
+        self.refresh_enabled()
+        self.follow(body)
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self._timer.start()
+
+    def follow(self, body: tuple[int, int, int, int]) -> None:
+        screen = QGuiApplication.screenAt(QPoint(body[0] + body[2] // 2, body[1] + body[3] // 2)) \
+            or QGuiApplication.primaryScreen()
+        g = screen.availableGeometry()
+        x, y = place_bubble(body, (self.width(), self.height()), (g.x(), g.y(), g.width(), g.height()))
+        self.move(x, y)
+
+    def hide_hold(self) -> None:
+        self._open = False
+        self._timer.stop()
+        self.hide()
+
+    def refresh_enabled(self) -> None:
+        on = self._open and self.armed()
+        self._continue.setEnabled(on)
+        self._end.setEnabled(on)
+
+    def _click(self, choice: str) -> None:
+        # 防误点：刚出现的 ARM_DELAY 内，即使按钮事件进来了也不算
+        if not self._open or not self.armed():
+            return
+        self.chosen.emit(choice)

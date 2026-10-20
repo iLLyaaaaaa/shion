@@ -235,7 +235,7 @@ def snapshot(
 def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
                    more: int = 0, expand: bool = False) -> int:
     """离屏渲染遥控面板存成 PNG（自查画面用）。同意/否决面板的按钮在 0.6 秒内是灰的，截图时按“已生效”画。"""
-    from shion.panel import ARM_DELAY, InputPanel, PermissionPanel
+    from shion.panel import ARM_DELAY, HoldPanel, InputPanel, PermissionPanel
 
     app = QApplication.instance() or QApplication(sys.argv)
     lines = Lines(lang)
@@ -270,6 +270,13 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
         panel.open(body)
         if kind == "snacks":
             panel._choose("page", "snacks")
+        img = panel.grab().toImage()
+    elif kind == "hold":
+        t = [0.0]
+        panel = HoldPanel(family, clock=lambda: t[0])
+        panel.show_hold({"title": ui("hold_title"), "continue": ui("hold_continue"), "end": ui("hold_end")}, body)
+        t[0] += ARM_DELAY + 0.1
+        panel.refresh_enabled()
         img = panel.grab().toImage()
     elif kind == "input":
         panel = InputPanel(family)

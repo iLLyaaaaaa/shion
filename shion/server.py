@@ -127,9 +127,9 @@ class _Handler(BaseHTTPRequestHandler):
         if etype == "prompt":
             # 用户在 CC 里说话就解除暂停；在服务线程里直接做，紧接着的工具调用不会再被误挡
             self.server.hub.resume()
-        if etype in ("prompt", "stop"):
-            # 新一轮开始或这一轮已经结束：没用上的“停下”作废，不能挡住下一轮
-            self.server.hub.cancel_stop()
+        elif etype == "stop" and not self.server.hub.is_holding:
+            # 这一轮没碰到检查点就自己结束了：没用上的“停下”作废，不能挡住下一轮
+            self.server.hub.resume()
         try:
             self.server.on_event(etype, detail)
         except Exception:
@@ -152,8 +152,8 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, {"text": text})
 
     def _post_pause_wait(self):
-        """检查点长轮询：暂停中最多等 wait 秒；有“停下”请求时取走它。
-        不能借此开始暂停或请求停下，只能等待和取走用户在诗音上做的决定。"""
+        """检查点长轮询：暂停中最多等 wait 秒；用户选了“结束这一轮”时 stop=true。
+        不能借此开始暂停或结束这一轮，只能等待用户在诗音上做的决定。"""
         data = self._read_json()
         if data is None:
             return

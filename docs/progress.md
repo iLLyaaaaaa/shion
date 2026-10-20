@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-20 停下与暂停合并已实现**：菜单只留“停下”，到下一个检查点原地等待，诗音弹出“继续 / 结束这一轮”面板；30 分钟没选按结束处理。挠痒放慢（200ms/帧、±2.5°、0.6 秒）已单独提交 `e15de5c`。完整测试 **763 passed、1 skipped**，真实 `claude -p` 两个场景通过；面板观感与真实 CC 界面 **待用户验收**，见下方本轮记录。用户已授权记录待验收后 commit，不 push。
 - **2026-10-20 转身、捏脸与挠痒已实现**：新增三组动作帧，移除行走入口与全部镜像；区域、时间和距离已集中为常量，三语台词齐全。完整测试 **759 passed、1 skipped**，原生 Windows 150% 专项 **119 passed**；动态交互 **待用户验收**。用户本轮明确授权素材先提交、功能测试和文档完成后再提交，不等待亲眼验收，不 push。
 - **2026-10-20 工作遥控改进已实现**：暂停检查点从 PreToolUse 扩到 PreToolUse + PostToolUse；新增“停下”（`continue: false`，只生效一次）。完整测试 **723 passed、1 skipped**，真实 `claude -p` 四个场景通过；菜单、气泡和真实 CC 界面表现 **待用户验收**，见下方本轮记录。用户已授权记录待验收后 commit，不 push。
 - **2026-10-20 动作更新已实现**：可变帧数组、八帧走路（60px/s、110ms/帧）、四阶段跳跃（最高 45px）、拖动变速循环和 SHION_DEBUG 实际绘制 FPS，见下方本轮记录。完整测试 **702 passed、1 skipped**，原生 Windows 150% 专项 **70 passed**；动态观感、真实桌面点穿与 FPS 显示 **待用户验收**。用户已授权记录待验收后 commit，不等待亲眼验收，不 push；不推进好感度或内容包开发。
@@ -14,6 +15,31 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。本次未安装/卸载 hooks。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-20：停下与暂停合并成一个流程
+- **挠痒放慢**（先单独提交 `e15de5c`）：`TICKLE_FRAME_SECONDS` 0.11→0.2、`TICKLE_TWIST_PERIOD` 0.32→0.6、`TICKLE_TWIST_DEGREES` 3→2.5；spec 参数和截图示例 `--tickle --at 0/0.2/0.4` 已同步。
+- **流程**：右键 → 工作遥控 → “停下”（菜单不再有暂停/继续）→ 诗音说“好，下一个空当就停下～”、挡手表情、菜单变灰“正在停下……” → 下一个检查点（PreToolUse / PostToolUse）hook 原地长轮询 → 诗音弹出检查点面板：“继续”放行无缝接着干；“结束这一轮”返回 `continue: false`（PreToolUse 另带 deny），常驻“已经停下了，在 CC 里说一声就能继续”。在 CC 里说话解除等待；30 分钟没选按结束处理（提示换成超时版）；这一轮没碰到检查点就结束了（Stop）则作废；诗音没开或连不上立即放行。
+- **RemoteHub**：删除一次性的 `request_stop / cancel_stop / stop_requested`；新增 `end()`（代数计数 `_end_gen`：此刻在等的所有 hook 都拿到 stop，之后到的不受影响、不留残余）和 `is_holding`（正在等的 hook 数，两段长轮询之间 2 秒宽限）。`wait_gate` 没在停下时直接返回。
+- **服务器**：`/pause/wait` 格式不变；`stop` 事件只在没有 hook 正在等时作废停下（别的会话结束不会放掉这里在等的 hook）。HTTP 仍然没有任何入口能开始停下或结束这一轮。
+- **hook**：超时不再只 deny，和“结束这一轮”一样输出 `continue: false` + `stopReason`（`ui.hook_stop_timeout`）。hooks 事件和超时配置没变，不用重装。
+- **界面**：`panel.py:HoldPanel`，宽 300、按钮高 44；规则同授权面板（`WindowDoesNotAcceptFocus`、`WA_ShowWithoutActivating`、按钮 NoFocus 且忽略按键、出现后 0.6 秒内不可点）。授权面板优先；弹出时收起气泡和对话窗口，开着时不能打开对话；跟随诗音；静音不影响。等着的 hook 消失（CC 里按 Esc）2 秒后面板收起。新增截图 `--snapshot OUT.png --panel hold --lang zh|en|ja`。
+- **台词**：三语新增 `hold_title / hold_continue / hold_end / work_stopped_timeout / hook_stop_timeout`，`menu_stop` 改为“停下 / Stop / 止める”；删除 `menu_pause / menu_resume / paused_status / paused_timeout`。界面文字都不含“Claude”（有测试）。
+- **测试**：`tests/test_stop_work.py` 重写为 33 项（hub 继续/结束/并行全部拿到 stop/之后不受影响/宽限，服务器防伪造与 Stop/prompt，hook 子进程继续放行、结束 Pre/Post、超时、服务没开，控制器菜单、等 hook 才弹面板、继续/结束/prompt/超时/Stop 作废/hook 消失、授权优先、键盘无效、跟随与对话、静音、三语）；删掉 `test_remote_control.py` 里旧的暂停界面用例；`test_hook.py` 超时用例改为 continue:false；截图测试加上 hold。完整 `PYTHONUTF8=1 .venv\Scripts\python -m pytest -q`：**763 passed、1 skipped**。
+- **截图**：`--panel hold` 三语截图（`.venv/preview-run/stop-merge/`，已忽略），看过中文和英文：两个按钮等宽，“继续”橙色高亮，文字没有裁切。
+- **真实 `claude -p`**（2.1.289，haiku，隔离端口和数据目录，假桌宠 = ShionServer + RemoteHub，在 prompt 之后 0.3 秒点停下、hook 等到后 3 秒再选，脚本在会话 scratchpad），任务“逐个读 a/b/c.txt 再写 SUMMARY.md”：
+  1. **停下 → 继续**：第一次 Read 前 PreToolUse 等了 3 秒，继续后依次读 a/b/c、写出 SUMMARY.md（apple/banana/cherry），正常收到 Stop；
+  2. **停下 → 结束这一轮**：第一次 Read 被拦住没执行，没发 working，界面收到 work_stopped，0.6 秒后 CC 退出；没有 SUMMARY.md，也没有 Stop 事件。
+- **踩坑**：①两个旧的进程内 hook 测试（超时理由、否决理由）会读真实存档的语言——你的诗音现在是日语，所以按中文断言就失败；已在测试里设 `SHION_DATA_DIR` 隔离。②并行 hook 用一次性 stop 只能放掉一个，其余会继续等，所以改成按代数判断“结束”。③hook 两段长轮询之间有毫秒级空当，`is_holding` 要有宽限，否则面板会闪。
+- **限制**：同上一轮——后面没有工具调用的长段文字拦不住；子代理内 hook 返回 continue:false 是否连带结束主代理未实测。
+- **待用户验收**（请重启诗音后检查）：
+  - [ ] 右键 → 工作遥控：只有“停下 / 做得好 / 有问题……”；点停下后变灰“正在停下……”，气泡“好，下一个空当就停下～”
+  - [ ] CC 终端版里做多步任务，中途点停下：到下一个工具前/后诗音弹出面板，外观、位置、按钮大小顺手；0.6 秒内点不动；面板出现时你在 CC 里打字不会被抢焦点，回车/空格不会触发按钮
+  - [ ] 点“继续”：CC 无缝接着干
+  - [ ] 点“结束这一轮”：这一轮结束，CC 里显示的停止理由文字是否合适；诗音常驻提示，在 CC 里说话后消失
+  - [ ] 面板开着时直接在 CC 里说话：面板收起，CC 处理你的新消息
+  - [ ] 同上在桌面端 Code 标签页里再试一次
+  - [ ] （可选）把 `remote.pause_timeout` 临时改成 60 秒，确认超时按结束处理、提示是超时版
+- 上一轮“工作遥控改进”里的“暂停：工具做完后也能停住；点继续后接着写”一项已被本轮流程取代，按本轮清单验收即可。
 
 ## 2026-10-20：真实转身、无镜像侧身、捏脸与挠痒
 - **素材先提交**：`bd99d3b`，仅 3 张 raw 源图、14 张生成图和 `tools/process_sheets.py`，共 18 个文件。只读检查 turn / tickle / cheek 分别切出 8 / 3 / 3 帧，输出全部可解码且为 448×512 RGBA；现有素材处理测试 **5 passed**。完整功能基线 **723 passed、1 skipped、2 条既有 Pillow 弃用警告**。后续实现未改动源图、生成帧或素材处理脚本。

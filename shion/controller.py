@@ -20,7 +20,7 @@ from shion.effects import HeartOverlay, CrumbOverlay, MOUTH_FRACTION
 from shion.dialogue import DialoguePanel
 from shion.menu_content import MenuContent, localized
 from shion.lines import Lines
-from shion.panel import InputPanel, PermissionPanel
+from shion.panel import HoldPanel, InputPanel, PermissionPanel
 from shion.remote import RemoteHub
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
@@ -78,10 +78,11 @@ class PetController(QObject):
         self.overlay = overlay
         self.bubble = bubble
         self.hub = hub or RemoteHub()
-        self._pause_timed_out = False
-        self._work_stopped = False  # hook 已经按“停下”结束了这一轮，等用户在 CC 里说话
+        self._work_stopped = False  # 这一轮已被“结束这一轮”结束，等用户在 CC 里说话
+        self._stop_timed_out = False  # 是等满上限自动结束的
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
+        self._hold_panel: Optional[HoldPanel] = None
         self._dialogue: Optional[DialoguePanel] = None
         self._crumbs: Optional[CrumbOverlay] = None
         self.menu_content = MenuContent()
@@ -234,6 +235,8 @@ class PetController(QObject):
             self.bubble.follow(self.window.body_rect())
         if self._perm_panel is not None and self._perm_panel.isVisible():
             self._perm_panel.follow(self.window.body_rect())
+        if self._hold_panel is not None and self._hold_panel.isVisible():
+            self._hold_panel.follow(self.window.body_rect())
         if self._dialogue is not None and self._dialogue.isVisible():
             self._dialogue.follow(self.window.body_rect())
         if self._crumbs is not None and self._crumbs.isVisible():
@@ -420,7 +423,8 @@ class PetController(QObject):
             return
         if etype == "prompt":
             self._clear_stopped()
-            self._sync_pause()  # 服务线程已经在 hub 里解除了暂停
+        if etype in ("prompt", "stop"):
+            self._sync_pause()  # 服务线程可能已经在 hub 里解除了暂停
         ui = self.lines.ui
         entry = make_entry(etype, detail, now)
         self.activity.add(entry)
@@ -445,18 +449,42 @@ class PetController(QObject):
         if self.say_text(text):
             self._last_activity_say = (text, now)
 
-    # ------------------------------------------------------------ 遥控：暂停 / 反馈
+    # ------------------------------------------------------------ 遥控：停下
     def stop_work(self) -> None:
-        """下一个检查点（工具调用前或做完后）让这一轮结束；只生效一次，hook 取走后自动清除。"""
+        """“停下”：下一个检查点（工具调用前或做完后）hook 原地等待，诗音弹面板让用户选“继续/结束这一轮”。"""
+        if self.state.paused:
+            return
         self.react(self.state.interact(self._now()))
-        self.hub.request_stop()
+        self._clear_stopped()
+        self._stop_timed_out = False
+        self.hub.pause()
+        self.state.paused = True
         if not self.state.save.bubble_muted:
             self._speech.dismiss()
             self.say(self.lines.ui("stop_requested"), priority=Priority.MEDIUM, category="stop_requested")
         self.sync()
 
+    def resume_work(self, *, quiet: bool = False) -> None:
+        """面板上的“继续”：放行等待的 hook，无缝接着干。"""
+        self.hub.resume()
+        self._clear_stopped()
+        self._leave_pause()
+        if not quiet:
+            self.say_key("resumed")
+        self.sync()
+
+    def end_round(self, *, timed_out: bool = False) -> None:
+        """面板上的“结束这一轮”（或等满上限）：正在等的 hook 都返回 continue: false。"""
+        self.hub.end()
+        self._leave_pause()
+        self._stop_timed_out = timed_out
+        self._on_work_stopped()
+        self.sync()
+
     def _on_work_stopped(self) -> None:
-        """服务线程报告：hook 已经取走“停下”，这一轮结束了。"""
+        """这一轮已经被结束：常驻提示，直到用户在 CC 里说话。多个并行 hook 会各报一次，只处理第一次。"""
+        if self._work_stopped:
+            return
         self._work_stopped = True
         self._speech.dismiss()
         self.refresh_pause_bubble()
@@ -465,63 +493,77 @@ class PetController(QObject):
         if not self._work_stopped:
             return
         self._work_stopped = False
+        self._stop_timed_out = False
         if self._speech.sticky:
             self._speech.dismiss()
             if self.bubble is not None:
                 self.bubble.dismiss()
 
-    def pause_work(self) -> None:
-        """下一个检查点（工具调用前或做完后）让 Claude 停住（hook 在 hub 上等待）。"""
-        self.react(self.state.interact(self._now()))
-        self._clear_stopped()
-        self._pause_timed_out = False
-        self.hub.pause()
-        self.state.paused = True
-        self._speech.dismiss()
-        self.refresh_pause_bubble()
-        self.sync()
-
-    def resume_work(self, *, quiet: bool = False) -> None:
-        self.hub.resume()
-        self._clear_stopped()
-        self._leave_pause()
-        if not quiet:
-            self.say_key("resumed")
-        self.sync()
-
     def _leave_pause(self) -> None:
         was_sticky = self._speech.sticky
         self.state.paused = False
-        self._pause_timed_out = False
+        if self._hold_panel is not None and self._hold_panel.is_open:
+            self._hold_panel.hide_hold()
         if was_sticky:
             self._speech.dismiss()
             if self.bubble is not None:
                 self.bubble.dismiss()
 
     def _sync_pause(self) -> None:
-        """hub 在服务线程里被解除暂停（用户在 CC 里说话）后，把界面状态同步过来。"""
+        """hub 在服务线程里被解除暂停（用户在 CC 里说话，或这一轮没碰到检查点就结束了）后，把界面状态同步过来。"""
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
+        self._sync_hold()
         self.refresh_pause_bubble()
 
-    def _on_pause_timeout(self) -> None:
-        """hook 等满时限后已拒绝工具调用：保持暂停标记，提示用户去 CC 里说话。"""
+    def _sync_hold(self) -> None:
+        """有 hook 正在检查点等待时弹出“继续/结束这一轮”面板；授权面板优先。"""
+        want = (self.state.paused and self.hub.is_paused and self.hub.is_holding
+                and not self.hub.permissions.pending())
+        panel = self._hold_panel
+        if not want:
+            if panel is not None and panel.is_open:
+                panel.hide_hold()
+            return
+        if panel is not None and panel.is_open:
+            return
+        if panel is None:
+            family = self.bubble.font_family if self.bubble is not None else "Consolas"
+            panel = self._hold_panel = HoldPanel(family, clock=self.window.monotonic_time)
+            panel.chosen.connect(self._on_hold_chosen)
+        if self._dialogue is not None:
+            self._dialogue.hide()
+        self._speech.dismiss()
+        if self.bubble is not None:
+            self.bubble.dismiss()
+        ui = self.lines.ui
+        panel.show_hold(
+            {"title": ui("hold_title"), "continue": ui("hold_continue"), "end": ui("hold_end")},
+            self.window.body_rect(),
+        )
+
+    def _on_hold_chosen(self, choice: str) -> None:
+        """用户点了检查点面板上的按钮。"""
         if not self.state.paused:
             return
-        self._pause_timed_out = True
-        self._speech.dismiss()
-        self.refresh_pause_bubble()
+        if choice == "continue":
+            self.resume_work()
+        elif choice == "end":
+            self.end_round()
+
+    def _on_pause_timeout(self) -> None:
+        """hook 等满上限后已按“结束这一轮”返回：同样放掉其他并行等待的 hook。只在停下等待中有效。"""
+        if not self.state.paused:
+            return
+        self.end_round(timed_out=True)
 
     def refresh_pause_bubble(self) -> None:
-        """暂停期间让“暂停中”一直挂着；被别的台词盖掉后，等那句说完再恢复。"""
-        if not (self.state.paused or self._work_stopped) or self.state.save.bubble_muted:
+        """这一轮被结束后让提示一直挂着；被别的台词盖掉后，等那句说完再恢复。"""
+        if not self._work_stopped or self.state.save.bubble_muted:
             return
         if self.window.monotonic_time() < self._speech.until:
             return
-        if self._work_stopped:
-            key = "work_stopped"
-        else:
-            key = "paused_timeout" if self._pause_timed_out else "paused_status"
+        key = "work_stopped_timeout" if self._stop_timed_out else "work_stopped"
         self.say(self.lines.ui(key), priority=Priority.MEDIUM, category="paused", sticky=True)
 
     # ------------------------------------------------------------ 遥控：同意 / 否决
@@ -608,12 +650,12 @@ class PetController(QObject):
     def dispose(self) -> None:
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
         self.state.cancel_snack()
-        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs):
+        for panel in (self._perm_panel, self._hold_panel, self._input_panel, self._dialogue, self._crumbs):
             if panel is not None:
                 panel.hide()
                 panel.setParent(None)
                 panel.deleteLater()
-        self._perm_panel = self._input_panel = None
+        self._perm_panel = self._hold_panel = self._input_panel = None
         self._dialogue = self._crumbs = None
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
@@ -625,6 +667,8 @@ class PetController(QObject):
                 panel.hide()
         if self._perm_panel is not None:
             self._perm_panel.hide_request()
+        if self._hold_panel is not None:
+            self._hold_panel.hide_hold()
         try:
             self.scheduler.flush()  # 内部不抛异常；这里再兜一层，保证一定能退出
         except Exception:
@@ -666,7 +710,7 @@ class PetController(QObject):
         return QPoint(x + w // 2, y + round(h * MOUTH_FRACTION))
 
     def open_dialogue(self) -> None:
-        if self.hub.permissions.pending():
+        if self.hub.permissions.pending() or (self._hold_panel is not None and self._hold_panel.is_open):
             return
         self.window.stop_motion()
         self._idle.next_at = None
@@ -711,14 +755,10 @@ class PetController(QObject):
         ui = self.lines.ui
         menu.addAction(ui("menu_talk")).triggered.connect(self.open_dialogue)
         remote_menu = menu.addMenu(ui("menu_remote"))
-        if self.hub.stop_requested:
+        if self.state.paused:
             remote_menu.addAction(ui("menu_stop_pending")).setEnabled(False)
         else:
             remote_menu.addAction(ui("menu_stop")).triggered.connect(self.stop_work)
-        if self.state.paused:
-            remote_menu.addAction(ui("menu_resume")).triggered.connect(lambda: self.resume_work())
-        else:
-            remote_menu.addAction(ui("menu_pause")).triggered.connect(self.pause_work)
         remote_menu.addAction(ui("menu_good")).triggered.connect(self.feedback_good)
         remote_menu.addAction(ui("menu_bad")).triggered.connect(self.open_bad_feedback)
 

@@ -12,13 +12,16 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 MAX_WAIT = 30.0  # 单次长轮询最多等多久（秒）
+HOLD_GRACE = 2.0  # hook 两段长轮询之间的空当，这么久之内仍算“在等”
 
 
 class RemoteHub:
     def __init__(self) -> None:
         self._cond = threading.Condition()
         self._paused = False
-        self._stop = False
+        self._end_gen = 0
+        self._holding = 0
+        self._last_hold = float("-inf")
         self.permissions = PermissionQueue()
 
     # ---- 暂停 / 继续 ----
@@ -44,33 +47,38 @@ class RemoteHub:
             self._cond.wait_for(lambda: not self._paused, timeout=seconds)
             return self._paused
 
-    # ---- 停下（只生效一次） ----
+    # ---- 结束这一轮 ----
+    def end(self) -> None:
+        """用户选了“结束这一轮”（或等满上限）：解除暂停，并让此刻正在检查点等待的 hook 全部带着停下返回。
+        之后才到的 hook 不受影响，不留残余状态。"""
+        with self._cond:
+            self._paused = False
+            self._end_gen += 1
+            self._cond.notify_all()
+
     @property
-    def stop_requested(self) -> bool:
+    def is_holding(self) -> bool:
+        """有 hook 正在检查点等待（刚退出 HOLD_GRACE 秒内也算，长轮询两段之间有空当）。"""
         with self._cond:
-            return self._stop
-
-    def request_stop(self) -> None:
-        with self._cond:
-            self._stop = True
-            self._cond.notify_all()
-
-    def cancel_stop(self) -> None:
-        with self._cond:
-            self._stop = False
-            self._cond.notify_all()
+            return self._holding > 0 or time.monotonic() - self._last_hold < HOLD_GRACE
 
     def wait_gate(self, seconds: float) -> tuple[bool, bool]:
-        """检查点：最多等 seconds 秒，直到不再暂停或有人请求停下。返回 (仍在暂停, 这次要停下)。
+        """检查点：最多等 seconds 秒，直到不再暂停。返回 (仍在暂停, 这次要停下)。
 
-        停下请求在这里被原子地取走：并行的多个 hook 只有一个会拿到，之后自动清除。
-        停下不改变暂停标记。
+        等待期间用户选了“结束这一轮”，返回 stop=True（并行等待的 hook 都会拿到）。
         """
         seconds = max(0.0, min(float(seconds), MAX_WAIT))
         with self._cond:
-            self._cond.wait_for(lambda: self._stop or not self._paused, timeout=seconds)
-            stop, self._stop = self._stop, False
-            return self._paused, stop
+            if not self._paused:
+                return False, False
+            gen = self._end_gen
+            self._holding += 1
+            try:
+                self._cond.wait_for(lambda: not self._paused or self._end_gen != gen, timeout=seconds)
+            finally:
+                self._holding -= 1
+                self._last_hold = time.monotonic()
+            return self._paused, self._end_gen != gen
 
 
 # ---------------------------------------------------------------- 授权请求

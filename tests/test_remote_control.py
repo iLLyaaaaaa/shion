@@ -132,7 +132,7 @@ def test_sticky_bubble_timeline_never_fades():
     assert not t.sticky and t.finished(0.0)
 
 
-# ---------------------------------------------------------------- 控制器：暂停
+# ---------------------------------------------------------------- 控制器
 @pytest.fixture
 def pet(env):  # noqa: F811
     env.sticky = []
@@ -146,89 +146,11 @@ def pet(env):  # noqa: F811
     return env
 
 
-def test_pause_shows_stop_sprite_and_sticky_bubble(pet):
-    pet.data.activity_level = "quiet"  # 只测常驻时间；随机闲聊会按设计盖掉它再恢复
-    pet.ctl.pause_work()
-    assert pet.ctl.hub.is_paused and pet.state.paused
-    assert pet.win.sprite_name == "stop"
-    assert pet.sticky == ["暂停中"]
-    for _ in range(50):  # 一直挂着：不会反复重说
-        pet.advance(1.0)
-    assert pet.sticky == ["暂停中"]
-    assert pet.win.sprite_name == "stop"
-
-
-def test_pause_bubble_comes_back_after_being_replaced(pet):
-    pet.ctl.pause_work()
-    pet.advance(3.0)
-    pet.ctl.say("别的话", priority=Priority.MEDIUM, category="x")
-    assert pet.sticky == ["暂停中"]
-    pet.advance(1.0)
-    assert pet.sticky == ["暂停中"]  # 别的话还没说完
-    pet.advance(10.0)
-    assert pet.sticky == ["暂停中", "暂停中"]  # 说完后恢复
-
-
-def test_resume_clears_pause_and_says_something(pet):
-    pet.ctl.pause_work()
-    pet.ctl.resume_work()
-    assert not pet.ctl.hub.is_paused and not pet.state.paused
-    assert pet.win.sprite_name != "stop"
-    assert pet.said[-1] in pet.ctl.lines._lines["resumed"]
-    for _ in range(20):
-        pet.advance(1.0)
-    assert pet.sticky == ["暂停中"]  # 没有再冒出来
-
-
-def test_prompt_from_cc_releases_pause_on_gui_side(pet):
-    pet.ctl.pause_work()
-    pet.ctl.hub.resume()  # 服务线程收到 prompt 事件时做的
-    pet.ctl.handle_event("prompt")
-    assert not pet.state.paused and pet.win.sprite_name != "stop"
-    pet.advance(5.0)
-    assert pet.sticky == ["暂停中"]
-
-
-def test_pause_timeout_keeps_pause_and_changes_notice(pet):
-    pet.ctl.pause_work()
-    pet.ctl.handle_event("pause_timeout")
-    assert pet.state.paused and pet.ctl.hub.is_paused
-    assert pet.sticky[-1] == "已经停下了，在 CC 里说一声就能继续"
-    pet.ctl.resume_work()  # 之后点“继续”只是解除标记
-    assert not pet.state.paused and not pet.ctl.hub.is_paused
-
-
-def test_pause_timeout_ignored_when_not_paused(pet):
-    pet.ctl.handle_event("pause_timeout")
-    assert pet.sticky == [] and not pet.state.paused
-
-
-def test_muted_pause_shows_no_bubble_but_still_pauses(pet):
-    pet.ctl.set_muted(True)
-    pet.ctl.pause_work()
-    pet.advance(3.0)
-    assert pet.said == [] and pet.ctl.hub.is_paused and pet.win.sprite_name == "stop"
-
-
-def test_menu_offers_pause_or_resume(pet):
-    menu = pet.ctl.build_menu()
-    remote = find_action(menu, "工作遥控").menu()
-    assert [a.text() for a in remote.actions()] == ["停下工作", "暂停工作", "做得好", "有问题……"]
-    find_action(remote, "暂停工作").trigger()
-    assert pet.ctl.hub.is_paused
-    menu2 = pet.ctl.build_menu()
-    remote2 = find_action(menu2, "工作遥控").menu()
-    assert [a.text() for a in remote2.actions()] == ["停下工作", "继续工作", "做得好", "有问题……"]
-    find_action(remote2, "继续工作").trigger()
-    assert not pet.ctl.hub.is_paused
-
-
 def test_new_ui_text_never_mentions_claude():
     import json as _json
     from shion.lines import LINES_DIR
 
-    keys = ["menu_remote", "menu_pause", "menu_resume", "menu_good", "menu_bad", "panel_bad_title",
-            "panel_send", "panel_cancel", "paused_status", "paused_timeout"]
+    keys = ["menu_remote", "menu_good", "menu_bad", "panel_bad_title", "panel_send", "panel_cancel"]
     for lang in ("zh", "en", "ja"):
         raw = _json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))
         for k in keys:

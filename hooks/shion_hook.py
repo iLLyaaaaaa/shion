@@ -71,8 +71,8 @@ def remote_setting(name: str, default: int, low: int, high: int) -> int:
 
 
 PAUSE_POLL = 25.0  # 每次长轮询最多等多久（服务端上限 30 秒）
-PAUSE_REASON = "用户暂停了工作，请停下并等待用户指示"
 STOP_REASON = "用户通过诗音让这一轮工作停下，请等待用户指示"
+TIMEOUT_REASON = "用户很久没有回应，这一轮先结束，请等待用户指示"
 
 
 def pause_limit() -> int:
@@ -80,10 +80,10 @@ def pause_limit() -> int:
 
 
 def pause_gate(limit: float, poll: float = PAUSE_POLL):
-    """检查点（PreToolUse / PostToolUse）。暂停期间一直等。
+    """检查点（PreToolUse / PostToolUse）。用户点了“停下”后在这里原地等，直到在诗音上选择。
 
-    返回 None = 放行；("stop", 理由) = 用户在诗音上点了“停下”，要结束这一轮；
-    ("timeout", 理由) = 暂停等满上限。
+    返回 None = 放行（选了“继续”或在 CC 里说了话）；("stop", 理由) = 选了“结束这一轮”；
+    ("timeout", 理由) = 等满上限，按“结束这一轮”处理。
     诗音没开、请求失败、返回内容不对，都按“没暂停、没停下”处理，绝不把 CC 卡住。
     """
     result = request("/pause/wait", {"wait": 0})
@@ -98,7 +98,7 @@ def pause_gate(limit: float, poll: float = PAUSE_POLL):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             request("/event", {"type": "pause_timeout"})
-            return ("timeout", PAUSE_REASON)
+            return ("timeout", ui_text("hook_stop_timeout", TIMEOUT_REASON))
         wait = min(poll, remaining)
         result = request("/pause/wait", {"wait": wait}, timeout=wait + 3)
 
@@ -311,13 +311,12 @@ def main() -> None:
     if name == "PreToolUse":
         gate = pause_gate(pause_limit())
         if gate is not None:
-            kind, reason = gate
-            deny = {"hookSpecificOutput": {
+            reason = gate[1]
+            # 结束这一轮：continue=false（官方：优先于事件专属决定），同时 deny 保证这次工具不执行
+            emit({"continue": False, "stopReason": reason, "hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
                 "permissionDecisionReason": reason,
-            }}
-            # 停下：continue=false 结束这一轮（官方：优先于事件专属决定），同时 deny 保证这次工具不执行
-            emit({"continue": False, "stopReason": reason, **deny} if kind == "stop" else deny)
+            }})
             return
     detail = build_detail(name, data)
     request("/event", {"type": etype} if detail is None else {"type": etype, "detail": detail[:MAX_DETAIL]})

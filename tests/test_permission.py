@@ -382,7 +382,8 @@ def test_hook_bad_input_gives_no_decision(hook_env, data):
     assert hub.permissions.pending() == []
 
 
-def test_hook_only_exact_allow_from_matching_id_counts(monkeypatch):
+def test_hook_only_exact_allow_from_matching_id_counts(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHION_DATA_DIR", str(tmp_path))  # 不读真实存档的语言
     h = load_hook()
     data = json.loads(perm_input())
     good = {"id": "abc", "status": "allow"}
@@ -601,7 +602,7 @@ def test_texts_in_all_languages_and_no_claude_word(env):
 def test_snapshot_panel_modes_render_png(qapp, tmp_path):
     from shion import app
     from PySide6.QtGui import QImage
-    for kind in ("permission", "input"):
+    for kind in ("permission", "hold", "input"):
         out = tmp_path / f"{kind}.png"
         assert app.snapshot_panel(str(out), kind, "x\n" * 30, "ja", 2, True) == 0
         img = QImage(str(out))
