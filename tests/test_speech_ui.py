@@ -129,7 +129,7 @@ def test_plan_ready_jumps_once_even_when_muted_and_ignores_content(env, lang, te
     assert "私密计划" not in caplog.text
     pos = env.win.pos()
     env.advance(0.35)
-    assert env.win.displayed_sprite == "jump_2" and env.win._jump_offset == pytest.approx(40)
+    assert env.win.displayed_sprite == "jump_3" and env.win._jump_offset == pytest.approx(45)
     assert env.win.pos() == pos
     env.advance(0.5)
     assert not env.win.motion_active and env.win._jump_offset == 0
@@ -169,7 +169,7 @@ def test_plan_jump_survives_calm_sync(env, mode):
         env.data.fixed_expression = "proud"
     env.ctl.handle_event("plan_ready")
     env.advance(0.35)
-    assert env.win.motion_active and env.win._jump_offset == pytest.approx(40)
+    assert env.win.motion_active and env.win._jump_offset == pytest.approx(45)
     env.advance(0.5)
     assert env.win.sprite_name == ("proud" if mode == "fixed" else "idle")
 

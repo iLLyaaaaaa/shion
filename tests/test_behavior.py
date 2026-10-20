@@ -75,7 +75,7 @@ def test_walk_bounds_direction_jumps_and_finishes(cross):
         assert not done
         if abs(x - prev_x) > 0.1:
             # 转折刚好跨帧时，当前方向可以已更新；其余按速度方向。
-            assert abs(x - prev_x) <= 80 / 60 + 0.001
+            assert abs(x - prev_x) <= walk.speed / 60 + 0.001
         prev_x = x
     x, jump, _, done = walk.sample(10 + walk.duration)
     assert done and jump == 0

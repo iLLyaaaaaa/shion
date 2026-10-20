@@ -16,20 +16,71 @@ IDLE_ACTION_WEIGHTS = (1, 1, 1, 1)
 IDLE_EXPRESSIONS = ("happy", "idle")
 IDLE_EXPRESSION_WEIGHTS = (1, 1)
 WALK_DURATION = 10.0
-WALK_SPEED = 80.0
+WALK_SPEED = 60.0
 WALK_MIN_LEG = 40.0
 WALK_HOP_HEIGHT = 10.0
 WALK_HOP_PERIOD = 0.45
-WALK_FRAME_SECONDS = 0.140
-WALK_REFERENCE_SPEED = 80.0
+WALK_FRAME_SECONDS = 0.110
+WALK_REFERENCE_SPEED = 60.0
 WALK_BOB_HEIGHT = 3.0
 WALK_BOB_FRAMES = 2  # 两帧一步，起伏随步频变化
 JUMP_CROUCH_DURATION = 0.15
-JUMP_AIR_DURATION = 0.4
-JUMP_HEIGHT = 40.0
+JUMP_RISE_DURATION = 0.09
+JUMP_HOLD_DURATION = 0.20
+JUMP_FALL_DURATION = 0.11
+JUMP_AIR_DURATION = JUMP_RISE_DURATION + JUMP_HOLD_DURATION + JUMP_FALL_DURATION
+JUMP_PHASES = (JUMP_CROUCH_DURATION, JUMP_RISE_DURATION, JUMP_HOLD_DURATION, JUMP_FALL_DURATION)
+JUMP_CROUCH_DEPTH = 0.10
+JUMP_HEIGHT = 45.0
 JUMP_DURATION = JUMP_CROUCH_DURATION + JUMP_AIR_DURATION
 LEGACY_JUMP_HEIGHT = 18.0
 LEGACY_JUMP_DURATION = 0.5
+DRAG_FRAME_SECONDS = 0.110
+DRAG_MIN_FRAME_SECONDS = 0.060
+DRAG_FAST_SPEED = 800.0
+DRAG_RATE_TAU = 0.08
+
+
+def jump_sample(elapsed: float) -> tuple[float, float, float]:
+    """(升空高度, 四阶段归一化帧进度, sy)，与刷新次数无关。"""
+    elapsed = max(0.0, elapsed)
+    start = 0.0
+    for stage, duration in enumerate(JUMP_PHASES):
+        if elapsed + 1e-9 < start + duration:
+            p = max(0.0, min(1.0, (elapsed - start) / duration))
+            height = (0.0, JUMP_HEIGHT * (1 - (1 - p) ** 3),
+                      JUMP_HEIGHT, JUMP_HEIGHT * (1 - p * p))[stage]
+            sy = 1 - JUMP_CROUCH_DEPTH * math.sin(math.pi * p) if stage == 0 else 1.0
+            return height, (stage + p) / len(JUMP_PHASES), sy
+        start += duration
+    return 0.0, 1.0, 1.0
+
+
+class DragPlayback:
+    """连续相位；帧速率指数缓动，用解析积分避免掉帧改变播放进度。"""
+
+    def __init__(self, now: float):
+        self.time = now
+        self.phase = 0.0
+        self.rate = self.target_rate = 1 / DRAG_FRAME_SECONDS
+
+    def advance(self, now: float) -> None:
+        dt = max(0.0, now - self.time)
+        self.time = max(self.time, now)
+        decay = math.exp(-dt / DRAG_RATE_TAU)
+        self.phase += self.target_rate * dt + (self.rate - self.target_rate) * DRAG_RATE_TAU * (1 - decay)
+        self.rate = self.target_rate + (self.rate - self.target_rate) * decay
+
+    def feed(self, now: float, speed: float, shakes: int) -> None:
+        self.advance(now)
+        strength = max(0.0, min(1.0, max(speed / DRAG_FAST_SPEED, shakes / SHAKE_COUNT)))
+        seconds = DRAG_FRAME_SECONDS - (DRAG_FRAME_SECONDS - DRAG_MIN_FRAME_SECONDS) * strength
+        self.target_rate = 1 / seconds
+
+    def freeze(self, now: float) -> None:
+        """松手时保持当前速率，后续下落和再次抓取都不重置相位。"""
+        self.advance(now)
+        self.target_rate = self.rate
 
 
 class ShakeTracker:
@@ -117,7 +168,9 @@ class Walk:
 
     def sample(self, now: float) -> tuple[float, float, int, bool]:
         elapsed = max(0.0, now - self.start)
-        finished = elapsed >= self.duration
+        finished = elapsed + 1e-9 >= self.duration
+        if finished:
+            elapsed = self.duration
         direction = 1
         x = self.points[-1][1]
         for (a, xa), (b, xb) in zip(self.points, self.points[1:]):

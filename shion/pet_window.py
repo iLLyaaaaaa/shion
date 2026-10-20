@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import math
+import os
+import re
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -18,11 +20,11 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from shion.animator import Animator, Frame
+from shion.animator import Animator, Frame, SQUASH, squash_scale
 from shion.behavior import (
-    JUMP_AIR_DURATION, JUMP_CROUCH_DURATION, JUMP_DURATION, JUMP_HEIGHT,
+    JUMP_DURATION, JUMP_HEIGHT,
     LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT, WALK_BOB_FRAMES, WALK_BOB_HEIGHT,
-    ShakeTracker, Walk,
+    SHAKE_WINDOW, DragPlayback, ShakeTracker, Walk, jump_sample,
 )
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
@@ -30,10 +32,7 @@ STATES = [
     "idle", "blink", "happy", "proud", "stop", "dizzy",
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
 ]
-SEQUENCES = {
-    "walk": tuple(f"walk_{i}" for i in range(1, 5)),
-    "jump": ("jump_1", "jump_2"),
-}
+SEQUENCE_GROUPS = ("walk", "jump", "drag")
 
 DEFAULT_HEIGHT = 200
 HEAD_FRAC = 0.45  # 精灵上方多少比例算头部（摸头判定区）
@@ -81,6 +80,7 @@ class PetWindow(QWidget):
         height: int = DEFAULT_HEIGHT,
         clock: Callable[[], float] = time.perf_counter,
         autostart: bool = True,
+        *, debug: bool | None = None,
     ):
         super().__init__()
         self.setWindowFlags(
@@ -91,6 +91,7 @@ class PetWindow(QWidget):
         self.setMouseTracking(True)
 
         self._clock = clock
+        self._fps_overlay = None
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
         self._mirrored_pixmaps: dict[str, QPixmap] = {}
@@ -109,7 +110,8 @@ class PetWindow(QWidget):
         self._press_global: QPoint | None = None
         self._grab_offset = QPoint()
         self._dragging = False
-        self._last_drag_x = 0
+        self._last_drag_pos = QPoint()
+        self._drag_playback: DragPlayback | None = None
         self._falling = False
         self._drag_active = False  # 已发 drag_started、尚未落地
         self._caught_fall = False  # 这次按下抓住了正在下落的桌宠
@@ -139,6 +141,10 @@ class PetWindow(QWidget):
         self._timer.timeout.connect(self._on_timer)
 
         self.set_state("idle")
+        debug_enabled = debug if debug is not None else os.environ.get("SHION_DEBUG") == "1"
+        if debug_enabled:
+            from shion.debug import FpsOverlay
+            self._fps_overlay = FpsOverlay(self, clock)
         if autostart:
             self._timer.start()
 
@@ -190,6 +196,22 @@ class PetWindow(QWidget):
         super().moveEvent(e)
         self.moved.emit()
 
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if self._fps_overlay is not None:
+            self._fps_overlay.resume()
+
+    def hideEvent(self, e) -> None:
+        if self._fps_overlay is not None:
+            self._fps_overlay.pause()
+        super().hideEvent(e)
+
+    def closeEvent(self, e) -> None:
+        self._timer.stop()
+        if self._fps_overlay is not None:
+            self._fps_overlay.pause()
+        super().closeEvent(e)
+
     def _is_head(self, pos: QPoint) -> bool:
         """鼠标是否在精灵上方 45%（按未变换的精灵坐标）。"""
         sx = pos.x() - MARGIN_X
@@ -221,7 +243,13 @@ class PetWindow(QWidget):
                 canvas = src.size()
                 self._sw = round(self._pixmaps[name].width() / dpr)
                 self._sh = round(self._pixmaps[name].height() / dpr)
-        for group, names in SEQUENCES.items():
+        for group in SEQUENCE_GROUPS:
+            numbered = sorted((int(match[1]), path.stem)
+                              for path in SPRITE_DIR.glob(f"{group}_*.png")
+                              if (match := re.fullmatch(rf"{group}_([1-9]\d*)", path.stem)))
+            if not numbered or any(number != i for i, (number, _) in enumerate(numbered, 1)):
+                continue
+            names = tuple(name for _, name in numbered)
             sources = [QPixmap(str(SPRITE_DIR / f"{name}.png")) for name in names]
             # 可选帧必须整组齐全且同画布；缺图或坏图沿用原来的程序动画。
             if any(src.isNull() or src.size() != canvas for src in sources):
@@ -290,6 +318,9 @@ class PetWindow(QWidget):
         p = QPainter(self)
         p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
         self._draw_sprite(p, self._frame)
+        p.end()
+        if self._fps_overlay is not None:
+            self._fps_overlay.counter.record()
 
     def render_frame(self) -> QImage:
         """把当前帧画进一张透明 QImage（不受遮罩裁剪，截图和测试用）。"""
@@ -335,10 +366,24 @@ class PetWindow(QWidget):
     def _refresh(self, now: float) -> None:
         f = self._animator.frame(now)
         if self._walk is not None and "walk" in self._sequences:
-            f = Frame(self._sequence_sprite("walk", now - self._walk.start, self._walk.frame_seconds))
+            elapsed = max(0.0, now - self._walk.start)
+            period = self._walk.frame_seconds * WALK_BOB_FRAMES
+            step_duration = min(SQUASH["step"][0], period * 0.4)
+            step_elapsed = (elapsed % period) * SQUASH["step"][0] / step_duration
+            sy = squash_scale("step", step_elapsed)
+            f = Frame(self._sequence_sprite("walk", elapsed, self._walk.frame_seconds),
+                      sx=1 / math.sqrt(sy), sy=sy)
         elif self._jump_start is not None and self._jump_framed:
             elapsed = max(0.0, now - self._jump_start)
-            f = Frame(self._sequences["jump"][0 if elapsed + 1e-9 < JUMP_CROUCH_DURATION else 1])
+            _, progress, sy = jump_sample(elapsed)
+            names = self._sequences["jump"]
+            index = min(len(names) - 1, int(progress * len(names) + 1e-9))
+            f = Frame(names[index], sx=1 / math.sqrt(sy), sy=sy)
+        elif self._drag_playback is not None and "drag" in self._sequences:
+            names = self._sequences["drag"]
+            name = names[int(self._drag_playback.phase + 1e-9) % len(names)]
+            # 保留拖动倾斜，但不对序列帧做底层表情交叉淡化。
+            f = replace(f, sprite=name, layers=())
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
         f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
         if (f == self._frame and self._mask_key is not None
@@ -350,6 +395,8 @@ class PetWindow(QWidget):
         if self._mask_key != old_key:
             self.setMask(region)
         self.update()
+        if self._fps_overlay is not None:
+            self._fps_overlay.follow()
 
     def _sequence_sprite(self, group: str, elapsed: float, frame_seconds: float) -> str:
         frames = self._sequences[group]
@@ -396,21 +443,27 @@ class PetWindow(QWidget):
                 self.motion_finished.emit()
         elif self._jump_start is not None:
             duration = JUMP_DURATION if self._jump_framed else LEGACY_JUMP_DURATION
-            crouch = JUMP_CROUCH_DURATION if self._jump_framed else 0.0
-            air = JUMP_AIR_DURATION if self._jump_framed else LEGACY_JUMP_DURATION
-            height = JUMP_HEIGHT if self._jump_framed else LEGACY_JUMP_HEIGHT
             elapsed = max(0.0, now - self._jump_start)
-            p = max(0.0, min(1.0, (elapsed - crouch) / air))
-            self._jump_offset = height * math.sin(math.pi * p)
+            if self._jump_framed:
+                self._jump_offset = jump_sample(elapsed)[0]
+            else:
+                p = max(0.0, min(1.0, elapsed / LEGACY_JUMP_DURATION))
+                self._jump_offset = LEGACY_JUMP_HEIGHT * math.sin(math.pi * p)
             if elapsed + 1e-9 >= duration:
                 if self._jump_framed:
-                    self._animator.squash(self._jump_start + duration, "land")
+                    self._animator.squash(self._jump_start + duration, "jump_land")
                 self._jump_start = None
                 self._jump_offset = 0.0
         if self._dragging and dt > 0:
-            vx = (self.x() - self._last_drag_x) / dt
-            self._last_drag_x = self.x()
+            delta = self.pos() - self._last_drag_pos
+            vx = delta.x() / dt
+            self._last_drag_pos = self.pos()
             self._animator.feed_velocity(vx, now)
+            if self._drag_playback is not None:
+                shakes = sum(now - mark <= SHAKE_WINDOW for mark in self._shake.marks)
+                self._drag_playback.feed(now, math.hypot(delta.x(), delta.y()) / dt, shakes)
+        if self._drag_playback is not None:
+            self._drag_playback.advance(now)
         if self._falling:
             self._fall_step(now)
         self._refresh(now)
@@ -465,10 +518,11 @@ class PetWindow(QWidget):
             now = self._clock()
             self._shake.reset(self._press_global.x())
             self._animator.set_drag(True, now)
-            self._last_drag_x = self.x()
+            self._last_drag_pos = self.pos()
             self._last_tick = now
             self.setCursor(Qt.ClosedHandCursor)
             if not self._drag_active:
+                self._drag_playback = DragPlayback(now)
                 self._drag_active = True
                 self.drag_started.emit()
         self._shake.feed(gp.x(), self._clock())
@@ -488,6 +542,11 @@ class PetWindow(QWidget):
         was_pat = self._pat_mode and self._moved
         double = self._double
         caught = self._caught_fall
+        now = self._clock()
+        if was_dragging:
+            self.advance_to(now)
+            if self._drag_playback is not None:
+                self._drag_playback.freeze(now)
         self._press_global = None
         self._dragging = False
         self._pat_mode = False
@@ -495,7 +554,6 @@ class PetWindow(QWidget):
         self._caught_fall = False
         self._animator.set_drag(False, self._clock())
         self._update_hover_cursor(e.position().toPoint())
-        now = self._clock()
         if was_dragging:
             self.start_fall()
         elif caught:
@@ -610,6 +668,7 @@ class PetWindow(QWidget):
             landed_at = self._fall_start + math.sqrt(max(0.0, 2 * (self._fall_floor - self._fall_y0) / GRAVITY))
             if self._drag_active:
                 self._drag_active = False
+                self._drag_playback = None
                 self.drag_finished.emit()
             self._animator.squash(landed_at, "land")
             return

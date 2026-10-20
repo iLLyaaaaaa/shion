@@ -103,7 +103,7 @@ def run() -> int:
     config = state_mod.Config.debug() if debug else state_mod.Config()
     pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty)
 
-    win = PetWindow(height=data.window.get("height", 200))
+    win = PetWindow(height=data.window.get("height", 200), debug=debug)
     overlay = HeartOverlay()
     bubble = BubbleWindow()
     lang = resolve_language(
@@ -156,6 +156,7 @@ def snapshot(
     mirror: bool = False,
     jump: bool = False,
     walk: bool = False,
+    drag: bool = False,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -167,7 +168,7 @@ def snapshot(
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
     app = QApplication.instance() or QApplication(sys.argv)
     t = [100.0]  # 假时钟，不用真的等
-    win = PetWindow(clock=lambda: t[0], autostart=False)
+    win = PetWindow(clock=lambda: t[0], autostart=False, debug=False)
     win.set_state(from_state or state, animate=False)
     if from_state:
         win.set_state(state)
@@ -178,6 +179,10 @@ def snapshot(
     elif walk:
         win.place_default()
         win.walk(cross=True)
+    elif drag:
+        from shion.behavior import DragPlayback
+        win.set_state("drag", animate=False)
+        win._drag_playback = DragPlayback(t[0])
     t[0] += at
     win.advance_to(t[0])
     if mirror:
@@ -234,7 +239,7 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
     body = (400, 400, 100, 100)
     if kind == "eating":
         from shion.effects import CrumbOverlay, MOUTH_FRACTION
-        win = PetWindow(autostart=False)
+        win = PetWindow(autostart=False, debug=False)
         win.set_state("happy", animate=False)
         img = win.render_frame()
         t = [100.0]

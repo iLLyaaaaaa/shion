@@ -1,7 +1,8 @@
 """把 raw/ 里的分帧图（*_sheet.png）切成单帧精灵图，输出到 assets/sprites/。
 
-- walk_sheet.png → walk_1.png ~ walk_4.png
-- jump_sheet.png → jump_1.png（下蹲）、jump_2.png（腾空）
+- walk_sheet.png → walk_1.png ~ walk_8.png
+- jump_sheet.png → jump_1.png ~ jump_4.png（下蹲、起跳、最高点、下落）
+- drag_sheet.png → drag_1.png ~ drag_4.png
 
 处理方式：
 1. 按连通区域把整张图切成若干帧（每帧都是一个完整的人物，相邻帧挨得很近也能切开）
