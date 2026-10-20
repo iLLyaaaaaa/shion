@@ -26,7 +26,10 @@ import process_sprites as ps
 SHEETS = {
     "walk_sheet": ("walk", "height", True),
     "jump_sheet": ("jump", "head", False),
+    "drag_sheet": ("drag", "head", False),
 }
+# 每张分帧图应有的帧数；切出来的帧数不对时报错，避免生成错乱的动画
+EXPECTED = {"walk_sheet": 8, "jump_sheet": 4, "drag_sheet": 4}
 HEAD_TOP = 0.28     # 头部宽度测量范围：人物上部 28%（避开举起的手臂）
 MIN_FRAME_AREA = 5000  # 像素数大于这个值的连通块才算一帧
 
@@ -36,7 +39,9 @@ def split_frames(img: Image.Image) -> list[tuple[Image.Image, int]]:
 
     GPT 画的分帧图里，相邻两帧的头发经常挨得很近，按竖直空隙切会切不开，所以按连通区域切。
     """
+    import warnings
     from scipy import ndimage as nd
+    warnings.filterwarnings("ignore", category=RuntimeWarning)  # 切开后留下的空标签会让重心计算除以 0，忽略即可
     a = np.array(img)
     mask = a[..., 3] > 40
     lab, n = nd.label(mask)
@@ -46,6 +51,33 @@ def split_frames(img: Image.Image) -> list[tuple[Image.Image, int]]:
     centers = nd.center_of_mass(mask, lab, range(1, n + 1))
     big = [i for i in range(n) if sizes[i] >= MIN_FRAME_AREA]
     big.sort(key=lambda i: centers[i][1])
+    # 相邻两帧碰在一起时会连成一个大块：宽度明显超过中位数的块，在中间最细的竖线处切开
+    slices = nd.find_objects(lab)
+    widths = [slices[i][1].stop - slices[i][1].start for i in big]
+    med = float(np.median(widths)) if widths else 0
+    for i in list(big):
+        sl = slices[i]
+        w = sl[1].stop - sl[1].start
+        if med and w > 1.6 * med:
+            pieces = max(2, round(w / med))
+            region = lab[sl] == i + 1
+            cols = region.sum(0)
+            cuts = []
+            for k in range(1, pieces):
+                c = int(w * k / pieces)
+                lo, hi = max(1, c - int(med * 0.25)), min(w - 1, c + int(med * 0.25))
+                cuts.append(lo + int(np.argmin(cols[lo:hi])))
+            edges = [0] + cuts + [w]
+            for j in range(pieces):
+                new_label = lab.max() + 1
+                sub = np.zeros_like(region)
+                sub[:, edges[j]:edges[j + 1]] = region[:, edges[j]:edges[j + 1]]
+                lab[sl][sub] = new_label
+            big.remove(i)
+    n = int(lab.max())
+    sizes = nd.sum(mask, lab, range(1, n + 1))
+    centers = nd.center_of_mass(mask, lab, range(1, n + 1))
+    big = sorted([i for i in range(n) if sizes[i] >= MIN_FRAME_AREA], key=lambda i: centers[i][1])
     owner = {}
     for i in range(n):
         if i in big:
@@ -81,6 +113,9 @@ def main():
             continue
         full = ps.load_clean(path)  # 已裁到整体边界
         frames = split_frames(full)
+        want = EXPECTED.get(sheet)
+        if want and len(frames) != want:
+            raise SystemExit(f"{sheet}.png 切出了 {len(frames)} 帧，应该是 {want} 帧，请检查原图")
         if mode == "height":
             s = ps.FIG_H / float(np.median([f.height for f, _ in frames]))
         else:
