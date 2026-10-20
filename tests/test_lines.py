@@ -12,6 +12,7 @@ NEEDED = {
     "poke", "stop", "dizzy", "drag", "wake", "neglect_return", "praise_menu",
     "claude_working", "claude_done", "pat", "greeting", "claude_waiting",
     "intro", "startup", "idle_talk",
+    "plan_ready",
 }
 
 
@@ -59,6 +60,17 @@ def test_every_shipped_language_is_complete(code):
     assert set(raw["ui"]) == set(zh["ui"])
     assert raw["meta"]["name"] and isinstance(raw["meta"]["font_fallback"], list)
     assert all(isinstance(s, str) and s for pool in raw["lines"].values() for s in pool)
+
+
+@pytest.mark.parametrize("code", ["zh", "en", "ja"])
+def test_ready_reminders_are_native_and_interface_has_no_claude(code):
+    raw = _raw(code)
+    for key in ("plan_ready", "claude_done"):
+        assert raw["lines"][key]  # 必须原生提供，不能依赖中文回退
+        assert Lines(code).pick(key) in raw["lines"][key]
+    visible = list(raw["ui"].values()) + [s for pool in raw["lines"].values() for s in pool]
+    assert all("claude" not in text.casefold() for text in visible)
+    assert "done_summary" not in raw["ui"]
 
 
 def test_shipped_languages_are_zh_en_ja_with_zh_first():

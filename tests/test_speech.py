@@ -61,7 +61,7 @@ def test_empty_or_rejected_speech_does_not_change_the_current_bubble():
     assert (gate.priority, gate.started, gate.until, gate.last_low) == before
 
 
-@pytest.mark.parametrize("key", ["claude_done", "tool_error", "nudge", "claude_waiting", "permission_request"])
+@pytest.mark.parametrize("key", ["claude_done", "tool_error", "nudge", "claude_waiting", "permission_request", "plan_ready"])
 def test_critical_event_categories_are_high(key):
     assert speech_kind(key) == (Priority.HIGH, key)
 

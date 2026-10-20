@@ -8,6 +8,7 @@
   },
   "lines": {
     "permission_request": ["Something needs your call!"],
+    "plan_ready": ["The plan's ready! Take a look~"],
     "feedback_sent": ["Passed it on!"],
     "feedback_bad": ["Got it, I'll pass that on."],
     "resumed": ["Back to work!"],
@@ -35,22 +36,22 @@
       "Shion loves head pats... I-I mean, it's fine, I guess."
     ],
     "praise_menu": [
-      "Got it! I'll pass that on to Claude~"
+      "Got it! I'll pass that on when work resumes~"
     ],
     "claude_working": [
-      "Claude's working hard...",
+      "Working hard...",
       "Shh, don't distract it."
     ],
     "claude_done": [
-      "All done! Go on, praise Claude.",
-      "Task complete~"
+      "All done! Take a look at the results~",
+      "Task complete~ Come see how it turned out!"
     ],
     "claude_waiting": [
-      "Claude's waiting for your reply.",
+      "Something needs your confirmation.",
       "I think it wants to ask you something."
     ],
     "greeting": [
-      "Claude's here!",
+      "Time to get to work!",
       "Here we go again~",
       "Shion is ready!"
     ],
@@ -77,7 +78,7 @@
       "Th-that failed?"
     ],
     "nudge": [
-      "Claude's waiting for you~",
+      "The results are waiting for you~",
       "It finished a while ago!",
       "Come take a look~"
     ]
@@ -132,12 +133,12 @@
     "menu_about": "About",
     "menu_quit": "Quit",
     "about_title": "About Shion",
-    "about_body": "Shion v{version}\nA desktop pet for Claude.\n\nUnofficial fan project, not affiliated with Anthropic.",
+    "about_body": "Shion v{version}\nA desktop companion for your work.\n\nUnofficial fan project, not affiliated with Anthropic.",
     "span_days": "{days}d {hours}h",
     "span_hours": "{hours}h {minutes}m",
     "span_minutes": "{minutes}m",
-    "status": "Together for {span} · Pats today: {pats} · Claude tasks done: {tasks} · Affection: {affection}",
-    "port_busy": "Local port {port} is in use — Claude integration is unavailable for now.",
+    "status": "Together for {span} · Pats today: {pats} · Tasks done: {tasks} · Affection: {affection}",
+    "port_busy": "Local port {port} is in use — work integration is unavailable for now.",
     "act_read": "Reading {target}…",
     "act_edit": "Editing {target}…",
     "act_write": "Writing {target}…",
@@ -147,7 +148,6 @@
     "act_agent": "Called a helper: {target}",
     "act_other": "Working on something…",
     "act_private": "Working…",
-    "done_summary": "Done: {text}",
     "recent_header": "Recent:",
     "menu_privacy": "Status only (hide details)",
     "act_error": "Error: {target}",

@@ -10,6 +10,7 @@
   },
   "lines": {
     "permission_request": ["決めてほしいことがあるよ"],
+    "plan_ready": ["計画ができたよ、見てみてね～"],
     "feedback_sent": ["伝えておいたよ"],
     "feedback_bad": ["わかった、伝えるね"],
     "resumed": ["作業再開だよ"],
@@ -37,22 +38,22 @@
       "詩音、なでられるの好き……べ、別にそうでもないけど！"
     ],
     "praise_menu": [
-      "了解！次に Claude に会ったら伝えておくね～"
+      "了解！次に作業するときに伝えておくね～"
     ],
     "claude_working": [
-      "Claude ががんばってる……",
+      "がんばって作業中……",
       "しーっ、邪魔しないであげて"
     ],
     "claude_done": [
-      "終わったよ！Claude をほめてあげて",
-      "タスク完了～"
+      "終わったよ！結果を見てみてね～",
+      "作業完了～見に行ってみてね！"
     ],
     "claude_waiting": [
-      "Claude が返事を待ってるよ",
+      "確認してほしいことがあるよ",
       "なにか聞きたいことがあるみたい"
     ],
     "greeting": [
-      "Claude が来たよ！",
+      "作業を始めるよ！",
       "さあ、始めよっか～",
       "詩音、準備できてるよ！"
     ],
@@ -79,7 +80,7 @@
       "し、失敗しちゃった？"
     ],
     "nudge": [
-      "Claude が待ってるよ～",
+      "結果が待ってるよ～",
       "終わってからだいぶ経つよ！",
       "見に来てあげて～"
     ]
@@ -134,12 +135,12 @@
     "menu_about": "Shion について",
     "menu_quit": "終了",
     "about_title": "Shion について",
-    "about_body": "Shion（詩音）v{version}\nClaude のデスクトップマスコット。\n\n非公式ファン作品です。Anthropic とは関係ありません。",
+    "about_body": "Shion（詩音）v{version}\n作業に寄り添うデスクトップマスコット。\n\n非公式ファン作品です。Anthropic とは関係ありません。",
     "span_days": "{days}日{hours}時間",
     "span_hours": "{hours}時間{minutes}分",
     "span_minutes": "{minutes}分",
-    "status": "一緒に過ごした時間 {span} · 今日なでられた回数 {pats} · Claude の完了タスク {tasks} · 好感度 {affection}",
-    "port_busy": "ローカルポート {port} が使用中のため、Claude との連携は一時的に使えません",
+    "status": "一緒に過ごした時間 {span} · 今日なでられた回数 {pats} · 完了タスク {tasks} · 好感度 {affection}",
+    "port_busy": "ローカルポート {port} が使用中のため、作業の連携は一時的に使えません",
     "act_read": "{target} を読んでるよ……",
     "act_edit": "{target} を直してるよ……",
     "act_write": "{target} を書いてるよ……",
@@ -149,7 +150,6 @@
     "act_agent": "お手伝いさんを呼んだ：{target}",
     "act_other": "作業中……",
     "act_private": "作業中……",
-    "done_summary": "できた：{text}",
     "recent_header": "最近：",
     "menu_privacy": "状態だけ表示（内容は隠す）",
     "act_error": "エラー：{target}",

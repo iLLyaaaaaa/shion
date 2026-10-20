@@ -155,7 +155,7 @@ def test_no_http_route_can_set_a_decision(server, extra):
     post(srv, "/permission/withdraw", {"id": "other", **extra})
     post(srv, "/pause/wait", {"wait": 0, **extra})
     post(srv, "/feedback/take", dict(extra))
-    for etype in ("permission_allow", "allow", "approve", "permission", "decision", "react"):
+    for etype in ("permission_allow", "allow", "approve", "permission", "decision", "react", "plan_ready"):
         post(srv, "/event", {"type": etype, "detail": json.dumps(extra), **extra})
     for path in ("/permission/allow", "/permission/decide", "/permission/approve", "/permission"):
         assert post(srv, path, {"id": rid, **extra})[0] == 404
@@ -185,12 +185,12 @@ def test_http_input_validation_and_limits(server):
     assert post(srv, "/permission/wait", {"id": 5})[0] == 400
     assert post(srv, "/permission/wait", {})[0] == 400
     assert post(srv, "/permission/withdraw", {"id": None})[0] == 400
-    big = {"tool": "ExitPlanMode", "detail": "计" * 15000}  # 约 45 KB，超过普通接口的 4 KB 但在授权上限内
+    big = {"tool": "Bash", "detail": "字" * 15000}  # 约 45 KB，超过普通接口的 4 KB 但在授权上限内
     assert post(srv, "/permission/open", big)[0] == 200
     too_big = {"tool": "Bash", "detail": "x" * (MAX_PERMISSION_BODY + 10)}
     assert post(srv, "/permission/open", too_big)[0] == 400
     assert post(srv, "/permission/wait", {"id": "x" * 6000})[0] == 400  # 其他接口仍是 4 KB
-    assert hub.permissions.pending()[0].detail == "计" * 15000
+    assert hub.permissions.pending()[0].detail == "字" * 15000
 
 
 @pytest.mark.parametrize("wait", ["5", None, True, float("nan"), float("inf"), [], {}])
@@ -326,6 +326,54 @@ def test_hook_does_not_handle_ask_user_question(hook_env):
     assert hub.permissions.pending() == []
 
 
+@pytest.mark.parametrize("tool_input", [{}, {"plan": "私密计划" * 10000}, {"plan": "短计划", "allowedPrompts": []}])
+def test_exit_plan_mode_only_sends_reminder_without_registering_or_deciding(env, tmp_path, tool_input):
+    events = []
+    hub = env.ctl.hub
+    existing = hub.permissions.open("Bash", "echo keep")
+
+    def forward(kind, detail):
+        events.append((kind, detail))
+
+    srv = ShionServer(forward, lambda: "", port=0, hub=hub)
+    srv.start()
+    try:
+        payload = json.dumps({"tool_name": "ExitPlanMode", "tool_input": tool_input}).encode("utf-8")
+        r = run_hook("PermissionRequest", srv.port, tmp_path, stdin=payload)
+        assert r.returncode == 0 and r.stdout == r.stderr == b""
+        assert events == [("plan_ready", None)]
+        assert [p.id for p in hub.permissions.pending()] == [existing]
+        hub.permissions.withdraw(existing)
+        # GUI 线程处理实际 hook 发来的事件，不伪造点击。
+        env.ctl.handle_event(*events[0])
+        env.ctl.tick()
+        assert env.ctl._perm_panel is None
+        assert env.said[-1] == "计划写好啦，去看看吧～"
+        assert env.win.motion_active
+    finally:
+        srv.stop()
+
+
+@pytest.mark.parametrize("answer", [None, {"id": "x", "status": "allow"}, {"behavior": "deny"}])
+def test_exit_plan_mode_never_calls_permission_routes_or_describes_plan(monkeypatch, answer):
+    h = load_hook()
+    calls = []
+    def request(path, payload=None, timeout=0.5):
+        calls.append((path, payload))
+        return answer
+    def unexpected(*args, **kwargs):
+        pytest.fail("ExitPlanMode 不应处理计划内容")
+    monkeypatch.setattr(h, "request", request)
+    monkeypatch.setattr(h, "describe_permission", unexpected)
+    assert h.permission_decision({"tool_name": "ExitPlanMode", "tool_input": {"plan": "私密计划"}}, 0) is None
+    assert calls == [("/event", {"type": "plan_ready"})]
+
+
+def test_exit_plan_mode_without_server_still_returns_no_decision(tmp_path):
+    r = run_hook("PermissionRequest", 1, tmp_path, stdin=perm_input("ExitPlanMode", plan="私密计划"))
+    assert r.returncode == 0 and r.stdout == r.stderr == b""
+
+
 @pytest.mark.parametrize("data", [b"", b"[]", b"not json", b"{}", b'{"tool_name": 5}', b'{"tool_name": ""}'])
 def test_hook_bad_input_gives_no_decision(hook_env, data):
     srv, hub, tmp = hook_env
@@ -384,8 +432,6 @@ def test_describe_permission_shows_what_will_happen():
     assert d("NotebookEdit", {"notebook_path": "n.ipynb"}) == "n.ipynb"
     assert d("WebFetch", {"url": "https://example.com/a?b=1"}) == "https://example.com/a?b=1"
     assert d("WebSearch", {"query": "pyside6 qtimer"}) == "pyside6 qtimer"
-    plan = "# 计划\n1. 先做 A\n2. 再做 B\n" * 50
-    assert d("ExitPlanMode", {"plan": plan}) == plan  # 计划全文
     other = d("mcp__x__tool", {"a": 1, "b": "中文"})
     assert json.loads(other) == {"a": 1, "b": "中文"} and "中文" in other
     assert d("Bash", None) == "{}" and d("Whatever", "not a dict") == "{}"
@@ -514,11 +560,11 @@ def test_long_text_gets_expand_toggle_and_full_text(env):
     panel = env.ctl._perm_panel
     assert panel._toggle.isHidden()
     env.ctl.hub.permissions.withdraw(short)
-    plan = "\n".join(f"步骤 {i}" for i in range(40))
-    open_request(env, plan, tool="ExitPlanMode")
+    command = "\n".join(f"echo line {i}" for i in range(40))
+    open_request(env, command, tool="Bash")
     env.advance(0.1)
     assert not panel._toggle.isHidden() and panel._toggle.text() == "展开"
-    assert panel._detail.toPlainText() == plan  # 完整显示，不截断
+    assert panel._detail.toPlainText() == command  # 完整显示，不截断
     h_collapsed = panel.height()
     panel._toggle.click()
     assert panel._toggle.text() == "收起" and panel.height() > h_collapsed

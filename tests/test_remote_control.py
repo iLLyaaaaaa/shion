@@ -147,6 +147,7 @@ def pet(env):  # noqa: F811
 
 
 def test_pause_shows_stop_sprite_and_sticky_bubble(pet):
+    pet.data.activity_level = "quiet"  # 只测常驻时间；随机闲聊会按设计盖掉它再恢复
     pet.ctl.pause_work()
     assert pet.ctl.hub.is_paused and pet.state.paused
     assert pet.win.sprite_name == "stop"

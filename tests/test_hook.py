@@ -71,17 +71,6 @@ def test_describe_tool():
     assert h.describe_tool("Read", "not a dict") == {"tool": "read", "target": ""}
 
 
-def test_first_sentence():
-    h = load_hook()
-    assert h.first_sentence("## 做完啦！改了3个文件。\n其他") == "做完啦"
-    assert h.first_sentence("Done. All good") == "Done"
-    assert h.first_sentence("\n\n**好**的，已经处理完毕") == "好的，已经处理完毕"
-    assert h.first_sentence("v1.2 ok") == "v1.2 ok"
-    long = h.first_sentence("很长" * 50)
-    assert len(long) == 40 and long.endswith("…")
-    assert h.first_sentence(None) == "" and h.first_sentence("   \n ") == ""
-
-
 def test_pretooluse_sends_json_detail(env):
     srv, events, _, tmp = env
     payload = json.dumps({"tool_name": "Read", "tool_input": {"file_path": "C:/p/state.py"}}).encode()
@@ -97,14 +86,25 @@ def test_pretooluse_bad_stdin_still_sends_working(env):
     assert events[0][0] == "working" and json.loads(events[0][1])["tool"] == "other"
 
 
-def test_stop_sends_first_sentence(env):
+def test_stop_sends_only_status_even_with_reply_and_transcript(env):
     srv, events, _, tmp = env
-    payload = json.dumps({"last_assistant_message": "## 改好了。后面还有很多"}, ensure_ascii=False).encode("utf-8")
-    run_hook("Stop", srv.port, tmp, stdin=payload)
-    assert events == [("stop", "改好了")]
+    payload = json.dumps({"last_assistant_message": "私密回复。不要转发", "transcript_path": "private.jsonl"}, ensure_ascii=False).encode("utf-8")
+    r = run_hook("Stop", srv.port, tmp, stdin=payload)
+    assert r.returncode == 0 and r.stdout == r.stderr == b""
+    assert events == [("stop", None)]
     events.clear()
     run_hook("Stop", srv.port, tmp, stdin=b"{}")
     assert events == [("stop", None)]
+
+
+def test_stop_wire_payload_has_no_detail(monkeypatch):
+    h = load_hook()
+    calls = []
+    monkeypatch.setattr(h.sys, "argv", [str(HOOK), "Stop"])
+    monkeypatch.setattr(h, "read_input", lambda: {"last_assistant_message": "私密回复"})
+    monkeypatch.setattr(h, "request", lambda path, payload=None: calls.append((path, payload)))
+    h.main()
+    assert calls == [("/event", {"type": "stop"})]
 
 
 def test_tool_error_sends_tool_name_but_not_interrupts(env):
@@ -326,10 +326,6 @@ def test_hanging_server_returns_quickly(tmp_path):
         assert time.monotonic() - t0 < 5
     finally:
         s.close()
-
-
-def test_first_sentence_keeps_underscores():
-    assert load_hook().first_sentence("读取 does_not_exist.md 失败") == "读取 does_not_exist.md 失败"
 
 
 def test_describe_tool_caps_target_length():

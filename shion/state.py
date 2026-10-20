@@ -520,7 +520,7 @@ class PetState:
 
     def claude_event(self, etype: str, detail: Optional[str], now: datetime) -> list[Reaction]:
         """处理本地 HTTP 服务转来的事件。未知类型直接忽略。"""
-        if etype not in ("session_start", "prompt", "working", "stop", "notification", "react", "tool_error"):
+        if etype not in ("session_start", "prompt", "working", "stop", "notification", "react", "tool_error", "plan_ready"):
             log.info("忽略未知事件：%r", etype)
             return []
         if etype == "react" and detail not in TEMP_STATES:
@@ -536,6 +536,9 @@ class PetState:
             if not (self._working_until and now < self._working_until):
                 reactions.append(_say("claude_working"))
             self._working_until = now + self.config.working_timeout  # 有新事件就续期
+        elif etype == "plan_ready":
+            self._working_until = None
+            reactions.append(_say("plan_ready"))
         elif etype == "stop":
             self._working_until = None
             self._stopped_at, self._nudges = now, 0

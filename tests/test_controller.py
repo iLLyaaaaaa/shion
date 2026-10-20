@@ -208,7 +208,7 @@ def test_menu_good_feedback_shows_proud(env):
     assert env.win.sprite_name == "proud"
     assert env.data.affection == 3
     assert env.data.feedback_queue == [{"kind": "good", "text": ""}]
-    assert env.said == ["收到！下次见到 Claude 我就告诉它～"]
+    assert env.said == ["收到！下次干活时我就转告～"]
 
 
 def test_menu_size_changes_window_and_save_and_checkmark(env):
@@ -248,7 +248,7 @@ def test_double_click_shows_status_after_delay(env):
     QTest.qWait(80)
     assert len(env.said) == 1
     text = env.said[0]
-    assert "今天被摸 3 次" in text and "Claude 完成了 0 个任务" in text and "好感度 3" in text
+    assert "今天被摸 3 次" in text and "已完成 0 个任务" in text and "好感度 3" in text
 
 
 def test_double_click_followed_by_click_does_not_show_status(env):
@@ -647,7 +647,7 @@ def test_working_activity_obeys_low_category_cooldown(env):
 
 def test_working_without_detail_keeps_old_line(env):
     env.ctl.handle_event("working", None)
-    assert len(env.said) == 1 and env.said[0] in ("Claude 在努力中……", "嘘，别打扰它")
+    assert len(env.said) == 1 and env.said[0] in ("正在努力干活……", "嘘，别打扰它")
 
 
 def test_privacy_mode_hides_target_and_summary(env):
@@ -661,10 +661,16 @@ def test_privacy_mode_hides_target_and_summary(env):
     assert not any("secret" in t or "密码" in t for t in env.said)
 
 
-def test_stop_summary_replaces_done_line(env):
+def test_stop_ignores_legacy_reply_in_bubble_log_and_status(env, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="shion.controller")
     env.ctl.handle_event("stop", "改好了三个文件")
-    assert env.said == ["做完啦：改好了三个文件"]
+    assert len(env.said) == 1 and env.said[0] in env.ctl.lines._lines["claude_done"]
     assert env.win.sprite_name == "done"
+    assert env.ctl.activity.recent()[0].target == ""
+    env.advance(10)
+    env.ctl._show_status()
+    assert "改好了三个文件" not in "\n".join(env.said) + caplog.text
 
 
 def test_stop_without_summary_uses_random_line(env):
@@ -696,8 +702,8 @@ def test_double_click_status_lists_recent_activity(env):
     env.ctl._show_status()
     text = env.said[0]
     assert "最近：" in text
-    assert "12:00 在改 bubble.py……" in text and "12:00 做完啦：好了" in text
-    assert text.index("做完啦") < text.index("在改")  # 新的在前
+    assert "12:00 在改 bubble.py……" in text and "12:00 做完了" in text
+    assert text.index("做完了") < text.index("在改")  # 新的在前
 
 
 def test_nudge_bounces_and_speaks(env):

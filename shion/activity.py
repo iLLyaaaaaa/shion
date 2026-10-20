@@ -17,7 +17,7 @@ class Entry:
     time: datetime
     kind: str  # 事件类型：session_start / working / stop / tool_error …
     tool: str = ""  # working 时的工具类别
-    target: str = ""  # 文件名 / 搜索词 / 回复第一句 / 出错的工具名
+    target: str = ""  # 文件名 / 搜索词 / 出错的工具名
 
 
 def parse_working(detail: Optional[str]) -> Optional[tuple[str, str]]:
@@ -40,13 +40,15 @@ def make_entry(etype: str, detail: Optional[str], now: datetime) -> Optional[Ent
     if etype == "working":
         parsed = parse_working(detail)
         return Entry(now, etype, *(parsed or ("other", "")))
-    if etype in ("session_start", "stop", "tool_error"):
+    if etype == "stop":
+        return Entry(now, etype)  # 旧 hook 传来的回复内容也不保留
+    if etype in ("session_start", "tool_error"):
         return Entry(now, etype, target=detail or "")
     return None  # prompt / notification / react 不进记录
 
 
 def describe(entry: Entry, ui: Callable[..., str], private: bool) -> str:
-    """一条记录的显示文字。隐私模式下不含文件名、搜索词、回复内容。"""
+    """一条记录的显示文字。隐私模式下不含文件名、搜索词。"""
     if entry.kind == "working":
         if private:
             return ui("act_private")
@@ -54,8 +56,6 @@ def describe(entry: Entry, ui: Callable[..., str], private: bool) -> str:
             return ui(f"act_{entry.tool}", target=entry.target)
         return ui("act_bash" if entry.tool == "bash" else "act_other")
     if entry.kind == "stop":
-        if entry.target and not private:
-            return ui("done_summary", text=entry.target)
         return ui("act_done")
     if entry.kind == "tool_error":
         if entry.target and not private:

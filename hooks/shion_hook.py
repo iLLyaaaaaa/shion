@@ -6,6 +6,7 @@
 暂停/继续：PreToolUse 在用户点了“暂停”时一直等；诗音没开、连不上、出错一律放行。
 同意/否决：PermissionRequest 把要执行的内容交给诗音，等用户在诗音上点按钮；只有收到明确的 allow 才输出 allow，
 其余一切情况（诗音没开、超时、出错、返回内容不对）都不输出任何决定，交回 CC 自己的授权框。
+ExitPlanMode 仅发送 plan_ready 提醒，不登记授权请求，计划确认始终由 CC 自己处理。
 反馈队列：PostToolUse（工作中）和 UserPromptSubmit（空闲时）把诗音里攒的反馈作为附加上下文送出。
 """
 import json
@@ -98,7 +99,7 @@ def pause_gate(limit: float, poll: float = PAUSE_POLL):
 
 PERMISSION_POLL = 10.0
 FEEDBACK_TIMEOUT = 3.0
-DETAIL_LIMIT = 12000  # 发给诗音的内容字数上限（再长的计划只显示前面）
+DETAIL_LIMIT = 12000  # 超出上限的授权内容不发送，交回 CC 自己处理
 
 
 def permission_limit() -> int:
@@ -111,7 +112,7 @@ def _clip(text, limit: int = DETAIL_LIMIT) -> str:
 
 
 def describe_permission(tool_name, tool_input, limit: int = DETAIL_LIMIT) -> str:
-    """把要授权的操作写成给人看的文字：命令、文件完整路径、网址、计划全文等。"""
+    """把要授权的操作写成给人看的文字：命令、文件完整路径、网址等。"""
     ti = tool_input if isinstance(tool_input, dict) else {}
     kind = TOOL_KIND.get(tool_name, "other")
     if kind == "bash" and ti.get("command"):
@@ -123,8 +124,6 @@ def describe_permission(tool_name, tool_input, limit: int = DETAIL_LIMIT) -> str
         return _clip(ti["url"], limit)
     if tool_name == "WebSearch" and ti.get("query"):
         return _clip(ti["query"], limit)
-    if tool_name == "ExitPlanMode" and ti.get("plan"):
-        return _clip(ti["plan"], limit)
     try:
         return _clip(json.dumps(ti, ensure_ascii=False, indent=2), limit)
     except Exception:
@@ -149,6 +148,9 @@ def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL)
     tool = data.get("tool_name")
     if not isinstance(tool, str) or not tool or tool == "AskUserQuestion":
         return None  # 提问不是同意/否决，交给 CC
+    if tool == "ExitPlanMode":
+        request("/event", {"type": "plan_ready"})
+        return None  # 只提醒去看计划，不登记、不轮询、不给决定
     if len(describe_permission(tool, data.get("tool_input"), limit=10**9)) > DETAIL_LIMIT:
         return None  # 内容长到面板放不下：用户看不全就不能替他决定，交回 CC 自己的授权框
     detail = describe_permission(tool, data.get("tool_input"))
@@ -251,20 +253,6 @@ def describe_tool(tool_name, tool_input) -> dict:
     return {"tool": kind, "target": target}
 
 
-def first_sentence(text, limit: int = 40) -> str:
-    """取回复的第一句：去掉 markdown 符号，按句号/换行切，过长截断。"""
-    if not isinstance(text, str):
-        return ""
-    for line in text.splitlines():
-        line = re.sub(r"[#*>`]+", "", line).strip(" -\t")
-        if not line:
-            continue
-        m = re.search(r"[。！？!?]|\.(?=\s|$)", line)
-        sentence = line[: m.start()] if m else line
-        return _short(sentence.strip(), limit)
-    return ""
-
-
 def read_input() -> dict:
     try:
         raw = sys.stdin.buffer.read()
@@ -278,8 +266,6 @@ def build_detail(name: str, data: dict):
     """各事件发给桌宠的 detail（字符串或 None）。"""
     if name == "PreToolUse":
         return json.dumps(describe_tool(data.get("tool_name"), data.get("tool_input")), ensure_ascii=False)
-    if name == "Stop":
-        return first_sentence(data.get("last_assistant_message")) or None
     if name == "PostToolUseFailure":
         return _short(data.get("tool_name") or "", 40) or None
     return None

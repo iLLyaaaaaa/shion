@@ -108,6 +108,16 @@ def test_stop_ends_working(pet):
     assert pet.current(T0 + sec(14)) == "idle"
 
 
+def test_plan_ready_ends_working_without_counting_a_task_or_starting_nudges(pet):
+    pet.claude_event("working", None, T0)
+    reactions = pet.claude_event("plan_ready", None, T0 + sec(5))
+    assert keys(reactions) == ["plan_ready"]
+    assert not pet.is_working(T0 + sec(5))
+    assert pet.current(T0 + sec(5)) == "idle"
+    assert pet.save.stats["claude_tasks"] == 0
+    assert "nudge" not in keys(pet.tick(T0 + sec(306)))
+
+
 # ---- 睡眠 ----
 
 def test_sleep_after_15_min_idle(pet):

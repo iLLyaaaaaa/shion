@@ -108,7 +108,7 @@ claude pet/
 1. **drag**：正在被拖动
 2. **固定表情 / 手动表情**：固定无期限；未固定的手动表情 5 秒
 3. **临时反应**（有持续时间）：happy、stop、dizzy、done（3 秒）、proud（3 秒）
-4. **working**：收到 Claude 开始干活的事件；收到 stop 事件或 2 分钟没有新事件后退出
+4. **working**：收到 Claude 开始干活的事件；收到 stop / plan_ready 事件或 2 分钟没有新事件后退出。plan_ready 只提醒看计划，不计为完成任务、不触发 done 或完成后的定时催促
 5. **sleep**：本地时间 0:30～6:30，或者 15 分钟没有任何鼠标交互、也没有 Claude 事件。任何交互都会唤醒，唤醒时说一句起床台词
 6. **待机短暂表情**：happy / idle 2 秒
 7. **底层状态**：根据冷落值决定
@@ -151,7 +151,7 @@ claude pet/
 - 独立的无边框置顶小窗口，跟随在桌宠头顶上方；如果靠近屏幕边缘，自动翻到另一侧。
 - **终端风格**：背景 `#0A0A0A`，1px 橙色 `#F58236` 边框，圆角 4px，米白色文字，等宽字体（优先 `Cascadia Mono`，回退到 `Consolas`），每行开头加 `> `。
 - 打字机效果：每 30ms 出一个字，全部显示完后停留 4 秒再淡出（0.3 秒）。
-- 台词统一经控制器仲裁：高优先级（Claude 完成/结果转述、出错、催促、等待确认和以后授权请求）随时打断；中优先级（问候、唤醒/回归、菜单反馈、双击状态查询）只能打断低优先级；低优先级（摸头、戳、拖、自言自语、Claude 工作过程提示）不能打断中/高。当前气泡自然消失后不再阻挡。
+- 台词统一经控制器仲裁：高优先级（完成提醒、计划写好提醒、出错、催促、等待确认和授权请求）随时打断；中优先级（问候、唤醒/回归、菜单反馈、双击状态查询）只能打断低优先级；低优先级（摸头、戳、拖、自言自语、工作过程提示）不能打断中/高。当前气泡自然消失后不再阻挡。
 - 低优先级互相替换时，当前气泡须已出现至少 2.5 秒（从气泡开始出现计时，不从打字完成计时），且同一触发类别已实际说出的台词至少间隔 4 秒；戳导致的普通/挡手/晕共用戳冷却，拖动及其落地晃晕共用拖冷却。被拦截的台词丢弃，不补播，不消耗随机台词选择。
 - 相邻摸头间隔 ≤1 秒算同一过程：开始尝试说一句，连续持续超过 6 秒再尝试一句，同一过程最多两句；仍受低优先级规则限制。每次摸头的爱心、表情、好感度及统计照常。相关时间都在 `speech.py`。
 - 台词从当前语言的 json 随机抽取，同一类台词不要连续重复。静音时不弹气泡。
@@ -166,7 +166,7 @@ claude pet/
 - **启动台词**：没有存档文件时说当前语言的 `intro`；非首次普通启动一律使用 `startup`，不再随机重复自我介绍。hook 仅对子进程设置 `SHION_LAUNCHED_BY_HOOK=1`，非首次被 hook 拉起时不说普通启动台词，交给 `session_start` 的 `greeting` 问候；遵守静音设置。
 - 右键菜单「语言」子菜单列出扫描到的语言（单选），选择后立即生效（菜单、双击状态、之后的台词、气泡字体），保存到存档，正在显示的气泡收起。
 
-`assets/lines/zh.json` 的 `lines` 部分的初始内容（Shion 的性格：温柔、有点傲娇，很在意 Claude 有没有被夸）：
+`assets/lines/zh.json` 的 `lines` 部分示例（Shion 的性格：温柔、有点傲娇，很在意工作有没有被夸；界面文字和所有台词不出现“Claude”）：
 
 ```json
 {
@@ -174,9 +174,10 @@ claude pet/
   "stop": ["够、够了啦！", "再戳我就生气了哦"],
   "dizzy": ["世界在转……", "呜……晕了"],
   "pat": ["……嘿嘿", "再摸一下也不是不行", "摸得好舒服……"],
-  "praise_menu": ["收到！下次见到 Claude 我就告诉它～"],
-  "claude_working": ["Claude 在努力中……", "嘘，别打扰它"],
-  "claude_done": ["做完啦！快夸夸 Claude", "任务完成～"],
+  "praise_menu": ["收到！下次干活时我就转告～"],
+  "claude_working": ["正在努力干活……", "嘘，别打扰它"],
+  "claude_done": ["做完啦！去看看结果吧～", "任务完成～快去看看吧！"],
+  "plan_ready": ["计划写好啦，去看看吧～"],
   "wake": ["唔……早", "我才没有睡着"],
   "neglect_return": ["……你终于回来了。", "我还以为你不要我了"],
   "drag": ["放我下来！", "哇啊啊——"]
@@ -194,7 +195,8 @@ claude pet/
 | `prompt` | UserPromptSubmit hook | 刷新“被理会”时间 |
 | `working` | PreToolUse hook | 进入 working（已经在 working 时忽略） |
 | `stop` | Stop hook | 退出 working → 播放 done 3 秒 + claude_done 台词，claude_tasks +1 |
-| `notification` | Notification hook | 气泡提示“Claude 在等你确认哦”（只有终端版会触发） |
+| `plan_ready` | ExitPlanMode 的 PermissionRequest hook | 高优先级气泡“计划写好啦，去看看吧～”并跳一下；退出 working，不弹授权面板、不计完成任务 |
+| `notification` | Notification hook | 气泡提示“有事情等你确认哦”（只有终端版会触发） |
 | `react` | 预留（目前没有调用方） | `detail` 是表情名，临时切换到该表情 3 秒 |
 
 - `POST /feedback/take` → 返回 `{"text": "…"}`：取走并清空反馈队列，按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
@@ -214,19 +216,21 @@ claude pet/
 - `PostToolUse`：调用 `/feedback/take`，非空则输出 `hookSpecificOutput.additionalContext`（Claude 工作中即可收到反馈）
 - `PreToolUse`：先问 `/pause/wait`；暂停中就按 25 秒一段一直等，直到继续或 `prompt` 解除；诗音没开、连不上、返回内容不对一律放行；等满暂停上限（默认 30 分钟）输出 `permissionDecision: deny`（理由“用户暂停了工作，请停下并等待用户指示”）并发 `pause_timeout`
 - `SessionStart`：如果 `/health` 不通，就启动桌宠（`.venv\Scripts\pythonw.exe -m shion`，脱离父进程，不弹出控制台窗口），然后发送 `session_start` 事件。
-- 其他事件（`PreToolUse` 发 `working`、`Stop`、`Notification`）只负责转发。
+- `Stop`：只发送 `{"type":"stop"}`，不读取/转发 `last_assistant_message`，不打开 `transcript_path`。只说当前语言的完成提醒。
+- 其他事件（`PreToolUse` 发 `working`、`Notification`）只负责转发。
 - 配置写进**用户级** `~/.claude/settings.json` 的 `hooks` 字段，这样终端和桌面端的 Code 标签页都会加载。写之前先备份原文件，**合并而不是覆盖**用户已有的配置。另外写一个 `tools/install_hooks.py`（安装）和 `tools/uninstall_hooks.py`（卸载）。
 
 ## 状态感知（v0.2.1）
 
 让诗音知道 Claude Code 正在干什么，当好状态窗口，也是 v0.3 遥控功能的“眼睛”。全部基于 hooks，只读，不打扰工作。
 
-- **转述结果**：Stop hook 的输入里有对话记录文件路径（`transcript_path`，字段名按官方文档确认）。读取 Claude 最后一条回复，取第一句（最多约 40 字），气泡显示“做完啦：……”
+- **完成提醒**：Stop 只提示去看结果，中文如“做完啦！去看看结果吧～”；英文如“All done! Take a look at the results~”；日文如“終わったよ！結果を見てみてね～”。三语均有原生台词，不显示回复第一句；旧 hook 发来的 stop detail 也不显示、不记录到最近活动或控制器日志。最近活动只显示“做完了”。done 表情、任务计数和定时催促保留
+- **计划提醒**：ExitPlanMode 的 PermissionRequest 仅发送无 detail 的 `plan_ready` 事件，计划正文不发送。三语分别是“计划写好啦，去看看吧～” / “The plan's ready! Take a look~” / “計画ができたよ、見てみてね～”。高优先级可打断已有气泡，同时复用菜单原地跳跃一次（静音只抑制气泡，仍跳；拖动/下落时沿用跳跃的保护，不强行中断）。不登记授权、不轮询、不输出 allow/deny，确认由 CC 自己处理
 - **显示正在干什么**：PreToolUse 时根据工具名和参数生成简短描述，例如“在读 state.py……”“在跑命令……”“在改 bubble.py……”。同一个描述 3 秒内不重复弹出
 - **出错反应**：工具执行失败时（PostToolUse 结果里带错误，或官方提供的失败事件），切到 dizzy 2 秒，说一句“呜……出错了”
 - **催你回来**：Claude 停下后，如果 5 分钟（可配置）没有新的 UserPromptSubmit，诗音跳一下提醒；最多提醒 2 次
 - **最近活动记录**：内存里保留最近 20 条事件（时间、类型、简短描述），双击状态里可以看最近 5 条；不写入存档
-- **隐私开关**（右键菜单）：“只显示状态，不显示内容”。打开后不显示文件名、命令和回复内容
+- **隐私开关**（右键菜单）：“只显示状态，不显示内容”。打开后不显示文件名、命令；回复内容无论开关状态都不显示
 
 ## Claude Code 遥控（v0.3）
 
@@ -236,7 +240,7 @@ claude pet/
 
 | 操作 | 实现 | 行为 |
 |---|---|---|
-| **同意 / 否决** | **PermissionRequest hook**：返回 `hookSpecificOutput.decision.behavior` 为 `allow` / `deny`（字段按官方文档确认）。hook 脚本向本地服务器长轮询，等待用户在诗音上的选择 | 气泡显示要执行的命令或要改的文件（完整显示，过长时可展开）和两个大按钮。退出计划模式的确认同样适用 |
+| **同意 / 否决** | **PermissionRequest hook**：返回 `hookSpecificOutput.decision.behavior` 为 `allow` / `deny`（字段按官方文档确认）。hook 脚本向本地服务器长轮询，等待用户在诗音上的选择 | 气泡显示要执行的命令或要改的文件（完整显示，过长时可展开）和两个大按钮。**ExitPlanMode 例外，只提醒，计划确认由 CC 自己处理** |
 | **做得好 / 有问题** | 放进**反馈队列**；送达方式见下 | “有问题”可以附一句话（单行输入框，可留空） |
 | **暂停 / 继续** | **PreToolUse hook**：暂停期间 hook 长轮询等待，不返回 | 见下面「暂停规则」 |
 
@@ -244,6 +248,7 @@ claude pet/
 - 决定**只能由用户在诗音界面上亲手点击产生**。本地 HTTP 服务**不提供**任何“设置决定”的接口，hook 只能“等待结果”
 - 默认等待 **120 秒**（可配置）。超时后 hook 不给决定，CC 照常弹出自己的授权框。**任何情况下都不能默认同意**
 - 诗音没在运行、连不上服务器时，hook 立刻退出、不给决定，交回 CC 自己处理
+- ExitPlanMode 无论有无计划、计划多长，一律不登记请求、不给决定；只尝试发送 `plan_ready`，发送失败也静默退出
 - 同一时间可能有多个授权请求（例如子代理并行）：按顺序排队，一次只显示一个，显示“还有 N 个”
 - 否决时附带理由“用户通过诗音否决了这个操作”
 - 内容超过 12000 字（面板放不下、用户看不全）时，hook 不登记请求、不给决定，交回 CC 自己的授权框
@@ -258,8 +263,8 @@ claude pet/
 - 右键原有的“夸夸”菜单项并入“工作遥控 → 做得好”；原来的 `pending_praise` / `/praise/take` 已由反馈队列和 `/feedback/take` 取代（存档迁移见「持久化」）
 
 **同意 / 否决的实现要点（v0.3 第二部分）**
-- hook（PermissionRequest）：`AskUserQuestion` 不处理（那是提问不是授权）；其余工具先 `/permission/open`，再按 10 秒一段 `/permission/wait`。**只有响应是对象、`id` 对得上、`status` 恰好等于 `"allow"` 才输出 allow**；`"deny"` 输出 deny + 存档语言的理由（`ui.hook_deny`，默认“用户通过诗音否决了这个操作”）；其余一切（连不上、超时、`gone`、字段不对）都不输出任何决定。超时（存档 `remote.permission_timeout`，默认 120 秒）先撤回请求再退出。
-- 显示的内容：Bash/PowerShell 显示命令（有描述则附 `# 描述`）；Edit/Write/NotebookEdit 显示文件完整路径；WebFetch 显示网址；WebSearch 显示搜索词；ExitPlanMode 显示计划全文；其他显示参数 JSON。最多 12000 字。**隐私模式不影响授权面板**（要决定就必须看到内容）。
+- hook（PermissionRequest）：`AskUserQuestion` 不处理（那是提问不是授权）；`ExitPlanMode` 只向 `/event` 发 `{"type":"plan_ready"}`，不进入授权流程；其余工具先 `/permission/open`，再按 10 秒一段 `/permission/wait`。**只有响应是对象、`id` 对得上、`status` 恰好等于 `"allow"` 才输出 allow**；`"deny"` 输出 deny + 存档语言的理由（`ui.hook_deny`，默认“用户通过诗音否决了这个操作”）；其余一切（连不上、超时、`gone`、字段不对）都不输出任何决定。超时（存档 `remote.permission_timeout`，默认 120 秒）先撤回请求再退出。
+- 显示的内容：Bash/PowerShell 显示命令（有描述则附 `# 描述`）；Edit/Write/NotebookEdit 显示文件完整路径；WebFetch 显示网址；WebSearch 显示搜索词；其他显示参数 JSON（不含已排除的 ExitPlanMode / AskUserQuestion）。最多 12000 字。**隐私模式不影响授权面板**（要决定就必须看到内容）。
 - 面板（`panel.py:PermissionPanel`）：终端配色；内容区只读、约 6 行高，过长出现“展开/收起”；“还有 N 个”；“否决”“同意”两个大按钮。**不抢焦点、不响应键盘**（`WindowDoesNotAcceptFocus`，按钮子类忽略所有按键），按钮在每条请求出现后 0.6 秒内不可点。静音不影响面板，只影响那一句提示语。
 - 排队：诗音每 100 毫秒从 hub 取最早的未决请求显示；hook 超过 25 秒没来轮询的请求视为已被 CC 取消（用户在 CC 里自己答了），面板自动消失。
 - 服务端 `request_queue_size` 调到 64，并行子代理的 hook 同时连进来不会被重置。

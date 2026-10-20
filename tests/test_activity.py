@@ -19,7 +19,8 @@ def test_parse_working():
 def test_make_entry_filters_events():
     assert make_entry("prompt", None, T0) is None
     assert make_entry("notification", "x", T0) is None
-    assert make_entry("stop", "好了", T0).target == "好了"
+    assert make_entry("stop", "私密回复", T0).target == ""
+    assert make_entry("plan_ready", "私密计划", T0) is None
     assert make_entry("working", '{"tool":"edit","target":"a.py"}', T0).tool == "edit"
     assert make_entry("working", None, T0).tool == "other"
 
@@ -39,7 +40,7 @@ def test_describe_respects_privacy():
     assert describe(e, ui, False) == "act_read|secret.py"
     assert describe(e, ui, True) == "act_private|"
     s = Entry(T0, "stop", target="我的密码")
-    assert describe(s, ui, False) == "done_summary|我的密码"
+    assert describe(s, ui, False) == "act_done|"
     assert describe(s, ui, True) == "act_done|"
     t = Entry(T0, "tool_error", target="Bash")
     assert describe(t, ui, False) == "act_error|Bash" and describe(t, ui, True) == "act_error_plain|"

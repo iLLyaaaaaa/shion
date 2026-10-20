@@ -20,7 +20,7 @@ log = logging.getLogger("shion.server")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 47613
 MAX_BODY = 4096
-MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/计划全文
+MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/参数
 REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 

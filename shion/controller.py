@@ -381,6 +381,8 @@ class PetController(QObject):
     # ------------------------------------------------------------ 来自 Claude 的事件
     def handle_event(self, etype: str, detail: Optional[str] = None) -> None:
         """处理本地 HTTP 服务转来的事件（必须在 GUI 线程调用，见 bridge.py）。"""
+        if etype in ("stop", "plan_ready"):
+            detail = None  # 兼容旧 hook：回复/计划内容不显示、不记录
         private = self.state.save.privacy_mode
         log.info("收到事件：%s %r", etype, None if private else detail)
         now = self._now()
@@ -400,13 +402,10 @@ class PetController(QObject):
             self.react(reactions)
             if not greeted:
                 self._say_activity(describe(entry, ui, private), now)
-        elif etype == "stop" and entry is not None and entry.target and not private:
-            reactions = [r for r in reactions if r.key != "claude_done"]
-            self.react(reactions)
-            self.say_text(ui("done_summary", text=entry.target),
-                          priority=Priority.HIGH, category="claude_done")
         else:
             self.react(reactions)
+        if etype == "plan_ready":
+            self.window.jump()
         self.sync()
 
     def _say_activity(self, text: str, now: datetime) -> None:

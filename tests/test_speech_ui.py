@@ -8,6 +8,7 @@ from tests.test_controller import env, qapp, work
 @pytest.mark.parametrize("event,detail,key", [
     ("stop", None, "claude_done"), ("tool_error", "Bash", "tool_error"),
     ("notification", None, "claude_waiting"),
+    ("plan_ready", None, "plan_ready"),
 ])
 def test_critical_event_interrupts_pat_and_blocks_new_low_and_medium_lines(env, event, detail, key):
     env.win.patted.emit()
@@ -87,12 +88,14 @@ def test_poke_variants_and_shaken_drag_use_source_cooldowns(env, monkeypatch):
     assert env.win.sprite_name == "dizzy" and env.said == accepted
 
 
-def test_stop_summary_always_overrides_wake_and_is_high(env):
+@pytest.mark.parametrize("event,key", [("stop", "claude_done"), ("plan_ready", "plan_ready")])
+def test_ready_reminder_overrides_wake_and_is_high(env, event, key):
     env.advance(901)
-    env.ctl.handle_event("stop", "改好了")
-    assert env.said[-1] == "做完啦：改好了"
+    env.ctl.handle_event(event, "私密内容")
+    reminder = env.said[-1]
+    assert reminder in env.ctl.lines._lines[key]
     env.win.patted.emit()
-    assert env.said[-1] == "做完啦：改好了"
+    assert env.said[-1] == reminder
 
 
 def test_nudge_can_interrupt_current_high(env):
@@ -101,6 +104,74 @@ def test_nudge_can_interrupt_current_high(env):
     env.ctl.say_key("tool_error")  # 只显示高优先级台词，不用新事件取消原有催促。
     env.advance(1)
     assert env.said[-1] in env.ctl.lines._lines["nudge"]
+
+
+@pytest.mark.parametrize("lang,text", [
+    ("zh", "计划写好啦，去看看吧～"),
+    ("en", "The plan's ready! Take a look~"),
+    ("ja", "計画ができたよ、見てみてね～"),
+])
+@pytest.mark.parametrize("muted", [False, True])
+def test_plan_ready_jumps_once_even_when_muted_and_ignores_content(env, lang, text, muted, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="shion.controller")
+    env.ctl.set_language(lang)
+    env.ctl.set_muted(muted)
+    env.ctl.handle_event("working")
+    env.said.clear()
+    env.ctl.handle_event("plan_ready", "私密计划")
+    assert env.said == ([] if muted else [text])
+    assert env.win.motion_active and env.win.displayed_sprite == "jump_1"
+    assert not env.win.idle_motion_active  # 安静档/固定表情也不会取消事件小跳
+    assert not env.state.is_working(env.now)
+    assert env.data.stats["claude_tasks"] == 0
+    assert len(env.ctl.activity) == 1  # 只有先前的 working，不存计划
+    assert "私密计划" not in caplog.text
+    pos = env.win.pos()
+    env.advance(0.35)
+    assert env.win.displayed_sprite == "jump_2" and env.win._jump_offset == pytest.approx(40)
+    assert env.win.pos() == pos
+    env.advance(0.5)
+    assert not env.win.motion_active and env.win._jump_offset == 0
+
+
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+@pytest.mark.parametrize("private", [False, True])
+def test_stop_reminders_always_ignore_content_and_keep_done_state_and_count(env, lang, private):
+    env.ctl.set_language(lang)
+    env.ctl.set_privacy(private)
+    env.ctl.handle_event("working")
+    env.said.clear()
+    env.ctl.handle_event("stop", "私密回复")
+    assert len(env.said) == 1 and env.said[0] in env.ctl.lines._lines["claude_done"]
+    assert env.ctl._speech.priority == Priority.HIGH
+    assert env.win.sprite_name == "done" and not env.state.is_working(env.now)
+    assert env.data.stats["claude_tasks"] == 1
+    env.advance(10)
+    env.ctl._show_status()
+    assert "私密回复" not in "\n".join(env.said)
+
+
+def test_plan_ready_interrupts_high_bubble_without_creating_a_permission_panel(env):
+    env.ctl.say_key("tool_error")
+    env.ctl.handle_event("plan_ready")
+    env.ctl.tick()
+    assert env.said[-1] == "计划写好啦，去看看吧～"
+    assert env.ctl._speech.priority == Priority.HIGH
+    assert env.ctl._perm_panel is None and env.ctl.hub.permissions.pending() == []
+
+
+@pytest.mark.parametrize("mode", ["quiet", "fixed"])
+def test_plan_jump_survives_calm_sync(env, mode):
+    if mode == "quiet":
+        env.data.activity_level = "quiet"
+    else:
+        env.data.fixed_expression = "proud"
+    env.ctl.handle_event("plan_ready")
+    env.advance(0.35)
+    assert env.win.motion_active and env.win._jump_offset == pytest.approx(40)
+    env.advance(0.5)
+    assert env.win.sprite_name == ("proud" if mode == "fixed" else "idle")
 
 
 def test_mute_and_language_dismiss_current_priority_but_keep_low_cooldown(env):
