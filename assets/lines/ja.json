@@ -92,6 +92,8 @@
     ]
   },
   "ui": {
+    "pause_label": "一時停止中",
+    "pause_label_hint": "クリックして再開",
     "action_bed": "ベッドで寝る",
     "action_desk": "ちょっと伏せる",
     "menu_release_to_taskbar": "離したらタスクバーまで落ちる",

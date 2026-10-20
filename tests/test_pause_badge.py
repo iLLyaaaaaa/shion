@@ -1,13 +1,18 @@
-"""停下标记 ⏸ 与检查点 hook 的 statusMessage。"""
+"""暂停文字标签的可见性、鼠标防误点、焦点与检查点放行。"""
 import json
 import threading
 import time
 
 import pytest
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QFontMetricsF
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QLineEdit
 
 from shion import badge as B
 from shion.lines import LINES_DIR
+from shion.bubble import BubbleWindow, FONT_PX, FG, BORDER, BG
+from shion.panel import ARM_DELAY
 from tests.test_controller import env, qapp  # noqa: F401
 from tests.test_install_hooks import PY, SCRIPT, hc
 from tests.test_interrupt import pet2, work  # noqa: F401
@@ -116,38 +121,172 @@ AVAIL = (0, 0, 1920, 1080)
 
 
 def test_geometry_is_at_head_top_right_not_above_head():
-    s = 20
-    x, y = B.badge_geometry(BODY, s, AVAIL)
-    assert BODY[0] + BODY[2] * 0.6 < x + s / 2 < BODY[0] + BODY[2]  # 头顶右侧
-    assert BODY[1] - s < y < BODY[1] + BODY[3] * 0.15  # 和头顶同高，不在气泡所在的正上方区域
+    size = (90, 28)
+    x, y = B.badge_geometry(BODY, size, AVAIL)
+    assert BODY[0] + BODY[2] * 0.6 < x + size[0] / 2 < BODY[0] + BODY[2]
+    assert BODY[1] - size[1] < y < BODY[1] + BODY[3] * 0.15
     # 气泡在本体上方居中，标记中心离精灵中线足够远
-    assert abs((x + s / 2) - (BODY[0] + BODY[2] / 2)) > BODY[2] * 0.2
+    assert abs((x + size[0] / 2) - (BODY[0] + BODY[2] / 2)) > BODY[2] * 0.2
 
 
 def test_geometry_moves_up_with_jump_and_is_clamped():
-    s = 20
-    _, y0 = B.badge_geometry(BODY, s, AVAIL)
-    _, y1 = B.badge_geometry(BODY, s, AVAIL, jump_offset=30)
+    size = (100, 28)
+    _, y0 = B.badge_geometry(BODY, size, AVAIL)
+    _, y1 = B.badge_geometry(BODY, size, AVAIL, jump_offset=30)
     assert y1 == y0 - 30
-    x, y = B.badge_geometry((1850, -50, 200, 230), s, AVAIL)
-    assert x == 1920 - s and y == 0
+    x, y = B.badge_geometry((1850, -50, 200, 230), size, AVAIL)
+    assert x == 1920 - size[0] and y == 0
 
 
-def test_size_scales_and_is_bounded():
-    assert B.badge_size(100) == B.BADGE_MIN
-    assert B.badge_size(2000) == B.BADGE_MAX
-    assert B.BADGE_MIN <= B.badge_size(400) <= B.BADGE_MAX
+@pytest.mark.parametrize("text", ["暂停中", "Paused", "一時停止中"])
+def test_size_fits_localized_text_with_bubble_font(qapp, text):
+    font = B.label_font()
+    w, h = B.badge_size(text, font)
+    assert w > QFontMetricsF(font).horizontalAdvance(text)
+    assert h > QFontMetricsF(font).height()
+    assert font.pixelSize() == FONT_PX
 
 
-def test_render_draws_two_bars(qapp):  # noqa: F811
-    s = 24
-    img = B.render_badge(s)
-    mid = s // 2
-    bar = QColor(img.pixel(round(s * 0.37), mid))
-    gap = QColor(img.pixel(mid, mid))
-    assert bar.lightness() > 200 and gap.lightness() < 80  # 两根亮竖条，中间是深色底
-    assert QColor(img.pixel(round(s * 0.63), mid)).lightness() > 200
-    assert img.pixelColor(0, 0).alpha() < 128  # 圆角外透明
+def test_render_draws_terminal_border_background_and_text(qapp):
+    img = B.render_badge("Paused", B.label_font())
+    assert img.pixelColor(0, 0).alpha() < 128
+    assert img.pixelColor(8, img.height() // 2) == BG
+    colors = {img.pixelColor(x, y).name() for x in range(img.width()) for y in range(img.height())}
+    assert FG.name() in colors and BORDER.name() in colors
+
+
+@pytest.mark.parametrize("delay,accepted", [(0, False), (ARM_DELAY - .001, False), (ARM_DELAY, True)])
+def test_left_click_arms_after_delay_and_resumes_all_checkpoints(pet, delay, accepted):
+    pet.win.show()
+    threads, results = held(pet, n=2)
+    badge = pet.win._pause_badge
+    try:
+        pet.advance(delay)
+        QTest.mouseClick(badge, Qt.LeftButton, Qt.NoModifier, badge.rect().center())
+        assert pet.state.paused is not accepted
+        assert shown(pet) is not accepted
+        if accepted:
+            join(threads)
+            assert results == [(False, False)] * 2
+            assert pet.said[-1] in pet.ctl.lines._lines["resumed"]
+            assert not badge.isVisible()
+    finally:
+        pet.ctl.resume_work(quiet=True)
+        join(threads)
+
+
+def test_press_before_arming_release_after_does_not_resume(pet):
+    pet.win.show()
+    threads, _ = held(pet)
+    badge = pet.win._pause_badge
+    try:
+        QTest.mousePress(badge, Qt.LeftButton, Qt.NoModifier, badge.rect().center())
+        pet.advance(ARM_DELAY + .1)
+        QTest.mouseRelease(badge, Qt.LeftButton, Qt.NoModifier, badge.rect().center())
+        assert pet.state.paused
+    finally:
+        pet.ctl.resume_work(quiet=True)
+        join(threads)
+
+
+def test_only_left_mouse_works_and_label_mask_leaves_other_regions_clear(pet):
+    pet.win.show()
+    threads, _ = held(pet)
+    badge = pet.win._pause_badge
+    try:
+        pet.advance(ARM_DELAY)
+        for button in (Qt.RightButton, Qt.MiddleButton):
+            QTest.mouseClick(badge, button, Qt.NoModifier, badge.rect().center())
+        for key in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape):
+            QTest.keyClick(badge, key)
+        # 区域外释放也不能继续。
+        QTest.mousePress(badge, Qt.LeftButton, Qt.NoModifier, badge.rect().center())
+        QTest.mouseRelease(badge, Qt.LeftButton, Qt.NoModifier, QPoint(-10, -10))
+        assert pet.state.paused
+        assert badge.windowFlags() & Qt.WindowDoesNotAcceptFocus
+        assert not badge.windowFlags() & Qt.WindowTransparentForInput
+        assert badge.testAttribute(Qt.WA_ShowWithoutActivating)
+        assert badge.focusPolicy() == Qt.NoFocus
+        assert badge.contextMenuPolicy() == Qt.PreventContextMenu
+        assert badge.mask().contains(badge.rect().center())
+        assert not badge.mask().contains(QPoint(0, 0))
+        assert not badge.mask().contains(QPoint(-10, -10))
+        assert not pet.win.mask().contains(QPoint(0, 0))
+    finally:
+        pet.ctl.resume_work(quiet=True)
+        join(threads)
+
+
+@pytest.mark.parametrize("lang,text,hint", [("zh", "暂停中", "点一下继续"), ("en", "Paused", "Click to continue"),
+                                           ("ja", "一時停止中", "クリックして再開")])
+def test_visible_label_updates_language_font_tooltip_and_follows_resize(pet, lang, text, hint):
+    pet.win.show()
+    threads, _ = held(pet)
+    try:
+        pet.ctl.set_language(lang)
+        badge = pet.win._pause_badge
+        assert badge.text == text and badge.toolTip() == hint
+        raw = json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))
+        assert raw["ui"]["pause_label"] == text and raw["ui"]["pause_label_hint"] == hint
+        bubble = BubbleWindow(autostart=False)
+        bubble.set_font_fallback(pet.ctl.lines.font_fallback)
+        assert badge.font().families() == bubble._font.families()
+        bubble.close()
+        pet.win.set_height(320)
+        pet.win.move(200, 200)
+        badge.follow()
+        avail = pet.win._screen_avail()
+        expected = B.badge_geometry(pet.win.body_rect(), (badge.width(), badge.height()),
+                                   (avail.x(), avail.y(), avail.width(), avail.height()))
+        assert (badge.x(), badge.y()) == expected
+        assert "claude" not in (text + hint).lower()
+    finally:
+        pet.ctl.resume_work(quiet=True)
+        join(threads)
+
+
+def test_showing_label_keeps_typing_focus_in_other_window(pet, qapp):
+    if qapp.platformName() == "offscreen":
+        pytest.skip("offscreen 不实现非激活显示；本项已由原生 Windows 150% 回归验证")
+    pet.win.show()
+    qapp.processEvents()
+    edit = QLineEdit()
+    edit.show()
+    edit.activateWindow()
+    edit.setFocus()
+    qapp.processEvents()
+    focused = qapp.focusWidget()
+    assert focused is edit and qapp.activeWindow() is edit
+    threads, _ = held(pet)
+    try:
+        qapp.processEvents()
+        assert qapp.focusWidget() is focused
+        assert qapp.activeWindow() is edit
+        QTest.keyClicks(edit, "still typing")
+        assert edit.text() == "still typing" and pet.state.paused
+    finally:
+        pet.ctl.resume_work(quiet=True)
+        join(threads)
+        edit.close()
+
+
+def test_reshowing_label_rearms_and_repeated_sync_does_not_reset_delay(pet):
+    pet.win.show()
+    threads, _ = held(pet)
+    badge = pet.win._pause_badge
+    try:
+        deadline = badge._armed_at
+        for _ in range(8):
+            pet.advance(.1)
+        assert badge._armed_at == deadline
+        pet.win.hide()
+        pet.win.show()
+        assert badge._armed_at > pet.mono[0]
+        QTest.mouseClick(badge, Qt.LeftButton, Qt.NoModifier, badge.rect().center())
+        assert pet.state.paused
+    finally:
+        pet.ctl.resume_work(quiet=True)
+        join(threads)
 
 
 # ---------------------------------------------------------------- statusMessage

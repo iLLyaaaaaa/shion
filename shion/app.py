@@ -198,14 +198,16 @@ def snapshot(
     t[0] += at
     win.advance_to(t[0])
     img = win.render_frame()
-    if badge:  # 停下标记：画在窗口坐标里，和真实窗口一样相对精灵本体定位
-        from shion.badge import badge_geometry, badge_size, render_badge
+    if badge:  # 暂停文字标签：与真实窗口一样相对精灵本体定位
+        from shion.badge import badge_geometry, label_font, render_badge
         sw, sh = win.sprite_size
-        size = badge_size(win.sprite_height)
+        lines = Lines(lang)
+        label = render_badge(lines.ui("pause_label"), label_font(lines.font_fallback))
+        size = (label.width(), label.height())
         bx, by = badge_geometry((MARGIN_X, MARGIN_TOP, sw, sh), size, (0, 0, img.width(), img.height()),
                                 win._jump_offset)
         p = QPainter(img)
-        p.drawImage(bx, by, render_badge(size))
+        p.drawImage(bx, by, label)
         p.end()
 
     if bubble:

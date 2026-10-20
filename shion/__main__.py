@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--bubble", default=None, help="截图里头顶的气泡文字（--at 是打字进度，不给则显示完整）")
     p.add_argument("--at", type=float, default=0.0, help="截图用：切到该状态后第几秒的那一帧")
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
-    p.add_argument("--badge", action="store_true", help="截图用：画出停下标记 ⏸")
+    p.add_argument("--badge", action="store_true", help="截图用：画出暂停文字标签")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
     p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating"], default=None,
                    help="截图用：授权、检查点停下、反馈、对话首页、零食列表或吃零食效果")

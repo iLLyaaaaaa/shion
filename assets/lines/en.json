@@ -90,6 +90,8 @@
     ]
   },
   "ui": {
+    "pause_label": "Paused",
+    "pause_label_hint": "Click to continue",
     "action_bed": "Go to bed",
     "action_desk": "Rest at the desk",
     "menu_release_to_taskbar": "Fall to the taskbar on release",

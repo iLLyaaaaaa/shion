@@ -82,7 +82,7 @@ class PetController(QObject):
         self.bubble = bubble
         self.hub = hub or RemoteHub()
         self._held_said = False  # 这次停下已经说过“已经停下啦～”
-        self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示 ⏸，直到继续）
+        self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示标签，直到继续）
         self._procs: dict[str, interrupt.CCProcess] = {}  # 会话 → hook 报来的 CC 进程（立即中断用）
         self._tool_wall: dict[str, dict[str, float]] = {}  # 会话 → {tool_use_id: 开始的 Unix 秒}
         self._interrupted: set[str] = set()  # 被立即中断、还没重新开始的会话
@@ -124,6 +124,7 @@ class PetController(QObject):
         w.menu_requested.connect(self.show_menu)
         w.moved.connect(self._on_window_moved)
         w.pressed.connect(self._on_pressed)
+        w.resume_requested.connect(self.resume_work)
 
         self._watch_screens()
 
@@ -155,7 +156,9 @@ class PetController(QObject):
             or cur in ("sleep", "desk") or self.state.save.activity_level == "quiet"
         )
         self.window.set_calm(calm)
-        self.window.set_paused_badge(self.state.paused and self._held_seen)
+        self.window.set_paused_badge(self.state.paused and self._held_seen,
+                                     text=self.lines.ui("pause_label"), tooltip=self.lines.ui("pause_label_hint"),
+                                     fallback=self.lines.font_fallback)
         if calm and self.window.idle_motion_active:
             self.window.stop_motion()
         if cur == "sleep" and self.state.sleep_in_bed(now):
@@ -387,6 +390,7 @@ class PetController(QObject):
         if self._dialogue is not None and self._dialogue.isVisible():
             self._dialogue.refresh()
         self.scheduler.mark_dirty(self._now())
+        self.sync()
 
     def set_privacy(self, private: bool) -> None:
         self.state.save.privacy_mode = private
@@ -560,7 +564,7 @@ class PetController(QObject):
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
         if self.state.paused and not self._held_seen and self.hub.is_holding:
-            self._held_seen = True  # ⏸ 和静音无关；sync() 里显示
+            self._held_seen = True  # 暂停标签和静音无关；sync() 里显示
         if self.state.paused and not self._held_said and self.hub.is_holding:
             self._held_said = True
             if not self.state.save.bubble_muted:

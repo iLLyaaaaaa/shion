@@ -91,6 +91,8 @@
     ]
   },
   "ui": {
+    "pause_label": "暂停中",
+    "pause_label_hint": "点一下继续",
     "action_bed": "去睡觉",
     "action_desk": "趴一会儿",
     "menu_release_to_taskbar": "松手后落到任务栏",

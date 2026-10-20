@@ -86,6 +86,7 @@ class PetWindow(QWidget):
     moved = Signal()  # 窗口位置变了（气泡跟随用）
     pressed = Signal()  # 左键按下即中断自主运动
     gesture = Signal(str)  # cheek_pull / cheek_release / tickle / tickle_end / belly（静默）
+    resume_requested = Signal()  # 检查点暂停标签，仅左键且防误点时间已过
 
     def __init__(
         self,
@@ -104,7 +105,7 @@ class PetWindow(QWidget):
 
         self._clock = clock
         self._fps_overlay = None
-        self._pause_badge = None  # 停下标记，第一次要显示时才建
+        self._pause_badge = None  # 暂停文字标签，第一次要显示时才建
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
         self._sequences: dict[str, tuple[str, ...]] = {}
@@ -233,13 +234,15 @@ class PetWindow(QWidget):
         self.moved.emit()
 
     # ---- 停下标记 ----
-    def set_paused_badge(self, on: bool) -> None:
-        """头顶旁边的 ⏸：hook 真的在检查点停住后一直显示，直到继续（由控制器决定开关）。"""
+    def set_paused_badge(self, on: bool, *, text="暂停中", tooltip="点一下继续", fallback=()) -> None:
+        """hook 真正在检查点停住后的文字标签；可见性由控制器决定。"""
         if self._pause_badge is None:
             if not on:
                 return
             from shion.badge import PauseBadge
             self._pause_badge = PauseBadge(self)
+            self._pause_badge.activated.connect(self.resume_requested.emit)
+        self._pause_badge.set_texts(text, tooltip, fallback)
         self._pause_badge.set_wanted(on)
 
     @property
