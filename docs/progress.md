@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-21 这一轮结束后的“继续”已实现**：立即中断 / 停太久结束这一轮后，工作遥控菜单多一项：终端版“继续（发送“继续”）”（子进程 AttachConsole + WriteConsoleInputW，先读屏，有草稿或确认框不发并说明原因），桌面端“继续”（复制到剪贴板）。桌面端立即中断本身不变。完整测试 **922 passed、2 skipped**；conhost 和 Windows Terminal 真机读屏/发送通过；完整链路 **待用户验收**，见本轮记录。不 push。
 - **2026-10-20 可行性实验：替用户发“继续”**（没改正式代码）：终端版 AttachConsole + WriteConsoleInputW **可行**（conhost 和 WT 后台标签都能送达，不抢焦点；要先读屏，避开确认对话框和用户草稿）；桌面端 UIA SetValue/Invoke **送得到，也能选对会话，但会把 Claude 拉到前台、抢走焦点**，不建议用。详见 `docs/experiments/send-continue.md`，脚本在 `tools/experiments/`。
 - **2026-10-20 暂停文字标签已实现**：小 ⏸ 已换成终端风格“暂停中 / Paused / 一時停止中”，带三语悬停提示；真正停在检查点后才显示，左键点击复用“继续”，0.6 秒防误点，不接键盘、不抢焦点。原生 Windows 150% 专项 **34 passed**；最终完整测试 **889 passed、3 skipped、2 warnings**。真实桌面穿透、悬停提示和 CC 点击续跑 **待用户验收**。第 1～4 项提交 `ddb5b1b`，本轮仍不 push。
 - **2026-10-20 床睡、趴桌与原地停放已实现**：新增宽画布按脚底中心切换、三语道具动作、慢放悬空/甩出下落与默认关闭的“松手后落到任务栏”存档开关。素材先提交 `61fe43d`。专项 **95 passed、1 skipped**；原生 Windows 150% 专项 **69 passed**。本轮动态桌面表现 **待用户验收**，见下方记录；用户确认方案并授权分步 commit，不 push。暂停文字标签见上一条。
@@ -20,6 +21,29 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-21：这一轮结束后的“继续”（终端发送 / 桌面端复制）
+- **做了什么**：
+  - 新文件 `shion/console_send.py`（不 import Qt）：`python -m shion.console_send --pid --created --text`，输出一行 JSON。先核对进程（在、claude.exe、创建时间一致）→ AttachConsole → 读屏 `check_screen` → 逐字 VK_PACKET + 回车 → FreeConsole。
+  - `shion/controller.py`：`_ended` 记最近一个被诗音结束这一轮的会话（`work_stopped`、被中断会话的 `stop`、`pause_timeout`），该会话再来 prompt / working 就收起。菜单在“停下”上面多一项：终端（`interrupt.is_terminal`：entry=cli 且 claude.exe）→“继续（发送“继续”）”，用 QProcess 跑子进程（10 秒超时、同时只一个、发送中变灰）；其他 → “继续”，复制到剪贴板。停下中的“继续”、立即中断、暂停标签都不变。终端会话停太久也给“发送”（和立即中断同一状态）。
+  - 三语台词 7 个 key（`continue_text` 继续/Continue/続けて 等），界面不出现“Claude”。spec v0.3 新增「这一轮结束后的继续」。
+  - 测试 `tests/test_continue_after_stop.py`（32 个）：读屏判断（空、草稿、占位提示+光标、多行、信任框、权限框、编号选项、回复里的普通列表）、进程核对、子进程拒绝非 claude 进程、菜单各种情况、各失败原因的台词、单个发送、三语。
+- **真机（scratch 目录里开的测试 CC，haiku，2.1.289）**：
+  - conhost：信任文件夹对话框 → `dialog`；空输入框 → 送达、CC 回复、前台窗口不变；草稿 `DRAFT-abc` → `draft`，草稿原样；创建时间不对 → `gone`；权限确认框（Do you want to proceed? / > 1. Yes）→ `dialog`。
+  - pythonw + QProcess（和正式启动方式一样）→ 送达。
+  - Windows Terminal：草稿 → `draft`；空输入框 → 送达，前台不变。
+- **踩过的坑**：
+  - 空输入框里有灰色占位提示（`> Try "write a test for <filepath>"`），读屏分不出颜色（属性全是 0x7）。改用控制台光标位置：空的时候光标在提示符后面（第 2 列），打过字光标跟在字后面。规则：输入行为空，或是 `Try "…"` 且光标在提示符后面，才算空。
+  - CC 回复里的普通编号列表（`1. What you were working on`）会被当成确认框。确认框的编号选项总有选中标记（`> 1.` / `❯ 1.`），所以只认带标记的编号行；确认字样（Yes / Allow / Do you want …）仍按最下面 25 行保守匹配，回复里碰巧有这些字时也不发。
+  - conhost 的提示符是 `>`，Windows Terminal 里是 `❯`，后面跟的是不换行空格（ ）。
+  - 在 PowerShell 里跑全量时 `test_install_hooks.py::test_corrupt_json_not_touched` 偶尔因 gbk 解码失败（已有问题，和本次无关）；用 `PYTHONUTF8=1` 跑全量通过。
+- **待用户验收**（先重启诗音）：
+  - [ ] 终端版 CC 工作中点“立即中断”，这一轮结束后菜单第一项是“继续（发送“继续”）”；点了以后 CC 收到“继续”接着干，诗音说“发过去啦，接着干～”，前台窗口和焦点不变
+  - [ ] 终端输入框里有没发出去的字时点它：不发送，草稿不变，诗音说明原因；CC 正在问确认问题时同样不发
+  - [ ] 桌面端 Code 点“立即中断”：说法和以前一样；这一轮结束后菜单出现“继续”，点了剪贴板里是“继续”，诗音说“已经复制好啦，去 CC 里粘贴发送就行～”，粘贴发送能接着干
+  - [ ] 停下后等满上限（可以先把 `remote.pause_timeout` 调到 60 秒）：桌面端出现复制版“继续”，终端出现发送版
+  - [ ] 自己在 CC 里说话后，这一项消失；切换英/日语后菜单和发送的文字跟着变
+- **下一步**：真机验收上面几项和之前保留的清单；不 push。
 
 ## 2026-10-20：可点击的暂停文字标签（取代 ⏸）
 - **显示条件**：沿用 `_held_seen`，请求停下但未到检查点时不显示；真正等待后显示，长轮询间隙/别的台词/静音不闪退；继续、CC 新 prompt、超时或立即中断会隐藏。原有 ⏸ 验收项由本节取代。

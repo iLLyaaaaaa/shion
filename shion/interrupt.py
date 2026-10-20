@@ -31,6 +31,11 @@ class CCProcess:
     hooks: list = field(default_factory=list)
 
 
+def is_terminal(proc: Optional[CCProcess]) -> bool:
+    """终端里的 CC（CLAUDE_CODE_ENTRYPOINT=cli 的 claude.exe）。桌面端 Code 是 claude-desktop；拿不准一律算不是。"""
+    return proc is not None and proc.entry == "cli" and proc.name == "claude.exe"
+
+
 @dataclass
 class ProcessView:
     """进程表的查询接口；测试里换成假的。"""

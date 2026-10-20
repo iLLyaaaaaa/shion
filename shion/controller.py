@@ -4,13 +4,15 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import random
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QRect, QTimer, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QProcess, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
@@ -54,6 +56,7 @@ VERSION = "0.1"
 TICK_MS = 100
 ACTIVITY_REPEAT = timedelta(seconds=3)  # 同一句“在干什么”这么久内不重复弹
 ROOT = Path(__file__).resolve().parent.parent
+CONTINUE_SEND_TIMEOUT_MS = 10_000
 
 
 class PetController(QObject):
@@ -86,6 +89,10 @@ class PetController(QObject):
         self._procs: dict[str, interrupt.CCProcess] = {}  # 会话 → hook 报来的 CC 进程（立即中断用）
         self._tool_wall: dict[str, dict[str, float]] = {}  # 会话 → {tool_use_id: 开始的 Unix 秒}
         self._interrupted: set[str] = set()  # 被立即中断、还没重新开始的会话
+        # 最近一个被诗音结束了这一轮（立即中断 / 停太久）的会话：(会话, CC 进程或 None)，菜单上可以“继续”
+        self._ended: Optional[tuple[str, Optional[interrupt.CCProcess]]] = None
+        self._continue_sending = False
+        self.continue_runner: Callable[[interrupt.CCProcess, str, Callable[[dict], None]], None] =             self._run_console_send
         self.process_view = interrupt.ProcessView()
         self.hook_images: tuple[str, ...] = (str(ROOT / ".venv" / "Scripts" / "python.exe"),)
         self._input_panel: Optional[InputPanel] = None
@@ -460,6 +467,7 @@ class PetController(QObject):
         log.info("收到事件：%s %r %s", etype, None if private else detail, session or "")
         now = self._now()
         if etype == "pause_timeout":
+            self._remember_ended(session)
             self.state.end_session(session)  # 这个会话的这一轮已经被 hook 结束了
             self._forget_session(session)
             self._on_pause_timeout()
@@ -467,12 +475,17 @@ class PetController(QObject):
             return
         if etype == "work_stopped":
             # hook 在检查点拿到了 stop（等满上限或立即中断）：这个会话的这一轮结束了，不算完成任务
+            self._remember_ended(session)
             self.state.end_session(session)
             self._forget_session(session)
             self.sync()
             return
         if etype == "tool_error" and session in self._interrupted:
             etype, detail = "tool_done", None  # 被“立即中断”结束的工具：本来就会失败，不说“出错了”
+        if etype == "stop" and session in self._interrupted:
+            self._remember_ended(session)  # 中断时正在写字、没碰到检查点：这一轮自己结束了
+        if etype in ("prompt", "working") and self._ended and self._ended[0] == session:
+            self._ended = None  # 用户自己在 CC 里接着说了
         if etype in ("prompt", "stop", "plan_ready"):
             self._interrupted.discard(session)
         self._track_session(etype, session, tool_id, meta.get("proc"))
@@ -634,6 +647,78 @@ class PetController(QObject):
             self._speech.dismiss()
             self.say(ui("interrupted"), priority=Priority.HIGH, category="stop_requested")
         self.sync()
+
+    # ------------------------------------------------------------ 遥控：这一轮结束后的继续
+    def _remember_ended(self, session: Optional[str]) -> None:
+        if session:
+            self._ended = (session, self._procs.get(session))
+
+    def ended_is_terminal(self) -> bool:
+        return self._ended is not None and interrupt.is_terminal(self._ended[1])
+
+    def continue_ended(self) -> None:
+        """这一轮已经被结束后的“继续”：终端版替用户发一句“继续”，桌面端复制到剪贴板。"""
+        ended = self._ended
+        if ended is None:
+            return
+        ui = self.lines.ui
+        text = ui("continue_text")
+        if not interrupt.is_terminal(ended[1]):
+            QGuiApplication.clipboard().setText(text)
+            self._ended = None
+            self._say_continue("continue_copied")
+            return
+        if self._continue_sending:
+            return
+        self._continue_sending = True
+        self.continue_runner(ended[1], text, lambda result: self._on_continue_result(ended, result))
+
+    def _on_continue_result(self, ended, result: dict) -> None:
+        self._continue_sending = False
+        reason = None if result.get("ok") is True else result.get("reason")
+        log.info("发送“继续”：%s", reason or "ok")
+        if reason in (None, "gone") and self._ended is ended:
+            self._ended = None  # 发过了，或者那个终端已经没了
+        key = {None: "continue_sent", "draft": "continue_draft", "dialog": "continue_dialog"}.get(
+            reason, "continue_failed")
+        self._say_continue(key)
+
+    def _say_continue(self, key: str) -> None:
+        if self.state.save.bubble_muted:
+            return
+        self._speech.dismiss()
+        self.say(self.lines.ui(key), priority=Priority.HIGH, category="stop_requested")
+
+    def _run_console_send(self, proc: interrupt.CCProcess, text: str, done: Callable[[dict], None]) -> None:
+        """在单独的子进程里附着 CC 的控制台发送（见 shion/console_send.py），结果回到 GUI 线程。"""
+        qp = QProcess(self)
+        qp.setProgram(sys.executable)
+        qp.setArguments(["-m", "shion.console_send", "--pid", str(proc.pid), "--created", str(proc.created),
+                         "--text", text])
+        qp.setWorkingDirectory(str(ROOT))
+        timer = QTimer(qp)
+        timer.setSingleShot(True)
+        timer.timeout.connect(qp.kill)
+        finished = []
+
+        def finish(*_):
+            if finished:
+                return
+            finished.append(True)
+            timer.stop()
+            out = bytes(qp.readAllStandardOutput().data()).decode("utf-8", "replace").strip()
+            try:
+                result = json.loads(out.splitlines()[-1])
+                result = result if isinstance(result, dict) else {"ok": False, "reason": "error"}
+            except (ValueError, IndexError):
+                result = {"ok": False, "reason": "error"}
+            qp.deleteLater()
+            done(result)
+
+        qp.finished.connect(finish)
+        qp.errorOccurred.connect(lambda err: finish() if err == QProcess.FailedToStart else None)
+        timer.start(CONTINUE_SEND_TIMEOUT_MS)
+        qp.start()
 
     # ------------------------------------------------------------ 遥控：同意 / 否决
     def _permission_texts(self) -> dict[str, str]:
@@ -825,6 +910,11 @@ class PetController(QObject):
         if self.state.paused:
             remote_menu.addAction(ui("menu_resume")).triggered.connect(self.resume_work)
         else:
+            if self._ended is not None:  # 这一轮已经结束：终端发送“继续”，桌面端复制
+                label = ui("menu_continue_send") if self.ended_is_terminal() else ui("menu_resume")
+                act = remote_menu.addAction(label)
+                act.setEnabled(not self._continue_sending)
+                act.triggered.connect(self.continue_ended)
             remote_menu.addAction(ui("menu_stop")).triggered.connect(self.stop_work)
         interrupt_action = remote_menu.addAction(ui("menu_interrupt"))
         interrupt_action.setEnabled(self.can_interrupt())
