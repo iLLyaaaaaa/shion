@@ -10,6 +10,11 @@
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。下一步是 v0.4。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
 
+## v0.3 审查（reviewer 子代理，2026-10-20）
+- 结论：**没找到让 allow 来自诗音界面点击之外的路径**（server 各路由、hook 的 `permission_decision`、`PermissionQueue` 的锁与 id、面板切换瞬间的点击归属、键盘/焦点都核对过）。暂停流程、线程模型、存档迁移、与 spec 的一致性没有问题。
+- 已修：① **反馈“取走”和“送达”不原子**：hook 取反馈超时 0.5s 小于 bridge 等 GUI 线程的 2s，GUI 卡顿时 hook 先断开、队列却已被清空而丢反馈。改为 hook 超时 3s（`FEEDBACK_TIMEOUT`）、bridge `TAKE_TIMEOUT` 1.5s，PostToolUse/UserPromptSubmit 总时限 6s；bridge 超时即取消，不会取走队列。② **超长命令被截断仍可点同意**：内容超过 12000 字时 hook 不登记请求、不给决定，交回 CC 自己的授权框（有测试）。③ 新增测试：settings 超时必须大于 hook 最长等待（PreToolUse ≥1895、PermissionRequest ≥180、FEEDBACK_TIMEOUT > TAKE_TIMEOUT）。④ spec 补了威胁模型一句（本机已被攻破的恶意进程不在范围）。
+- 没改，记在这里：Edit/Write 只显示文件路径不显示改动内容（符合 spec）；hook 被 CC 杀掉后的“僵尸请求”面板最多停留 25 秒（`PENDING_IDLE`），这期间点按钮无害但没反应；“已经转告啦”在响应写出前就说了（超时修好后窗口极小）；没有专门测“按下旧请求、松开前已换成新请求”的 Qt 事件序列（逻辑上由 `_armed_at` 重置和点击时取 `_rid` 保证）。
+
 ## v0.3 第二部分：同意/否决（2026-10-20）
 - **硬约束与落实**：allow 只能来自用户在诗音界面上的点击。① `remote.py:PermissionQueue.decide()` 是唯一能写入决定的入口，源码级测试断言整个包里只有 `controller.py` 的按钮回调（`_on_permission_decided`）会调用它、`server.py` 的源码里没有 `decide`；② HTTP 只有 `/permission/open|wait|withdraw`，没有任何字段会被读成决定（测试往所有接口、所有事件类型、各种形状的“同意”字段里灌，请求始终 pending）；③ hook 只有收到 `{"id": 同一个 id, "status": "allow"}`（恰好等于）才输出 allow，大小写不同、`true`、列表、id 对不上、缺字段、超时、连不上、撤回、`gone` 全部不给决定（交回 CC 自己的授权框）；④ 诗音没开：hook 连 `/permission/open` 都失败就立刻退出，无输出。
 - **新增/改动**：`remote.py:PermissionQueue`（`secrets.token_hex(16)` 的 id、最多 20 个排队、内容 ≤20000 字、allow/deny 只能取一次、25 秒没人轮询的请求过期、没人取的决定 60 秒后清掉）；`server.py` 三个路由（授权请求体上限 64 KB，其他接口仍 4 KB；`request_queue_size` 调到 64——测试里并发连接偶发 `ConnectionResetError`）；`hooks/shion_hook.py`：`permission_decision` / `describe_permission` / `deny_message`，`ensure_ascii=False` 发请求（中文计划不会膨胀 6 倍）；`hooks_config.py`：新增 PermissionRequest（matcher `*`，超时 180 秒）；`panel.py:PermissionPanel`；`controller.py` 的 `_sync_permission`（tick 里每 100ms 同步，一次显示一条、显示“还有 N 个”）。内容显示规则见 spec「同意/否决的实现要点」。
@@ -168,7 +173,7 @@
 - [x] v0.1 审查（独立子代理，只读）+ 修复（pytest 共 210 个通过）
 - [x] v0.2 Claude Code hooks（pytest 共 287 个通过；**真机已验收（2026-10-19）**）
 - [x] v0.2.1 状态感知（pytest 共 321 个通过；**真机已验收（2026-10-19）**）
-- [x] v0.3 Claude Code 遥控（pytest 共 581 个通过；**真机验收待用户确认**）
+- [x] v0.3 Claude Code 遥控（pytest 共 583 个通过；**真机验收待用户确认**）
 - [ ] v0.4 诗音的对话菜单（零食、预设对话，不调用模型）
 - [ ] v0.5 内容包
 - [ ] v1.0 发布

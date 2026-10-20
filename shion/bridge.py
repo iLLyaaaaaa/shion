@@ -15,7 +15,7 @@ from PySide6.QtCore import QObject, Signal
 
 from shion.controller import PetController
 
-TAKE_TIMEOUT = 2.0  # 秒
+TAKE_TIMEOUT = 1.5  # 秒；要小于 hook 取反馈的超时（3 秒），hook 放弃之前 GUI 线程没处理就取消，不会丢反馈
 
 
 class _TakeRequest:

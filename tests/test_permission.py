@@ -560,3 +560,31 @@ def test_snapshot_panel_modes_render_png(qapp, tmp_path):
         assert app.snapshot_panel(str(out), kind, "x\n" * 30, "ja", 2, True) == 0
         img = QImage(str(out))
         assert not img.isNull() and img.width() > 200 and img.height() > 80
+
+
+def test_hook_gives_no_decision_when_content_is_too_long_to_show_fully(hook_env):
+    """内容长到面板放不下时，用户看不全就不能替他决定：不登记请求、不给决定，交回 CC 自己的授权框。"""
+    srv, hub, tmp = hook_env
+    r = run_hook("PermissionRequest", srv.port, tmp, stdin=perm_input("Bash", command="echo " + "x" * 13000))
+    assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
+    assert hub.permissions.pending() == []
+    ok = start_hook(srv, tmp, perm_input("Bash", command="echo " + "x" * 5000))
+    req = wait_pending(hub)[0]
+    assert len(req.detail) == len("echo " + "x" * 5000)  # 没超限的完整显示
+    hub.permissions.decide(req.id, True)
+    assert b"allow" in ok.communicate(timeout=15)[0]
+
+
+def test_settings_timeouts_outlast_hook_limits():
+    """CC 先杀掉 hook 会变成“超时放行”：settings 里的超时必须大于 hook 自己的最长等待。"""
+    import importlib.util
+    tools = Path(__file__).resolve().parent.parent / "tools" / "hooks_config.py"
+    spec = importlib.util.spec_from_file_location("hc_t", tools)
+    hc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hc)
+    h = load_hook()
+    assert hc.TIMEOUTS["PreToolUse"] >= 1880 + 15  # 暂停上限最大 1880 秒 + 余量
+    assert hc.TIMEOUTS["PermissionRequest"] >= 170 + 10
+    assert h.FEEDBACK_TIMEOUT > 1.5  # 大于 bridge 等 GUI 线程的时间
+    from shion.bridge import TAKE_TIMEOUT
+    assert TAKE_TIMEOUT < h.FEEDBACK_TIMEOUT

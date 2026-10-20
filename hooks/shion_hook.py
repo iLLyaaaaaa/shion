@@ -97,6 +97,7 @@ def pause_gate(limit: float, poll: float = PAUSE_POLL):
 
 
 PERMISSION_POLL = 10.0
+FEEDBACK_TIMEOUT = 3.0
 DETAIL_LIMIT = 12000  # 发给诗音的内容字数上限（再长的计划只显示前面）
 
 
@@ -109,25 +110,25 @@ def _clip(text, limit: int = DETAIL_LIMIT) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def describe_permission(tool_name, tool_input) -> str:
+def describe_permission(tool_name, tool_input, limit: int = DETAIL_LIMIT) -> str:
     """把要授权的操作写成给人看的文字：命令、文件完整路径、网址、计划全文等。"""
     ti = tool_input if isinstance(tool_input, dict) else {}
     kind = TOOL_KIND.get(tool_name, "other")
     if kind == "bash" and ti.get("command"):
         desc = ti.get("description")
-        return _clip(str(ti["command"]) + (f"\n# {desc}" if desc else ""))
+        return _clip(str(ti["command"]) + (f"\n# {desc}" if desc else ""), limit)
     if kind in ("edit", "write") and (ti.get("file_path") or ti.get("notebook_path")):
-        return _clip(ti.get("file_path") or ti.get("notebook_path"))
+        return _clip(ti.get("file_path") or ti.get("notebook_path"), limit)
     if tool_name == "WebFetch" and ti.get("url"):
-        return _clip(ti["url"])
+        return _clip(ti["url"], limit)
     if tool_name == "WebSearch" and ti.get("query"):
-        return _clip(ti["query"])
+        return _clip(ti["query"], limit)
     if tool_name == "ExitPlanMode" and ti.get("plan"):
-        return _clip(ti["plan"])
+        return _clip(ti["plan"], limit)
     try:
-        return _clip(json.dumps(ti, ensure_ascii=False, indent=2))
+        return _clip(json.dumps(ti, ensure_ascii=False, indent=2), limit)
     except Exception:
-        return _clip(ti)
+        return _clip(ti, limit)
 
 
 def deny_message() -> str:
@@ -148,8 +149,11 @@ def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL)
     tool = data.get("tool_name")
     if not isinstance(tool, str) or not tool or tool == "AskUserQuestion":
         return None  # 提问不是同意/否决，交给 CC
+    if len(describe_permission(tool, data.get("tool_input"), limit=10**9)) > DETAIL_LIMIT:
+        return None  # 内容长到面板放不下：用户看不全就不能替他决定，交回 CC 自己的授权框
+    detail = describe_permission(tool, data.get("tool_input"))
     opened = request(
-        "/permission/open", {"tool": tool, "detail": describe_permission(tool, data.get("tool_input"))}, timeout=2.0
+        "/permission/open", {"tool": tool, "detail": detail}, timeout=2.0
     )
     rid = opened.get("id") if isinstance(opened, dict) else None
     if not isinstance(rid, str) or not rid:
@@ -179,7 +183,8 @@ def emit(obj) -> None:
 
 
 def take_feedback() -> str:
-    result = request("/feedback/take", {})
+    # 超时要比 bridge 等 GUI 线程的时间（1.5 秒）长：否则 hook 先放弃、GUI 线程随后仍清空队列，反馈就丢了
+    result = request("/feedback/take", {}, timeout=FEEDBACK_TIMEOUT)
     text = result.get("text") if isinstance(result, dict) else ""
     return text if isinstance(text, str) else ""
 
@@ -330,7 +335,7 @@ if __name__ == "__main__":
     worker.start()
     event = sys.argv[1:2]
     # PreToolUse 可能要等用户点“继续”，总时限 = 暂停上限 + 余量；其余事件很快
-    worker.join(12 if event == ["SessionStart"] else (pause_limit() + 30 if event == ["PreToolUse"] else (permission_limit() + 10 if event == ["PermissionRequest"] else 2.5)))
+    worker.join(12 if event == ["SessionStart"] else (pause_limit() + 30 if event == ["PreToolUse"] else (permission_limit() + 10 if event == ["PermissionRequest"] else (6.0 if event in (["PostToolUse"], ["UserPromptSubmit"]) else 2.5))))
     try:
         sys.stdout.flush()
     except BaseException:
