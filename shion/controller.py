@@ -121,7 +121,6 @@ class PetController(QObject):
         self._status_timer.timeout.connect(self._show_status)
 
         w = window
-        w.hovered.connect(self._on_hover)
         w.patted.connect(self._on_pat)
         w.gesture.connect(self._on_gesture)
         w.clicked.connect(self._on_click)
@@ -272,10 +271,6 @@ class PetController(QObject):
     # ------------------------------------------------------------ 手势
     def _on_pressed(self) -> None:
         self._idle.next_at = None
-
-    def _on_hover(self) -> None:
-        self.react(self.state.interact(self._now()))
-        self.sync()
 
     def _on_pat(self) -> None:
         self.window.stop_motion()
@@ -998,10 +993,8 @@ class PetController(QObject):
         return menu
 
     def show_menu(self, pos: QPoint) -> None:
-        self.window.stop_motion()
         self._idle.next_at = None
-        self.react(self.state.interact(self._now()))
-        self.sync()
+        # 浏览/取消菜单不算交互，只有选中具体操作才改变状态或动作。
         menu = self.build_menu()
         self._menu_open = True
         try:

@@ -106,7 +106,7 @@ def test_menu_props_touch_restores_and_does_not_gain_affection(env, action):
     assert env.win.sprite_name == action
     assert not env.state.can_idle(env.now)
     assert env.data.affection == 0 and env.data.stats["pats"] == 0
-    env.win.hovered.emit()
+    env.win.clicked.emit()
     assert env.win.sprite_name == "idle"
     if action == "bed":
         # 让原菜单台词自然结束，再验唤醒台词；状态始终立即唤醒。
@@ -116,14 +116,15 @@ def test_menu_props_touch_restores_and_does_not_gain_affection(env, action):
 def test_goodnight_and_night_use_bed_day_idle_uses_original_sleep(env):
     env.ctl.choose_dialogue("talks", "goodnight")
     assert env.win.sprite_name == "bed"
-    env.win.hovered.emit()
+    env.win.clicked.emit()
     env.advance(901)
     assert env.win.sprite_name == "sleep"
     env.now = datetime(2026, 10, 20, 1)
     env.ctl.sync()
     assert env.win.sprite_name == "bed"
+    env.data.last_attended = env.now  # 此处只验证夜间唤醒；久别回归台词另有专项。
     env.ctl._speech.dismiss()
-    env.win.hovered.emit()
+    env.win.clicked.emit()
     assert env.win.sprite_name != "bed"
     assert env.said[-1] in env.ctl.lines._lines["wake"]
 
@@ -139,8 +140,6 @@ def test_neglect_decides_once_until_touched_and_does_not_reset_attention(env, mo
     for _ in range(4):
         env.ctl.sync()
     assert len(calls) == 1 and env.data.last_attended == original
-    env.win.hovered.emit()
-    assert env.win.sprite_name == "neglect1" and len(calls) == 1
     env.win.clicked.emit()
     assert env.win.sprite_name == "idle"
 

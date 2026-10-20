@@ -279,7 +279,7 @@ class Rec:
 
     def __init__(self, w):
         self.log = []
-        for name in ("hovered", "patted", "clicked", "double_clicked", "drag_started", "drag_finished"):
+        for name in ("patted", "clicked", "double_clicked", "drag_started", "drag_finished"):
             getattr(w, name).connect(lambda n=name: self.log.append(n))
 
     def count(self, name):

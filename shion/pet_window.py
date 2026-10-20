@@ -76,7 +76,6 @@ def landing_geometry(
 
 
 class PetWindow(QWidget):
-    hovered = Signal()  # 鼠标进入（只唤醒）
     patted = Signal()  # 在头部左右移动，每累计 40px 一次
     clicked = Signal()  # 按下到松开几乎没动
     double_clicked = Signal()  # 在对应的 clicked 之后发出
@@ -572,8 +571,15 @@ class PetWindow(QWidget):
         self._refresh(now)
 
     # ---- 鼠标 ----
-    def enterEvent(self, _e) -> None:
-        self.hovered.emit()
+    def enterEvent(self, e) -> None:
+        if not self._dragging:
+            self._update_hover_cursor(e.position().toPoint())
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:
+        if not self._dragging:
+            self.unsetCursor()
+        super().leaveEvent(e)
 
     def _update_hover_cursor(self, pos: QPoint) -> None:
         if self._is_head(pos):
@@ -755,7 +761,6 @@ class PetWindow(QWidget):
                 self.double_clicked.emit()
 
     def contextMenuEvent(self, e) -> None:
-        self.stop_motion()
         self.menu_requested.emit(e.globalPos())
 
     # ---- 原地动作 ----

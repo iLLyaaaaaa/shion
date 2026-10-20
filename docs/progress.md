@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-21 悬停不再算交互**：移除 hovered → interact 及其唤醒路径；进入、无按键移动、离开仅处理光标和 Qt 提示，不改变状态、动作或交互计时。仅打开/浏览/取消右键菜单也不唤醒、不打断动作，实际手势和菜单动作沿用原优先级。完整测试 **974 passed、3 skipped**；原生 Windows 150% 专项 **53 passed**。桌面表现 **待用户验收**。用户明确要求补测试、更新记录后 commit，不等待本轮亲眼验收；不 push。
 - **2026-10-21 这一轮结束后的“继续”已实现**：立即中断 / 停太久结束这一轮后，工作遥控菜单多一项：终端版“继续（发送“继续”）”（子进程 AttachConsole + WriteConsoleInputW，先读屏，有草稿或确认框不发并说明原因），桌面端“继续”（复制到剪贴板）。桌面端立即中断本身不变。完整测试 **922 passed、2 skipped**；conhost 和 Windows Terminal 真机读屏/发送通过；完整链路 **待用户验收**，见本轮记录。不 push。
 - **2026-10-20 可行性实验：替用户发“继续”**（没改正式代码）：终端版 AttachConsole + WriteConsoleInputW **可行**（conhost 和 WT 后台标签都能送达，不抢焦点；要先读屏，避开确认对话框和用户草稿）；桌面端 UIA SetValue/Invoke **送得到，也能选对会话，但会把 Claude 拉到前台、抢走焦点**，不建议用。详见 `docs/experiments/send-continue.md`，脚本在 `tools/experiments/`。
 - **2026-10-20 暂停文字标签已实现**：小 ⏸ 已换成终端风格“暂停中 / Paused / 一時停止中”，带三语悬停提示；真正停在检查点后才显示，左键点击复用“继续”，0.6 秒防误点，不接键盘、不抢焦点。原生 Windows 150% 专项 **34 passed**；最终完整测试 **889 passed、3 skipped、2 warnings**。真实桌面穿透、悬停提示和 CC 点击续跑 **待用户验收**。第 1～4 项提交 `ddb5b1b`，本轮仍不 push。
@@ -21,6 +22,20 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-21：悬停不唤醒、不打断状态或动作
+- **做了什么**：
+  - 删除 `PetWindow.hovered`、`PetController._on_hover` 及连接；`enterEvent` / 无按键 `mouseMoveEvent` / `leaveEvent` 只更新光标，保留 Qt 自带提示；拖动时进入/离开仍保留握手光标。
+  - 复查全部 `interact()` 调用，剩余仅为双击、动作菜单、停下和立即中断这些实际操作；`show_menu` 与 `contextMenuEvent` 不再唤醒或停止已有动作。菜单打开期间仍暂停新待机动作调度，已有动作按原时间线继续。
+  - 更新原先用悬停唤醒的测试与规格/旧接口说明；新增 `tests/test_hover_passive.py`，覆盖白天睡眠、夜间床睡、菜单床睡/晚安、手动/自动趴桌、落寞/蜷起、九种固定表情、临时/待机表情、工作/暂停、吃零食、转身/侧身/跳跃（手动与自动）、鼓腮/挠痒，以及计时/台词不变、自动入睡不推迟、浏览/取消菜单和真正操作仍唤醒。
+- **验证**：`PYTHONUTF8=1`、`QT_QPA_PLATFORM=offscreen`，`.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/hover-passive/full` → **974 passed、3 skipped、2 warnings**（316.16 秒）。三项跳过分别为 offscreen 不支持的对话/暂停标签非激活显示，以及本轮不在 CC 内运行的进程链检查；两条 warnings 为既有 Pillow getdata 弃用警告。原生 `QT_QPA_PLATFORM=windows`、`QT_SCALE_FACTOR=1.5`，`tests/test_hover_passive.py` → **53 passed**（19.13 秒）。`git diff --check` 通过。日志在已忽略的 `.venv/preview-run/hover-passive/`，不提交；原生自动事件不替代下列用户亲眼验收。
+- **踩坑**：直接替换 `QMenu.exec` 未拦住原生菜单事件循环，首轮测试卡住；已终止本轮测试进程并改用菜单执行替身，保留真实 Qt 上下文菜单事件到控制器的路径，避免等待人工关闭菜单。旧测试改成真实点击后会刷新被理会时间，跨夜久别优先说 `neglect_return`；夜间唤醒用例已隔离久别条件，保留原台词优先级。
+- **待用户验收**（先重启诗音）：
+  - [ ] 坐着睡觉、床上睡觉、晚安后、趴桌、落寞、蜷起来、固定表情时，鼠标反复移入/移出和移动均不唤醒、不换状态、不冒起床台词。
+  - [ ] 转身、侧身、跳跃、鼓腮、挠痒等进行中移入/移出不打断；仅打开菜单、浏览子菜单、Esc/点外部取消也不打断，动作按原时间自然结束。
+  - [ ] 头顶光标仍为张开的手，身体与移出恢复正常；拖动保持握手光标；暂停标签悬停提示正常，真实桌面点穿与四档尺寸/高分屏表现正常。
+  - [ ] 真正左键点击、摸头、捏脸、挠痒、拖动、双击及选择菜单动作仍能脱离睡眠/趴桌；固定表情仍按既有优先级在动作后恢复。
+- **下一步**：用户亲眼验收以上项目及之前保留的清单，不推进其他功能，不 push。
 
 ## 2026-10-21：这一轮结束后的“继续”（终端发送 / 桌面端复制）
 - **做了什么**：
@@ -462,14 +477,14 @@
 - [x] 右键菜单：夸夸 Claude（proud）、大小四档（切换后仍贴任务栏）、静音气泡、开机自启灰色、关于、退出
 - [x] 台词已在第 5 步换成真气泡（不再用 QToolTip）
 - [x] 爱心窗口完全点不到（不挡鼠标）
-- [x] 睡着（15 分钟无操作，或 `SHION_DEBUG=1` 下 1 分钟）后悬停会唤醒并说起床台词
+- [x] 历史验收：睡着后悬停会唤醒并说起床台词；2026-10-21 本轮已取消悬停唤醒，新行为见本轮待用户验收清单
 - [x] 存档位置：`%APPDATA%\Shion\state.json`，日志：`%APPDATA%\Shion\shion.log`
 
 ## 第 4 步留给后面步骤的接口
 - `PetController(window, state, scheduler, lines=None, overlay=None, now_fn=datetime.now, say=None, autostart=True)`：信号 `quit_requested`；`react(reactions)`、`say_key(key)`、`say(text)`、`sync()`、`tick()`、`set_size/set_muted/praise/quit`、`restore_position()`、`build_menu()`、`status_text()`
 - **第 5 步只需把 `say` 的出口换成气泡**：控制器的 `_tooltip_say` 是暂代；构造时传 `say=` 回调即可覆盖；静音在 `say_key` 里已处理，双击状态不受静音影响
 - **接 server（下一步之后）**：`controller.state.claude_event(...)` 的返回值交给 `controller.react(...)`，再 `controller.sync()`；注意要在 GUI 线程调用（用信号切线程），`take_praise` 要同步返回
-- `PetWindow` 不再自己决定精灵：新增信号 `hovered/patted/clicked/double_clicked/drag_started/drag_finished/menu_requested`，`set_height()`、`snap_to_floor()`、`head_anchor()`；状态机的 `current()` 由控制器同步给 `set_state`
+- `PetWindow` 不再自己决定精灵：信号 `patted/clicked/double_clicked/drag_started/drag_finished/menu_requested`（2026-10-21 移除 `hovered`），`set_height()`、`snap_to_floor()`、`head_anchor()`；状态机的 `current()` 由控制器同步给 `set_state`
 - `app.run()` 已接好存档（`SaveScheduler`）、日志、`SHION_DEBUG`、`SHION_DATA_DIR`（环境变量，覆盖数据目录，测试用）
 
 ## 第 2 步：已验收（用户真机确认，2026-10-19）
@@ -501,7 +516,7 @@
 - 输入方法都返回 `list[Reaction]`，`Reaction("say", key)` 的 key 对应台词分类：
   `poke / stop / dizzy / drag / wake / neglect_return / praise_menu / claude_working / claude_done`（已在 spec 的 zh.json 里），
   另外有 **`greeting`（session_start）和 `claude_waiting`（notification）两个新 key，第 5 步写台词库时要补上**
-- 界面层调用：`pat`（累计移动 40px 一次）、`click`、`drag_start/drag_end`、`interact`（悬停、双击、右键，只唤醒；拖动除外，拖动算被理会）、`praise_claude`、`take_praise`、`claude_event(type, detail, now)`
+- 界面层调用：`pat`（累计移动 40px 一次）、`click`、`drag_start/drag_end`、`interact`（双击、实际菜单操作，只唤醒；拖动除外，拖动算被理会；2026-10-21 起悬停与浏览/取消菜单不调用）、`praise_claude`、`take_praise`、`claude_event(type, detail, now)`
 - 存档：`load(path)` / `save(path, data)` / `SaveScheduler(path, data)`（`mark_dirty`、`poll(now)` 给 QTimer、退出时 `flush()`）。路径用 `QStandardPaths.AppDataLocation` 取，第 1 步的 app 负责
 - `Config.debug()` 给 `SHION_DEBUG=1` 用
 
@@ -512,7 +527,7 @@
 - 调试：`.venv\Scripts\python -m shion.server` 起一个无窗口的内存版，用 curl 发 `/event`、`/praise/take`、`/health` 看打印
 
 ## 设计决定（第 3 步时定的，spec 没写死的部分）
-- 摸头、单击、拖动（开始和松手）、Claude 事件算“被理会”；悬停、双击、右键只唤醒不算。唤醒和冷落回归同时发生时只说 `neglect_return`
+- 摸头、单击、拖动（开始和松手）、Claude 事件算“被理会”；双击和相应菜单操作只唤醒不算。2026-10-21 更新：悬停与浏览/取消菜单不唤醒，也不刷新计时。唤醒和冷落回归同时发生时只说 `neglect_return`
 - 夜间（0:30～6:30）默认睡；被叫醒后当晚不再强制睡，要再空闲 15 分钟才睡
 - “做得好”菜单让待表扬 +1；摸头不再产生表扬（2026-10-19 本轮更新）
 - 存档里 `window.x/y` 默认是 `null`（表示用默认的右下角），spec 里写的是 0

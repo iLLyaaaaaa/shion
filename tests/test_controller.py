@@ -313,10 +313,10 @@ def test_restore_position_uses_saved_x_or_falls_back(qapp, tmp_path):
     assert avail.left() <= default_x <= avail.right()
 
 
-def test_hover_wakes_sleeping_pet_with_wake_line(env):
+def test_click_wakes_sleeping_pet_with_wake_line(env):
     env.advance(16 * 60)
     assert env.win.sprite_name == "sleep"
-    env.win.hovered.emit()
+    env.win.clicked.emit()
     assert env.win.sprite_name != "sleep"
     assert env.said and env.said[-1] in Lines()._lines["wake"]
 

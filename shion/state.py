@@ -483,7 +483,7 @@ class PetState:
         return reactions
 
     def interact(self, now: datetime) -> list[Reaction]:
-        """悬停、双击、右键等：只负责唤醒，不算“被理会”。（拖动算，见 drag_start）"""
+        """双击、菜单操作等实际操作：唤醒但不算“被理会”；悬停不调用此入口。"""
         reactions = self._touch(now, attend=False)
         self._log_state(now)
         return reactions
