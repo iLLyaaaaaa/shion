@@ -39,7 +39,8 @@ class Config:
     neglect1: timedelta = timedelta(minutes=30)
     neglect2: timedelta = timedelta(hours=2)
     sleep_idle: timedelta = timedelta(minutes=15)
-    working_timeout: timedelta = timedelta(minutes=2)
+    working_timeout: timedelta = timedelta(minutes=5)  # 没有工具在执行时，多久没新事件就退出 working
+    tool_timeout: timedelta = timedelta(minutes=30)  # 工具执行中（PreToolUse 之后还没 PostToolUse）最长保持多久
     night_start: time = time(0, 30)
     night_end: time = time(6, 30)
 
@@ -79,7 +80,7 @@ class Config:
             neglect1=timedelta(seconds=20),
             neglect2=timedelta(seconds=40),
             sleep_idle=timedelta(seconds=60),
-            working_timeout=timedelta(seconds=20),
+            working_timeout=timedelta(seconds=60),
             nudge_after=timedelta(seconds=20),
         )
 
@@ -97,6 +98,19 @@ class Reaction:
 
 def _say(key: str) -> Reaction:
     return Reaction("say", key)
+
+
+@dataclass
+class WorkSession:
+    """一个 CC 会话的工作状态（不存档）。tools：在执行的工具 tool_use_id → 开始时间。"""
+
+    last: datetime
+    tools: dict = field(default_factory=dict)
+
+    def active(self, now: datetime, cfg: "Config") -> bool:
+        if any(now - start < cfg.tool_timeout for start in self.tools.values()):
+            return True
+        return now - self.last < cfg.working_timeout
 
 
 # ---------------------------------------------------------------- 存档数据
@@ -327,7 +341,7 @@ class PetState:
 
         self._dragging = False
         self._temp: Optional[tuple[str, datetime]] = None  # (状态名, 到期时间)
-        self._working_until: Optional[datetime] = None
+        self._sessions: dict[str, WorkSession] = {}  # 正在工作的会话（session_id → 状态；旧 hook 没带 id 时用 ""）
         self._stopped_at: Optional[datetime] = None  # Claude 停下的时间（催你回来用）
         self._nudges = 0
         self._last_activity = now  # 最近一次鼠标交互或 Claude 事件（用于睡眠）
@@ -368,7 +382,7 @@ class PetState:
             return self._temp[0]
         if self.paused:
             return "stop"
-        if self._working_until and now < self._working_until:
+        if self.is_working(now):
             return "working"
         if self._is_asleep(now):
             return "sleep"
@@ -377,7 +391,20 @@ class PetState:
         return ("idle", "neglect1", "neglect2")[self._neglect_level(now)]
 
     def is_working(self, now: datetime) -> bool:
-        return self._working_until is not None and now < self._working_until
+        """任意一个会话在工作就算。"""
+        return any(sess.active(now, self.config) for sess in self._sessions.values())
+
+    def working_sessions(self, now: datetime) -> list[str]:
+        return [key for key, sess in self._sessions.items() if sess.active(now, self.config)]
+
+    def tool_starts(self, session: str) -> list[datetime]:
+        """这个会话里还在执行的工具的开始时间。"""
+        sess = self._sessions.get(session)
+        return sorted(sess.tools.values()) if sess else []
+
+    def end_session(self, session: Optional[str]) -> None:
+        """这个会话的这一轮结束了（被中断 / 停太久结束）：不再算工作中，不计完成任务。"""
+        self._sessions.pop(session or "", None)
 
     def can_idle(self, now: datetime) -> bool:
         return (
@@ -428,8 +455,8 @@ class PetState:
                 self._changed(now)
         if self._temp and now >= self._temp[1]:
             self._temp = None
-        if self._working_until and now >= self._working_until:
-            self._working_until = None
+        for key in [k for k, sess in self._sessions.items() if not sess.active(now, self.config)]:
+            del self._sessions[key]
         reactions: list[Reaction] = []
         cfg = self.config
         if (
@@ -573,9 +600,14 @@ class PetState:
             self._changed(now or self._last_activity)
         return items
 
-    def claude_event(self, etype: str, detail: Optional[str], now: datetime) -> list[Reaction]:
-        """处理本地 HTTP 服务转来的事件。未知类型直接忽略。"""
-        if etype not in ("session_start", "prompt", "working", "stop", "notification", "react", "tool_error", "plan_ready"):
+    def claude_event(self, etype: str, detail: Optional[str], now: datetime,
+                     session: Optional[str] = None, tool_id: Optional[str] = None) -> list[Reaction]:
+        """处理本地 HTTP 服务转来的事件。未知类型直接忽略。
+
+        session：CC 的 session_id（旧 hook 没有，用 ""）；tool_id：PreToolUse 与 PostToolUse 配对用的 tool_use_id。
+        """
+        if etype not in ("session_start", "prompt", "working", "tool_done", "stop", "notification", "react",
+                         "tool_error", "plan_ready"):
             log.info("忽略未知事件：%r", etype)
             return []
         if etype == "react" and detail not in TEMP_STATES:
@@ -583,19 +615,28 @@ class PetState:
             return []
 
         reactions = self._touch(now, attend=True)
+        key = session or ""
         if etype in ("session_start", "prompt", "working"):
             self._stopped_at, self._nudges = None, 0  # Claude 又开始干活了，不用催
+        if etype in ("prompt", "working") or (etype in ("tool_done", "tool_error") and key in self._sessions):
+            was_working = self.is_working(now)
+            sess = self._sessions.get(key)
+            if sess is None or not sess.active(now, self.config):
+                sess = self._sessions[key] = WorkSession(now)
+            sess.last = now  # 有新事件就续期
+            if etype == "working" and tool_id:
+                sess.tools[tool_id] = now
+            elif etype in ("tool_done", "tool_error"):
+                sess.tools.pop(tool_id, None) if tool_id else sess.tools.clear()
+            if etype == "working" and not was_working:
+                reactions.append(_say("claude_working"))
         if etype == "session_start":
             reactions.append(_say("greeting"))
-        elif etype == "working":
-            if not (self._working_until and now < self._working_until):
-                reactions.append(_say("claude_working"))
-            self._working_until = now + self.config.working_timeout  # 有新事件就续期
         elif etype == "plan_ready":
-            self._working_until = None
+            self._sessions.pop(key, None)
             reactions.append(_say("plan_ready"))
         elif etype == "stop":
-            self._working_until = None
+            self._sessions.pop(key, None)  # 只结束这个会话；别的会话还在工作时 done 之后回到 working
             self._stopped_at, self._nudges = now, 0
             self.save.stats["claude_tasks"] += 1
             self._set_temp("done", now)

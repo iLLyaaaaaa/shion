@@ -84,18 +84,18 @@ def test_tick_clears_expired(pet):
 
 # ---- working ----
 
-def test_working_times_out_after_2_minutes(pet):
+def test_working_times_out_after_5_minutes(pet):
     pet.claude_event("working", None, T0)
-    assert pet.current(T0 + sec(119)) == "working"
-    assert pet.current(T0 + sec(121)) == "idle"
+    assert pet.current(T0 + sec(299)) == "working"
+    assert pet.current(T0 + sec(301)) == "idle"
 
 
 def test_working_renewed_by_new_event(pet):
     pet.claude_event("working", None, T0)
     r = pet.claude_event("working", None, T0 + sec(100))
     assert "claude_working" not in keys(r)  # 已在 working，不重复说话
-    assert pet.current(T0 + sec(200)) == "working"
-    assert pet.current(T0 + sec(221)) == "idle"
+    assert pet.current(T0 + sec(399)) == "working"
+    assert pet.current(T0 + sec(401)) == "idle"
 
 
 def test_first_working_says_line(pet):

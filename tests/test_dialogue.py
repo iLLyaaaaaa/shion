@@ -166,7 +166,7 @@ def test_goodnight_preserves_higher_priority_state(env, block, expected):
     assert env.win.sprite_name == expected
     env.data.fixed_expression = None
     env.state.paused = False
-    env.advance(121)
+    env.advance(301)
     assert env.win.sprite_name == "sleep"
 
 

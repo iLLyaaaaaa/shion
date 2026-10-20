@@ -84,9 +84,9 @@ claude pet/
 | 拎起晃动 | 水平方向反转，反向摆幅 >40px 确认一次；任意 2 秒内至少 3 次 | 记住晃晕直到落地，下落仍是 drag；落地后 dizzy 2.5 秒并说 dizzy 台词。小幅抖动、一直向同侧移动不计数，每轮拖动独立 |
 | 松手 | — | 带重力下落到脚底贴住屏幕可用区域的底边（不能越出屏幕），落地时压扁一下；恢复固定/自动状态，达到晃晕阈值时先显示 dizzy 2.5 秒（固定表情仍优先） |
 | 双击 | — | 气泡显示状态：已陪伴多久、今天被摸了几次、Claude 今天完成了几个任务 |
-| 右键 | — | 工作遥控（停下 ／ 做得好 ／ 有问题……）／ 表情 ／ 活跃度 ／ 动作 ／ 大小 ／ 静音气泡 ／ 只显示状态，不显示内容 ／ 语言 ／ 开机自启（v1.0）／ 关于 ／ 退出 |
+| 右键 | — | 工作遥控（停下/继续 ／ 立即中断 ／ 做得好 ／ 有问题……）／ 表情 ／ 活跃度 ／ 动作 ／ 大小 ／ 静音气泡 ／ 只显示状态，不显示内容 ／ 语言 ／ 开机自启（v1.0）／ 关于 ／ 退出 |
 
-- **工作遥控**（见 v0.3）：“做得好”好感度 +3、proud，并加入反馈队列；“有问题……”弹出一行输入框（可留空）；“停下”见 v0.3「停下规则」（菜单里不再有单独的暂停/继续）。
+- **工作遥控**（见 v0.3）：“做得好”好感度 +3、proud，并加入反馈队列；“有问题……”弹出一行输入框（可留空）；“停下”见 v0.3「停下规则」，停下期间这一项变成“继续”；“立即中断”见 v0.3「立即中断」。
 - **表情**：开心 happy、得意 proud、害羞挡手 stop、晕乎乎 dizzy、工作中 working、完成啦 done、睡觉 sleep、发呆 idle、委屈 neglect2；不提供 blink、drag、neglect1。默认临时显示 5 秒；勾选“固定当前表情”后保存并保持，之后选新表情仍固定；“恢复自动”解除。固定期间台词、统计、Claude 状态照常处理；拖动/下落仍为 drag，落地恢复固定表情。双击状态显示“表情已固定”。
 - **活跃度**：安静 / 普通（默认）/ 活泼，写入存档。普通每 8～20 秒、活泼每 4～10 秒随机做一件原地动作：八帧转一圈、朝向鼠标侧身 2 秒、原地小跳（与菜单跳跃共用下述帧动画）、开心或发呆 2 秒、自言自语 `idle_talk`（10% 抽取概率、至少间隔 60 秒）。安静关闭待机动作；Claude 实际工作中、表情固定、睡着、拖动/下落、按住鼠标或打开菜单期间暂停，恢复后重新等待、不补播。自动动作不刷新睡眠/被理会时间。
 - **动作**：仅保留跳一跳、转个身、朝向鼠标；删去“散步一会儿”和“走到屏幕另一边”。转身顺序播放 turn_1～8，各 90ms，720ms 后结束；朝向鼠标在右/左分别显示 turn_2 / turn_8，2 秒后结束。菜单和待机共用实现，位置不变，不做任何镜像。按下立即中断动作；自动动作还会在 working、固定、睡眠或安静档出现时中断。结束后恢复当前底层状态（通常 idle，固定/手动/工作表情仍保留）。
@@ -114,7 +114,7 @@ claude pet/
 1. **drag**：正在被拖动
 2. **固定表情 / 手动表情**：固定无期限；未固定的手动表情 5 秒
 3. **临时反应**（有持续时间）：happy、stop、dizzy、done（3 秒）、proud（3 秒）
-4. **working**：收到 Claude 开始干活的事件；收到 stop / plan_ready 事件或 2 分钟没有新事件后退出。plan_ready 只提醒看计划，不计为完成任务、不触发 done 或完成后的定时催促
+4. **working**：按会话（session_id）计算，任意一个会话在工作就显示。会话从 UserPromptSubmit / PreToolUse 开始算工作中；PreToolUse 之后、对应的 PostToolUse / PostToolUseFailure（按 tool_use_id 配对）之前一直保持（单个工具最长 30 分钟）；没有在执行的工具时，距最近事件 5 分钟（调试模式 60 秒）才退出。这个会话 Stop / plan_ready / 被中断或停太久结束时立刻退出；别的会话还在工作时，done 3 秒之后回到 working。plan_ready 只提醒看计划，不计为完成任务、不触发 done 或完成后的定时催促
 5. **sleep**：本地时间 0:30～6:30，或者 15 分钟没有任何鼠标交互、也没有 Claude 事件。任何交互都会唤醒，唤醒时说一句起床台词
 6. **待机短暂表情**：happy / idle 2 秒
 7. **底层状态**：根据冷落值决定
@@ -203,16 +203,18 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 |---|---|---|
 | `session_start` | SessionStart hook | 说一句问候，刷新“被理会”时间 |
 | `prompt` | UserPromptSubmit hook | 刷新“被理会”时间 |
-| `working` | PreToolUse hook | 进入 working（已经在 working 时忽略） |
+| `working` | PreToolUse hook | 进入 working（已经在 working 时不重复说话），记下在执行的工具 |
+| `tool_done` | PostToolUse hook（放行后）；PostToolUseFailure 的 Esc 中断 | 工具执行完，不说话 |
 | `stop` | Stop hook | 退出 working → 播放 done 3 秒 + claude_done 台词，claude_tasks +1 |
 | `plan_ready` | ExitPlanMode 的 PermissionRequest hook | 高优先级气泡“计划写好啦，去看看吧～”并跳一下；退出 working，不弹授权面板、不计完成任务 |
 | `notification` | Notification hook | 气泡提示“有事情等你确认哦”（只有终端版会触发） |
 | `react` | 预留（目前没有调用方） | `detail` 是表情名，临时切换到该表情 3 秒 |
 
 - `POST /feedback/take` → 返回 `{"text": "…"}`：取走并清空反馈队列，按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
-- `POST /pause/wait {"wait": 秒}` → `{"paused": true|false, "stop": true|false}`：检查点长轮询。没在停下就立即返回；停下等待中最多等 `wait` 秒（上限 30），用户选“继续”立即返回 `paused: false`；选“结束这一轮”时**此刻正在等的所有请求**都返回 `stop: true`（之后到达的请求不受影响，不留残余状态），服务线程随即向界面发内部事件 `work_stopped`（界面只处理第一次）。hub 记录正在等的请求数，两段长轮询之间 2 秒内仍算“在等”，界面据此弹出面板。**没有任何接口能让 HTTP 调用方开始停下或结束这一轮**，`/event` 里的 `work_stopped` 一律 400；`prompt` 事件到达时服务线程会直接解除等待；`stop` 事件（这一轮已结束）在没有 hook 正在等时作废没用上的停下
+- 会话字段（`/event` 可选，`server.parse_meta` 校验，不对就 400）：`session`（stdin 的 session_id）、`tool_id`（tool_use_id），以及 prompt / PreToolUse 附带的 `proc`：`{"pid", "created"(FILETIME), "name"(只认 claude.exe/node.exe/bun.exe), "entry"(CLAUDE_CODE_ENTRYPOINT), "hooks"(hook 自己到 CC 之间的 pid，最多 8 个)}`。带会话字段时回调为 `on_event(type, detail, meta)`，否则仍是两参数
+- `POST /pause/wait {"wait": 秒, "session": 可选}` → `{"paused": true|false, "stop": true|false}`：检查点长轮询。没在停下就立即返回；停下等待中最多等 `wait` 秒（上限 30），用户点“继续”立即返回 `paused: false`；等满上限（`pause_timeout`）时**此刻正在等的所有请求**都返回 `stop: true`（之后到达的请求不受影响，不留残余状态）；这个 `session` 被“立即中断”过时立即返回 `stop: true`（只生效一次，正在等的也会被唤醒）。拿到 stop 时服务线程向界面发内部事件 `work_stopped`（带 session）。hub 记录正在等的请求数，两段长轮询之间 2 秒内仍算“在等”。**没有任何接口能让 HTTP 调用方开始停下、结束这一轮或请求中断**，`/event` 里的 `work_stopped` 一律 400；`prompt` 事件到达时服务线程直接解除等待；`stop` 事件在没有 hook 正在等时作废没用上的停下；`prompt` / `stop` 带 session 时作废该会话没用上的中断标记
 - `POST /permission/open {"tool", "detail"}` → `{"id"}`（请求体上限放宽到 64 KB；排队上限 20，满了返回 503）；`POST /permission/wait {"id", "wait"}` → `{"id", "status"}`，`status` 是 `pending`/`allow`/`deny`/`gone`，`allow`/`deny` 只能取一次；`POST /permission/withdraw {"id"}` 撤回。**没有任何接口、任何字段能写入 allow/deny**，决定只来自诗音界面上的按钮（有测试往所有接口和事件类型里塞各种“同意”字段，请求始终保持 pending；另有源码级测试保证只有 controller 的按钮回调会写入决定）
-- `type = pause_timeout`（hook 等满上限后发来）：只在停下等待中有效，界面按“结束这一轮”处理（放掉其他并行等待的 hook），气泡换成“等了好久没选，这一轮先结束了；在 CC 里说一声就能继续”
+- `type = pause_timeout`（hook 等满上限后发来）：只在停下等待中有效，界面放掉其他并行等待的 hook（也返回 stop），提醒一次“停太久了，这一轮先结束啦，在 CC 里说一声就能接着做”（不常驻）
 - `GET /health` → `{"ok": true}`
 - 安全：带 `Origin` 头的请求（来自网页）和 `Host` 不是 `127.0.0.1` / `localhost` 的请求一律返回 403，不触发任何回调；读请求体有 5 秒超时。hook 脚本是普通 HTTP 客户端，不受影响。
 
@@ -223,8 +225,10 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 - 只用标准库（`urllib.request`），**超时 0.5 秒**。桌宠没运行或请求失败时**静默退出、返回码为 0**，绝不能影响 Claude Code 的正常使用。
 - 从 stdin 读取 hook 输入的 JSON（可以不用，但必须读完）。
 - `UserPromptSubmit`：先发送 `prompt` 事件，再调用 `/feedback/take`；返回的文字非空就原样打印到 stdout（`[诗音] 用户觉得你刚才做得很好。` 等，按存档语言使用中/英/日；多次“做得好”合成一句，不写次数；摸头不产生反馈）
-- `PostToolUse`：**检查点**（同 PreToolUse 的 `/pause/wait` 逻辑）。放行后再调用 `/feedback/take`，非空则输出 `hookSpecificOutput.additionalContext`（Claude 工作中即可收到反馈）。结束这一轮（或等满上限）时输出 `{"continue": false, "stopReason": …}`，不取反馈（留给下一次 UserPromptSubmit）
-- `PreToolUse`：**检查点**。先问 `/pause/wait`；停下等待中就按 25 秒一段一直等，直到“继续”或 `prompt` 解除；诗音没开、连不上、返回内容不对一律放行（`stop`/`paused` 必须恰好是 `true` 才算数）。结束这一轮时输出 `{"continue": false, "stopReason": …}` 并附带 `permissionDecision: deny`（保证这次工具不执行），不发 `working`；等满上限（`remote.pause_timeout`，默认 30 分钟）同样处理并发 `pause_timeout`
+- 所有事件都带 `session`（和 `tool_id`）；UserPromptSubmit / PreToolUse 另带 `proc`：用 Toolhelp 快照从 hook 自己沿父进程链往上找，有 `CLAUDE_PID` 环境变量时必须在链上找到它（否则不带），没有时取最近的 claude/node/bun 祖先；进程表工具在 `shion/winproc.py`（只用标准库）
+- `PostToolUseFailure`：发 `tool_error`；`is_interrupt`（用户在 CC 里按 Esc）时改发 `tool_done`。**不是检查点**：实测（2.1.289）CC 不理会它返回的 `continue: false`
+- `PostToolUse`：**检查点**（同 PreToolUse 的 `/pause/wait` 逻辑）。放行后先发 `tool_done`，再调用 `/feedback/take`，非空则输出 `hookSpecificOutput.additionalContext`（Claude 工作中即可收到反馈）。被立即中断或等满上限时输出 `{"continue": false, "stopReason": …}`，不取反馈（留给下一次 UserPromptSubmit）
+- `PreToolUse`：**检查点**。先问 `/pause/wait`；停下等待中就按 25 秒一段一直等，直到“继续”或 `prompt` 解除；诗音没开、连不上、返回内容不对一律放行（`stop`/`paused` 必须恰好是 `true` 才算数）。被立即中断或等满上限时输出 `{"continue": false, "stopReason": …}` 并附带 `permissionDecision: deny`（保证这次工具不执行），不发 `working`；等满上限（`remote.pause_timeout`，默认 30 分钟）同样处理并发 `pause_timeout`
 - `stopReason` 按存档语言取 `ui.hook_stop`（默认“用户通过诗音让这一轮工作停下，请等待用户指示”）；等满上限取 `ui.hook_stop_timeout`（默认“用户很久没有回应，这一轮先结束，请等待用户指示”）。官方文档：`continue: false` 让 Claude 在 hook 运行后完全停止处理，优先于任何事件专属的决定字段；`stopReason` 显示给用户并留在对话里；对 PreToolUse 和 PostToolUse 都有效
 - `SessionStart`：如果 `/health` 不通，就启动桌宠（`.venv\Scripts\pythonw.exe -m shion`，脱离父进程，不弹出控制台窗口），然后发送 `session_start` 事件。
 - `Stop`：只发送 `{"type":"stop"}`，不读取/转发 `last_assistant_message`，不打开 `transcript_path`。只说当前语言的完成提醒。
@@ -253,7 +257,8 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 |---|---|---|
 | **同意 / 否决** | **PermissionRequest hook**：返回 `hookSpecificOutput.decision.behavior` 为 `allow` / `deny`（字段按官方文档确认）。hook 脚本向本地服务器长轮询，等待用户在诗音上的选择 | 气泡显示要执行的命令或要改的文件（完整显示，过长时可展开）和两个大按钮。**ExitPlanMode 例外，只提醒，计划确认由 CC 自己处理** |
 | **做得好 / 有问题** | 放进**反馈队列**；送达方式见下 | “有问题”可以附一句话（单行输入框，可留空） |
-| **停下**（子菜单第一项） | **PreToolUse 和 PostToolUse 两个检查点**：hook 长轮询原地等待；“继续”放行，“结束这一轮”返回 `continue: false` + `stopReason` | 见下面「停下规则」 |
+| **停下 / 继续**（子菜单第一项） | **PreToolUse 和 PostToolUse 两个检查点**：hook 长轮询原地等待；“继续”放行，停太久返回 `continue: false` + `stopReason` | 见下面「停下规则」 |
+| **立即中断**（第二项） | 结束 CC 进程下正在跑的工具子进程树 + 一次性中断标记，下一个检查点返回 `continue: false` | 见下面「立即中断」 |
 
 **同意 / 否决的安全规则**
 - 决定**只能由用户在诗音界面上亲手点击产生**。本地 HTTP 服务**不提供**任何“设置决定”的接口，hook 只能“等待结果”
@@ -280,22 +285,27 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 - 排队：诗音每 100 毫秒从 hub 取最早的未决请求显示；hook 超过 25 秒没来轮询的请求视为已被 CC 取消（用户在 CC 里自己答了），面板自动消失。
 - 服务端 `request_queue_size` 调到 64，并行子代理的 hook 同时连进来不会被重置。
 
-**停下规则**（原来的“暂停/继续”和“停下”已合并成这一个流程）
-- 工作遥控子菜单**第一项**“停下”。点了以后诗音说“好，下一个空当就停下～”，切到挡手表情；还没到检查点时菜单项显示为灰色的“正在停下……”
-- **下一个检查点**原地等待：调用工具之前（PreToolUse）或工具做完、开始写文字之前（PostToolUse），哪个先到算哪个。正在执行的命令不会被掐断；已经开始写的文字会写完（后面没有工具调用的长段文字拦不住，这是 hooks 机制的限制）
-- hook 真的在检查点等着时，诗音弹出**检查点面板**（`panel.py:HoldPanel`）：标题“停在这儿等你决定～”和两个大按钮
-  - **继续**：hook 立即放行，无缝接着干，诗音说“继续干活啦”
-  - **结束这一轮**：此刻在等的 hook 全部返回 `continue: false`（PreToolUse 另带 deny，这次工具不执行）；诗音常驻提示“已经停下了，在 CC 里说一声就能继续”，直到 UserPromptSubmit
-- 面板规则同授权面板：**不抢键盘焦点、只响应鼠标**（`WindowDoesNotAcceptFocus` + 忽略按键的按钮），出现后 **0.6 秒内按钮不可点**；跟随诗音；授权面板优先显示；打开时关掉对话窗口、不能打开对话；静音不影响面板
+**停下规则**（不弹面板）
+- 工作遥控子菜单第一项“停下”。点了以后诗音说一次“好，马上停～”，切到挡手表情
+- **下一个检查点**原地等待：调用工具之前（PreToolUse）或工具做完、开始写文字之前（PostToolUse），哪个先到算哪个。正在执行的命令不会被掐断；已经开始写的文字会写完（后面没有工具调用的长段文字拦不住，这是 hooks 机制的限制）。对所有会话生效（子代理的工具调用同样受影响）
+- hook 第一次真的在检查点等着时，诗音说一次“已经停下啦～”（多个并行 hook、两段长轮询之间都不重复；不常驻）
+- 停下期间菜单里“停下”变成“继续”：点了就放行，无缝接着干，诗音说“继续干活啦”；还没到检查点就点 = 取消这次停下
 - 其他出口：
-  - 在 CC 里说话：任何一次 **UserPromptSubmit** 都解除等待，面板收起
-  - **30 分钟（`remote.pause_timeout`，可配置 60～1880 秒）没选**：按“结束这一轮”处理，提示换成“等了好久没选，这一轮先结束了；在 CC 里说一声就能继续”
+  - 在 CC 里说话：任何一次 **UserPromptSubmit** 都解除等待
+  - **30 分钟（`remote.pause_timeout`，可配置 60～1880 秒）没继续**：hook 返回 `continue: false`（PreToolUse 另带 deny）结束这一轮，其他并行等待的 hook 一起结束；诗音提醒一次“停太久了，这一轮先结束啦，在 CC 里说一声就能接着做”
   - 还没碰到检查点这一轮就自己结束了（Stop）：停下作废，不会挡住下一轮
-  - 等着的 hook 被 CC 杀掉（例如在 CC 里按 Esc）：面板 2 秒后收起，回到“正在停下……”，下一次检查点或 UserPromptSubmit 再处理
   - 诗音没在运行、连不上服务器：hook 立刻放行，不会把 CC 卡住
-- 子代理的工具调用同样受影响
 - 实测（2.1.289）：`continue: false` 结束这一轮后 **不会再触发 Stop hook**，所以不会出现“做完啦”
-- 静音只抑制气泡，停下和面板照常生效
+- 静音只抑制气泡，停下照常生效
+
+**立即中断**（工作遥控第二项，不切换窗口、不模拟键盘）
+- 只对“工作中”的会话（见状态机 working）生效，没有工作中的会话时菜单项是灰的；对所有工作中的会话各做一次
+- 校验 hook 报来的 CC 进程：还活着、名字和创建时间都对得上（防 PID 复用）。找不到时说“找不到正在工作的进程，先改成普通的停下啦”并退回普通“停下”
+- 结束“在执行的工具开始之后才创建”的 CC 直接子进程及其子孙（先孙后子，核对创建时间）；排除 hook 进程（报来的 hook pid、可执行文件是项目 `.venv\Scripts\python.exe` 的直接子进程）。MCP 服务器等会话开始时就有的子进程不受影响。没有在执行的工具（正在写文字）时不结束任何进程
+- 同时给该会话设**一次性中断标记**：下一个检查点（PreToolUse / PostToolUse）返回 `continue: false`；被结束的工具触发的 PostToolUseFailure 不消耗标记，诗音也不说“出错了”。prompt / Stop 作废没用上的标记
+- 做完把会话标成空闲，下一次 prompt / PreToolUse 之前不会再发；诗音说“已经中断啦，在 CC 里说一声就能继续”，并解除停下
+- 终端版和桌面端 Code 用同一种做法。**不用 Ctrl+C**：实测（2.1.289）用 `GenerateConsoleCtrlEvent` 向终端版 CC 的控制台发 Ctrl+C，CC 会在 1～4 秒内整个退出，而不是像按 Esc 那样只中断当前生成
+- 限制：正在写、后面没有工具调用的文字拦不住（写完就是这一轮结束）
 
 **hooks 配置**
 - PermissionRequest、PreToolUse、PostToolUse 的 hook 超时要设得比上面的等待时间长（例如 PermissionRequest 180 秒、PreToolUse / PostToolUse 1900 秒），由 hook 脚本自己控制提前返回

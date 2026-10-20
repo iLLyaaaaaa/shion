@@ -1,4 +1,4 @@
-"""工作遥控：“停下”→ 检查点原地等待 → 面板选“继续 / 结束这一轮”。"""
+"""工作遥控：“停下”→ 检查点原地等待 → 菜单“继续”放行 / 在 CC 里说话放行 / 等满上限结束这一轮。"""
 import json
 import os
 import subprocess
@@ -9,19 +9,16 @@ import urllib.error
 import urllib.request
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtTest import QTest
-
 from shion.lines import LINES_DIR
-from shion.panel import ARM_DELAY
 from shion.remote import HOLD_GRACE, RemoteHub
 from shion.server import ShionServer
 from tests.test_controller import env, qapp, find_action  # noqa: F401
 from tests.test_hook import HOOK, PRAISE_LINE, run_hook
 from tests.test_hook import env as hook_env  # noqa: F401
 
-STOPPED = "已经停下了，在 CC 里说一声就能继续"
-STOPPED_TIMEOUT = "等了好久没选，这一轮先结束了；在 CC 里说一声就能继续"
+STOP_REQUESTED = "好，马上停～"
+HELD = "已经停下啦～"
+STOPPED_TIMEOUT = "停太久了，这一轮先结束啦，在 CC 里说一声就能接着做"
 STOP_REASON = "用户通过诗音让这一轮工作停下，请等待用户指示"
 TIMEOUT_REASON = "用户很久没有回应，这一轮先结束，请等待用户指示"
 
@@ -105,7 +102,7 @@ def _post(port, path, body):
 def srv():
     events = []
     hub = RemoteHub()
-    server = ShionServer(lambda t, d: events.append((t, d)), lambda: "", port=0, hub=hub)
+    server = ShionServer(lambda t, d, m=None: events.append((t, d)), lambda: "", port=0, hub=hub)
     server.start()
     yield server, hub, events
     hub.resume()
@@ -273,101 +270,89 @@ def held(pet, n=1):
     return threads, results
 
 
-def armed(pet):
-    pet.advance(ARM_DELAY + 0.1)
-    panel = pet.ctl._hold_panel
-    panel.refresh_enabled()
-    return panel
-
-
 def remote_texts(pet):
     menu = pet.ctl.build_menu()  # 留着引用：顶层菜单被回收时子菜单的动作也会被销毁
     remote = find_action(menu, "工作遥控").menu()
     return menu, remote, [(a.text(), a.isEnabled()) for a in remote.actions()]
 
 
-def test_menu_has_only_stop_and_shows_pending(pet):
+def test_menu_stop_turns_into_continue(pet):
     menu, remote, texts = remote_texts(pet)
-    assert texts == [("停下", True), ("做得好", True), ("有问题……", True)]
+    assert texts == [("停下", True), ("立即中断", False), ("做得好", True), ("有问题……", True)]
     find_action(remote, "停下").trigger()
     assert pet.ctl.hub.is_paused and pet.state.paused
-    assert pet.said[-1] == "好，下一个空当就停下～"
+    assert pet.said[-1] == STOP_REQUESTED
     assert pet.win.sprite_name == "stop"
     _, _, texts2 = remote_texts(pet)
-    assert texts2[0] == ("正在停下……", False)
-    assert len(texts2) == 3
+    assert texts2[0] == ("继续", True)
+    assert len(texts2) == 4
 
 
-def test_panel_waits_for_a_hook_at_the_checkpoint(pet):
+def test_held_notice_is_said_once_when_a_hook_really_waits(pet):
     pet.ctl.stop_work()
     pet.advance(1.0)
-    assert pet.ctl._hold_panel is None  # 还没到检查点：只有气泡
-    threads, _ = start_waiters(pet.ctl.hub)
-    pet.advance(0.1)
-    panel = pet.ctl._hold_panel
-    assert panel.isVisible() and panel.is_open
-    assert (panel._title.text(), panel._continue.text(), panel._end.text()) == (
-        "停在这儿等你决定～", "继续", "结束这一轮")
+    assert pet.said == [STOP_REQUESTED]  # 还没到检查点
+    threads, _ = start_waiters(pet.ctl.hub, n=3)
+    for _ in range(30):
+        pet.advance(0.2)
+    assert pet.said == [STOP_REQUESTED, HELD]  # 三个并行 hook、多次轮询，只说一次
+    assert pet.sticky == []  # 不常驻
     pet.ctl.hub.resume()
     join(threads)
 
 
-def test_continue_releases_hook_seamlessly(pet):
+def test_menu_continue_releases_hook(pet):
     threads, results = held(pet)
-    panel = pet.ctl._hold_panel
-    assert not panel._continue.isEnabled()
-    panel._click("continue")  # 0.6 秒内硬塞进来的点击也不算
-    assert pet.ctl.hub.is_paused
-    armed(pet)._continue.click()
+    _, remote, _ = remote_texts(pet)
+    menu, remote, _ = remote_texts(pet)
+    find_action(remote, "继续").trigger()
     join(threads)
     assert results == [(False, False)]
-    assert not pet.state.paused and not panel.isVisible()
+    assert not pet.state.paused and not pet.ctl.hub.is_paused
     assert pet.said[-1] in pet.ctl.lines._lines["resumed"]
     assert pet.win.sprite_name != "stop"
     assert remote_texts(pet)[2][0] == ("停下", True)
 
 
-def test_end_round_stops_every_waiting_hook_and_shows_sticky_notice(pet):
-    pet.data.activity_level = "quiet"
-    threads, results = held(pet, n=3)
-    armed(pet)._end.click()
-    join(threads)
-    assert results == [(False, True)] * 3
-    for _ in range(3):  # 每个 hook 都报一次，只处理第一次
-        pet.ctl.handle_event("work_stopped")
-    assert pet.sticky == [STOPPED]
-    assert not pet.state.paused and not pet.ctl._hold_panel.isVisible()
-    for _ in range(30):
-        pet.advance(1.0)
-    assert pet.sticky == [STOPPED]
-    pet.ctl.handle_event("prompt")
-    pet.advance(5.0)
-    assert pet.sticky == [STOPPED]  # 在 CC 里说话后不再冒出来
-    assert not pet.ctl._work_stopped
+def test_continue_before_checkpoint_cancels_stop(pet):
+    pet.ctl.stop_work()
+    pet.ctl.resume_work()
+    assert not pet.ctl.hub.is_paused and not pet.state.paused
+    assert pet.ctl.hub.wait_gate(0) == (False, False)
 
 
-def test_prompt_from_cc_releases_wait_and_closes_panel(pet):
+def test_prompt_from_cc_releases_wait(pet):
     threads, results = held(pet)
     pet.ctl.hub.resume()  # 服务线程收到 prompt 事件时做的
     pet.ctl.handle_event("prompt")
     join(threads)
     assert results == [(False, False)]
-    assert not pet.state.paused and not pet.ctl._hold_panel.isVisible()
+    assert not pet.state.paused
+    pet.ctl.stop_work()  # 下一次停下又能说“已经停下啦”
+    threads, _ = start_waiters(pet.ctl.hub)
+    pet.advance(0.1)
+    assert pet.said.count(HELD) == 2
+    pet.ctl.hub.resume()
+    join(threads)
 
 
-def test_timeout_is_treated_as_end_round(pet):
+def test_timeout_ends_every_waiting_hook_and_says_once(pet):
     pet.data.activity_level = "quiet"
     threads, results = held(pet, n=2)
     pet.ctl.handle_event("pause_timeout")  # 一个 hook 等满上限
+    pet.ctl.handle_event("pause_timeout")  # 另一个也报：不再重复
     join(threads)
     assert results == [(False, True)] * 2  # 其余并行等待的也一起结束
-    assert pet.sticky == [STOPPED_TIMEOUT]
-    assert not pet.state.paused and not pet.ctl._hold_panel.isVisible()
+    assert pet.said.count(STOPPED_TIMEOUT) == 1 and pet.sticky == []
+    assert not pet.state.paused
+    for _ in range(30):
+        pet.advance(1.0)
+    assert pet.said.count(STOPPED_TIMEOUT) == 1
 
 
 def test_timeout_ignored_when_not_stopping(pet):
     pet.ctl.handle_event("pause_timeout")
-    assert pet.sticky == [] and not pet.state.paused and not pet.ctl._work_stopped
+    assert pet.said == [] and not pet.state.paused
 
 
 def test_turn_ending_before_checkpoint_cancels_stop(pet):
@@ -378,90 +363,42 @@ def test_turn_ending_before_checkpoint_cancels_stop(pet):
     assert remote_texts(pet)[2][0] == ("停下", True)
 
 
-def test_panel_closes_when_hook_goes_away_and_returns_if_it_comes_back(pet):
-    pet.ctl.stop_work()
-    hub = pet.ctl.hub
-    threads, results = start_waiters(hub, seconds=0.3)  # hook 被 CC 杀掉 ≈ 不再来轮询
-    pet.advance(0.1)
-    assert pet.ctl._hold_panel.isVisible()
-    join(threads)
-    assert results == [(True, False)]
-    hub._last_hold -= HOLD_GRACE + 0.1
-    pet.advance(0.1)
-    assert not pet.ctl._hold_panel.isVisible() and pet.state.paused
-    threads, _ = start_waiters(hub)
-    pet.advance(0.1)
-    assert pet.ctl._hold_panel.isVisible()
-    hub.resume()
-    join(threads)
-
-
-def test_permission_panel_takes_priority(pet):
+def test_no_panel_pops_up_any_more(pet):
     threads, _ = held(pet)
-    rid = pet.ctl.hub.permissions.open("Bash", "ls")
-    pet.advance(0.1)
-    assert pet.ctl._perm_panel.isVisible() and not pet.ctl._hold_panel.isVisible()
-    pet.ctl.hub.permissions.withdraw(rid)
-    pet.advance(0.1)
-    assert pet.ctl._hold_panel.isVisible()
-    pet.ctl.hub.resume()
-    join(threads)
-
-
-def test_panel_does_not_steal_focus_or_react_to_keyboard(pet):
-    threads, _ = held(pet)
-    panel = armed(pet)
-    assert panel.windowFlags() & Qt.WindowDoesNotAcceptFocus
-    assert panel.testAttribute(Qt.WA_ShowWithoutActivating)
-    for w in (panel._continue, panel._end):
-        assert w.focusPolicy() == Qt.NoFocus
-    for key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space, Qt.Key_Escape, Qt.Key_Y):
-        QTest.keyClick(panel, key)
-        QTest.keyClick(panel._continue, key)
-        QTest.keyClick(panel._end, key)
-    assert pet.ctl.hub.is_paused and pet.state.paused  # 键盘一个决定也没产生
-    pet.ctl.hub.resume()
-    join(threads)
-
-
-def test_panel_follows_the_pet_and_closes_dialogue(pet):
-    pet.ctl.open_dialogue()
+    assert not hasattr(pet.ctl, "_hold_panel")
+    pet.ctl.open_dialogue()  # 停下期间也能打开对话
     assert pet.ctl._dialogue.isVisible()
-    threads, _ = held(pet)
-    assert not pet.ctl._dialogue.isVisible()
-    pet.ctl.open_dialogue()  # 面板开着时不能打开对话
-    assert not pet.ctl._dialogue.isVisible()
-    pet.win.move(pet.win.x() + 40, pet.win.y())
-    pet.ctl._on_window_moved()
-    assert pet.ctl._hold_panel.isVisible()
     pet.ctl.hub.resume()
     join(threads)
 
 
-def test_muted_still_stops_and_shows_panel(pet):
+def test_muted_still_stops_without_speaking(pet):
     pet.ctl.set_muted(True)
     threads, results = held(pet)
-    assert pet.ctl._hold_panel.isVisible()
-    armed(pet)._end.click()
+    assert pet.ctl.hub.is_paused and pet.said == []
+    pet.ctl.resume_work(quiet=True)
     join(threads)
-    assert results == [(False, True)] and pet.said == []
+    assert results == [(False, False)]
 
 
-def test_panel_text_is_localized(pet):
+def test_menu_texts_are_localized(pet):
     pet.ctl.set_language("en")
-    threads, _ = held(pet)
-    panel = pet.ctl._hold_panel
-    assert (panel._continue.text(), panel._end.text()) == ("Continue", "End this turn")
-    pet.ctl.hub.resume()
-    join(threads)
+    menu = pet.ctl.build_menu()
+    remote = find_action(menu, "Work remote").menu()
+    assert [a.text() for a in remote.actions()][:2] == ["Stop", "Interrupt now"]
+    pet.ctl.stop_work()
+    menu = pet.ctl.build_menu()
+    remote = find_action(menu, "Work remote").menu()
+    assert remote.actions()[0].text() == "Continue"
 
 
 def test_stop_texts_in_all_languages_never_mention_claude():
-    keys = ("menu_stop", "menu_stop_pending", "stop_requested", "work_stopped", "work_stopped_timeout",
-            "hook_stop", "hook_stop_timeout", "hold_title", "hold_continue", "hold_end")
+    keys = ("menu_stop", "menu_resume", "menu_interrupt", "stop_requested", "work_held", "work_stopped_timeout",
+            "hook_stop", "hook_stop_timeout", "interrupted", "interrupt_no_process", "interrupt_idle")
     for lang in ("zh", "en", "ja"):
         raw = json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))
         for k in keys:
             assert raw["ui"][k] and "claude" not in raw["ui"][k].lower()
-        for k in ("menu_pause", "menu_resume", "paused_status", "paused_timeout"):
+        for k in ("menu_pause", "paused_status", "paused_timeout", "menu_stop_pending", "work_stopped",
+                  "hold_title", "hold_continue", "hold_end"):
             assert k not in raw["ui"]

@@ -29,7 +29,7 @@ class _TakeRequest:
 
 
 class ServerBridge(QObject):
-    event_received = Signal(str, object)
+    event_received = Signal(str, object, object)
     feedback_requested = Signal(object)
 
     def __init__(self, controller: PetController, take_timeout: float = TAKE_TIMEOUT,
@@ -41,8 +41,8 @@ class ServerBridge(QObject):
         self.feedback_requested.connect(self._handle_feedback)
 
     # ---- 给 ShionServer 用，在服务线程里调用 ----
-    def on_event(self, etype: str, detail: Optional[str]) -> None:
-        self.event_received.emit(etype, detail)
+    def on_event(self, etype: str, detail: Optional[str], meta: Optional[dict] = None) -> None:
+        self.event_received.emit(etype, detail, meta)
 
     def on_take_feedback(self) -> str:
         req = _TakeRequest()
@@ -55,8 +55,11 @@ class ServerBridge(QObject):
         raise TimeoutError("GUI 线程没有及时处理取反馈请求")
 
     # ---- 在 GUI 线程里执行 ----
-    def _handle_event(self, etype: str, detail) -> None:
-        self._controller.handle_event(etype, detail)
+    def _handle_event(self, etype: str, detail, meta) -> None:
+        if meta:
+            self._controller.handle_event(etype, detail, meta)
+        else:
+            self._controller.handle_event(etype, detail)
 
     def _handle_feedback(self, req: _TakeRequest) -> None:
         with req.lock:

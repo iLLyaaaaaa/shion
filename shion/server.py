@@ -1,7 +1,7 @@
 """Shion 的本地 HTTP 服务。
 
 只用标准库，不 import Qt。通过两个回调和外界交互：
-``on_event(type, detail)`` 收到事件时调用，``on_take_feedback()`` 取走并清空反馈队列（返回要注入的文字）。
+``on_event(type, detail[, meta])`` 收到事件时调用（带会话信息时才传 meta），``on_take_feedback()`` 取走并清空反馈队列（返回要注入的文字）。
 这两个回调都在服务线程里被调用；接到界面时由界面层负责切回 GUI 线程。
 """
 from __future__ import annotations
@@ -24,6 +24,40 @@ MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/参数
 REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 INTERNAL_STOPPED = "work_stopped"  # 只由服务线程在 hook 取走“停下”时发给界面，外部不能伪造
+ID_MAX = 128  # session_id / tool_use_id 的长度上限
+PROC_NAMES = ("claude.exe", "node.exe", "bun.exe")  # hook 报来的工作进程只认这些名字
+
+
+def parse_meta(data: dict) -> Optional[dict]:
+    """/event 里可选的会话信息。字段不对返回 None（整个请求 400）；没有就返回空 dict。
+
+    session / tool_id：字符串；proc：{"pid": 正整数, "created": 整数, "name": 进程名, "entry": 字符串, "hooks": [pid…]}。
+    """
+    meta: dict = {}
+    for key in ("session", "tool_id"):
+        value = data.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value or len(value) > ID_MAX:
+            return None
+        meta[key] = value
+    proc = data.get("proc")
+    if proc is not None:
+        if not isinstance(proc, dict):
+            return None
+        pid, created, name = proc.get("pid"), proc.get("created"), proc.get("name")
+        entry, hooks = proc.get("entry", ""), proc.get("hooks", [])
+
+        def is_int(v) -> bool:
+            return isinstance(v, int) and not isinstance(v, bool)
+        if (not is_int(pid) or pid <= 0 or not is_int(created) or created <= 0
+                or not isinstance(name, str) or name.lower() not in PROC_NAMES
+                or not isinstance(entry, str) or len(entry) > 40
+                or not isinstance(hooks, list) or len(hooks) > 8
+                or not all(is_int(h) and h > 0 for h in hooks)):
+            return None
+        meta["proc"] = {"pid": pid, "created": created, "name": name.lower(), "entry": entry, "hooks": list(hooks)}
+    return meta
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -124,14 +158,21 @@ class _Handler(BaseHTTPRequestHandler):
         if etype == INTERNAL_STOPPED:
             self._send(400, {"error": "内部事件，不能从外部发送"})
             return
+        meta = parse_meta(data)
+        if meta is None:
+            self._send(400, {"error": "session / tool_id / proc 字段不合法"})
+            return
+        hub = self.server.hub
+        if etype in ("prompt", "stop") and "session" in meta:
+            hub.clear_interrupt(meta["session"])  # 这一轮已经结束或重新开始：没用上的中断作废
         if etype == "prompt":
             # 用户在 CC 里说话就解除暂停；在服务线程里直接做，紧接着的工具调用不会再被误挡
-            self.server.hub.resume()
-        elif etype == "stop" and not self.server.hub.is_holding:
+            hub.resume()
+        elif etype == "stop" and not hub.is_holding:
             # 这一轮没碰到检查点就自己结束了：没用上的“停下”作废，不能挡住下一轮
-            self.server.hub.resume()
+            hub.resume()
         try:
-            self.server.on_event(etype, detail)
+            self.server.emit_event(etype, detail, meta)
         except Exception:
             log.exception("on_event 回调出错")
             self._send(500, {"error": "internal error"})
@@ -152,18 +193,21 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, {"text": text})
 
     def _post_pause_wait(self):
-        """检查点长轮询：暂停中最多等 wait 秒；用户选了“结束这一轮”时 stop=true。
-        不能借此开始暂停或结束这一轮，只能等待用户在诗音上做的决定。"""
+        """检查点长轮询：停下中最多等 wait 秒；等满上限被结束、或这个会话被“立即中断”时 stop=true。
+        不能借此开始停下或中断，只能等待用户在诗音上做的决定。"""
         data = self._read_json()
         if data is None:
             return
         wait = data.get("wait", 0) if isinstance(data, dict) else 0
         if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait):
             wait = 0
-        paused, stop = self.server.hub.wait_gate(wait)
+        session = data.get("session") if isinstance(data, dict) else None
+        if not isinstance(session, str) or not session or len(session) > ID_MAX:
+            session = None
+        paused, stop = self.server.hub.wait_gate(wait, session)
         if stop:
             try:
-                self.server.on_event(INTERNAL_STOPPED, None)
+                self.server.emit_event(INTERNAL_STOPPED, None, {"session": session} if session else {})
             except Exception:
                 log.exception("on_event 回调出错")
         self._send(200, {"paused": paused, "stop": stop})
@@ -223,6 +267,13 @@ class _Server(ThreadingHTTPServer):
         self.hub = hub
         self.feedback_lock = threading.Lock()
 
+    def emit_event(self, etype: str, detail: Optional[str], meta: dict) -> None:
+        """带会话信息时多传一个参数；旧的两参数回调（测试、调试入口）照常可用。"""
+        if meta:
+            self.on_event(etype, detail, meta)
+        else:
+            self.on_event(etype, detail)
+
 
 class ShionServer:
     def __init__(
@@ -278,10 +329,11 @@ def main() -> None:
     pet = PetState(SaveData(), datetime.now(), Config.debug())
     lock = threading.Lock()
 
-    def on_event(etype, detail):
+    def on_event(etype, detail, meta=None):
         with lock:
             now = datetime.now()
-            reactions = pet.claude_event(etype, detail, now)
+            meta = meta or {}
+            reactions = pet.claude_event(etype, detail, now, meta.get("session"), meta.get("tool_id"))
             print(f"事件 {etype!r} {detail!r} -> {reactions}  当前：{pet.current(now)}", flush=True)
 
     def on_take():

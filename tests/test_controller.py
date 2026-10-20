@@ -408,9 +408,9 @@ def test_working_event_shows_working_then_times_out_to_idle(env):
     env.advance(60)
     assert env.win.sprite_name == "working"
     env.ctl.handle_event("working", None)  # 有新事件就续期
-    env.advance(100)
+    env.advance(280)
     assert env.win.sprite_name == "working"
-    env.advance(30)  # 距最后一次事件超过 2 分钟
+    env.advance(30)  # 距最后一次事件超过 5 分钟
     assert env.win.sprite_name == "idle"
     assert any(t in Lines()._lines["claude_working"] for t in env.said)
 

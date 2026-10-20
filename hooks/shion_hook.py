@@ -3,8 +3,10 @@
 只用标准库。无论发生什么都返回 0、不输出多余内容，绝不能影响 Claude Code。
 用法：shion_hook.py <SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|PostToolUseFailure|PermissionRequest|Stop|Notification>
 
-暂停/继续：PreToolUse 和 PostToolUse 两个检查点在用户点了“暂停”时一直等；诗音没开、连不上、出错一律放行。
-停下：用户在诗音上点了“停下”，下一个检查点输出 continue=false 结束这一轮（只生效一次）。
+停下/继续：PreToolUse 和 PostToolUse 两个检查点在用户点了“停下”时原地等，点“继续”或在 CC 里说话就放行；
+等满上限输出 continue=false 结束这一轮。诗音没开、连不上、出错一律放行。
+立即中断：诗音结束正在跑的工具子进程，并让这个会话的下一个检查点（PreToolUse / PostToolUse）输出 continue=false。
+会话：每个事件都带 stdin 里的 session_id；prompt / PreToolUse 另带启动本 hook 的 CC 进程（按实际父进程链确认）。
 同意/否决：PermissionRequest 把要执行的内容交给诗音，等用户在诗音上点按钮；只有收到明确的 allow 才输出 allow，
 其余一切情况（诗音没开、超时、出错、返回内容不对）都不输出任何决定，交回 CC 自己的授权框。
 ExitPlanMode 仅发送 plan_ready 提醒，不登记授权请求，计划确认始终由 CC 自己处理。
@@ -79,14 +81,15 @@ def pause_limit() -> int:
     return remote_setting("pause_timeout", 1800, 60, 1880)
 
 
-def pause_gate(limit: float, poll: float = PAUSE_POLL):
+def pause_gate(limit: float, poll: float = PAUSE_POLL, session=None):
     """检查点（PreToolUse / PostToolUse）。用户点了“停下”后在这里原地等，直到在诗音上选择。
 
     返回 None = 放行（选了“继续”或在 CC 里说了话）；("stop", 理由) = 选了“结束这一轮”；
     ("timeout", 理由) = 等满上限，按“结束这一轮”处理。
     诗音没开、请求失败、返回内容不对，都按“没暂停、没停下”处理，绝不把 CC 卡住。
     """
-    result = request("/pause/wait", {"wait": 0})
+    extra = {"session": session} if session else {}
+    result = request("/pause/wait", {"wait": 0, **extra})
     deadline = time.monotonic() + limit
     while True:
         if not isinstance(result, dict):
@@ -97,10 +100,64 @@ def pause_gate(limit: float, poll: float = PAUSE_POLL):
             return None
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            request("/event", {"type": "pause_timeout"})
+            request("/event", {"type": "pause_timeout", **extra})
             return ("timeout", ui_text("hook_stop_timeout", TIMEOUT_REASON))
         wait = min(poll, remaining)
-        result = request("/pause/wait", {"wait": wait}, timeout=wait + 3)
+        result = request("/pause/wait", {"wait": wait, **extra}, timeout=wait + 3)
+
+
+# ---------------------------------------------------------------- 找到启动本 hook 的 CC 进程
+CC_NAMES = ("claude.exe", "node.exe", "bun.exe")
+CHAIN_MAX = 8
+
+
+def _winproc():
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from shion import winproc  # 只用标准库 ctypes，不 import Qt
+    return winproc
+
+
+def process_table() -> dict:
+    """{pid: (父 pid, 可执行文件名)}，见 shion/winproc.py。出错返回空 dict。"""
+    try:
+        return _winproc().process_table()
+    except Exception:
+        return {}
+
+
+def process_created(pid: int):
+    try:
+        return _winproc().process_created(pid)
+    except Exception:
+        return None
+
+
+def find_cc_process(table=None, me=None, claude_pid=None, created=process_created):
+    """从本进程沿父进程链往上找 CC 进程：有 CLAUDE_PID 时必须在链上找到它，否则取最近的 claude/node/bun。
+
+    返回 {"pid", "created", "name", "entry", "hooks": [本 hook 到 CC 之间的 pid]}，找不到返回 None。
+    """
+    table = process_table() if table is None else table
+    pid = os.getpid() if me is None else me
+    if claude_pid is None:
+        raw = os.environ.get("CLAUDE_PID", "")
+        claude_pid = int(raw) if raw.isdigit() else None
+    chain = []
+    while pid in table and pid not in chain and len(chain) < CHAIN_MAX:
+        chain.append(pid)
+        parent = table[pid][0]
+        if parent not in table:
+            return None
+        name = table[parent][1].lower()
+        if (claude_pid is None or parent == claude_pid) and name in CC_NAMES:
+            when = created(parent)
+            if not when:
+                return None
+            entry = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")[:40]
+            return {"pid": parent, "created": when, "name": name, "entry": entry, "hooks": chain}
+        pid = parent
+    return None
 
 
 PERMISSION_POLL = 10.0
@@ -161,7 +218,8 @@ def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL)
     if not isinstance(tool, str) or not tool or tool == "AskUserQuestion":
         return None  # 提问不是同意/否决，交给 CC
     if tool == "ExitPlanMode":
-        request("/event", {"type": "plan_ready"})
+        sid = data.get("session_id")
+        request("/event", {"type": "plan_ready", **({"session": sid} if isinstance(sid, str) and 0 < len(sid) <= 128 else {})})
         return None  # 只提醒去看计划，不登记、不轮询、不给决定
     if len(describe_permission(tool, data.get("tool_input"), limit=10**9)) > DETAIL_LIMIT:
         return None  # 内容长到面板放不下：用户看不全就不能替他决定，交回 CC 自己的授权框
@@ -283,22 +341,45 @@ def build_detail(name: str, data: dict):
     return None
 
 
+def session_meta(name: str, data: dict) -> dict:
+    """事件里附带的会话信息：session_id、tool_use_id；prompt / PreToolUse 附带 CC 进程。"""
+    meta = {}
+    for key, field in (("session", "session_id"), ("tool_id", "tool_use_id")):
+        value = data.get(field)
+        if isinstance(value, str) and value and len(value) <= 128:
+            meta[key] = value
+    if name in ("UserPromptSubmit", "PreToolUse"):
+        try:
+            proc = find_cc_process()
+        except Exception:
+            proc = None
+        if proc:
+            meta["proc"] = proc
+    return meta
+
+
 def main() -> None:
     data = read_input()
     name = sys.argv[1] if len(sys.argv) > 1 else ""
     if name not in EVENTS:
         return
     etype = EVENTS[name]
-    if name == "PostToolUseFailure" and data.get("is_interrupt"):
-        return
+    meta = session_meta(name, data)
+    session = meta.get("session")
+    if name == "PostToolUseFailure":
+        # 不是检查点：实测（2.1.289）CC 不理会 PostToolUseFailure 返回的 continue=false，中断标记留给下一个检查点
+        if data.get("is_interrupt"):
+            request("/event", {"type": "tool_done", **meta})  # 用户在 CC 里按了 Esc：工具结束，不算出错
+            return
     if name == "SessionStart":
         ensure_running()
     if name == "PostToolUse":
         # 检查点：工具做完、开始写文字之前也能停住；继续以后才取反馈，停下时反馈留给下一次 UserPromptSubmit
-        gate = pause_gate(pause_limit())
+        gate = pause_gate(pause_limit(), session=session)
         if gate is not None:
             emit({"continue": False, "stopReason": gate[1]})
             return
+        request("/event", {"type": "tool_done", **meta})
         text = take_feedback()
         if text:
             emit({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}})
@@ -309,7 +390,7 @@ def main() -> None:
             emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
         return
     if name == "PreToolUse":
-        gate = pause_gate(pause_limit())
+        gate = pause_gate(pause_limit(), session=session)
         if gate is not None:
             reason = gate[1]
             # 结束这一轮：continue=false（官方：优先于事件专属决定），同时 deny 保证这次工具不执行
@@ -319,7 +400,10 @@ def main() -> None:
             }})
             return
     detail = build_detail(name, data)
-    request("/event", {"type": etype} if detail is None else {"type": etype, "detail": detail[:MAX_DETAIL]})
+    payload = {"type": etype, **meta}
+    if detail is not None:
+        payload["detail"] = detail[:MAX_DETAIL]
+    request("/event", payload)
     if name == "UserPromptSubmit":
         text = take_feedback()
         if text:

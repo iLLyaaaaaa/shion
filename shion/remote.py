@@ -22,6 +22,7 @@ class RemoteHub:
         self._end_gen = 0
         self._holding = 0
         self._last_hold = float("-inf")
+        self._interrupts: set[str] = set()  # 被“立即中断”的会话：下一个检查点结束这一轮（一次性）
         self.permissions = PermissionQueue()
 
     # ---- 暂停 / 继续 ----
@@ -49,7 +50,7 @@ class RemoteHub:
 
     # ---- 结束这一轮 ----
     def end(self) -> None:
-        """用户选了“结束这一轮”（或等满上限）：解除暂停，并让此刻正在检查点等待的 hook 全部带着停下返回。
+        """停下等满上限：解除暂停，并让此刻正在检查点等待的 hook 全部带着停下返回。
         之后才到的 hook 不受影响，不留残余状态。"""
         with self._cond:
             self._paused = False
@@ -62,22 +63,48 @@ class RemoteHub:
         with self._cond:
             return self._holding > 0 or time.monotonic() - self._last_hold < HOLD_GRACE
 
-    def wait_gate(self, seconds: float) -> tuple[bool, bool]:
+    # ---- 立即中断 ----
+    def request_interrupt(self, sessions) -> None:
+        """只由诗音界面上的“立即中断”调用：这些会话的下一个检查点返回 stop。"""
+        with self._cond:
+            self._interrupts.update(s for s in sessions if isinstance(s, str))
+            self._cond.notify_all()
+
+    def clear_interrupt(self, session: str) -> None:
+        """这个会话的这一轮已经结束（Stop）或用户又说话了（prompt）：没用上的中断作废。"""
+        with self._cond:
+            self._interrupts.discard(session)
+
+    def interrupt_pending(self, session: str) -> bool:
+        with self._cond:
+            return session in self._interrupts
+
+    def wait_gate(self, seconds: float, session: Optional[str] = None) -> tuple[bool, bool]:
         """检查点：最多等 seconds 秒，直到不再暂停。返回 (仍在暂停, 这次要停下)。
 
-        等待期间用户选了“结束这一轮”，返回 stop=True（并行等待的 hook 都会拿到）。
+        等待期间等满上限被“结束”（end），返回 stop=True（并行等待的 hook 都会拿到）；
+        这个会话被“立即中断”过，立即返回 stop=True（只生效一次）。
         """
         seconds = max(0.0, min(float(seconds), MAX_WAIT))
         with self._cond:
+            if session is not None and session in self._interrupts:
+                self._interrupts.discard(session)
+                return False, True
             if not self._paused:
                 return False, False
             gen = self._end_gen
             self._holding += 1
             try:
-                self._cond.wait_for(lambda: not self._paused or self._end_gen != gen, timeout=seconds)
+                self._cond.wait_for(
+                    lambda: not self._paused or self._end_gen != gen
+                    or (session is not None and session in self._interrupts),
+                    timeout=seconds)
             finally:
                 self._holding -= 1
                 self._last_hold = time.monotonic()
+            if session is not None and session in self._interrupts:
+                self._interrupts.discard(session)
+                return self._paused, True
             return self._paused, self._end_gen != gen
 
 

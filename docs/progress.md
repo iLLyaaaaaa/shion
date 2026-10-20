@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-20 停下简化、立即中断、工作状态与多会话已实现**：删掉检查点面板，停下只说两句；新增“立即中断”（结束工具子进程 + 下个检查点结束这一轮）；工具执行中一直 working；按 session_id 区分会话。完整测试 **814 passed、1 skipped**，真实 `claude -p` / 终端版 CC 六个场景通过；**终端版没有用 Ctrl+C**（实测会让 CC 整个退出，见本轮记录，需要你决定）。桌面端 Code 的立即中断和界面观感 **待用户验收**。用户已授权记录待验收后 commit，不 push。
 - **2026-10-20 停下与暂停合并已实现**：菜单只留“停下”，到下一个检查点原地等待，诗音弹出“继续 / 结束这一轮”面板；30 分钟没选按结束处理。挠痒放慢（200ms/帧、±2.5°、0.6 秒）已单独提交 `e15de5c`。完整测试 **763 passed、1 skipped**，真实 `claude -p` 两个场景通过；面板观感与真实 CC 界面 **待用户验收**，见下方本轮记录。用户已授权记录待验收后 commit，不 push。
 - **2026-10-20 转身、捏脸与挠痒已实现**：新增三组动作帧，移除行走入口与全部镜像；区域、时间和距离已集中为常量，三语台词齐全。完整测试 **759 passed、1 skipped**，原生 Windows 150% 专项 **119 passed**；动态交互 **待用户验收**。用户本轮明确授权素材先提交、功能测试和文档完成后再提交，不等待亲眼验收，不 push。
 - **2026-10-20 工作遥控改进已实现**：暂停检查点从 PreToolUse 扩到 PreToolUse + PostToolUse；新增“停下”（`continue: false`，只生效一次）。完整测试 **723 passed、1 skipped**，真实 `claude -p` 四个场景通过；菜单、气泡和真实 CC 界面表现 **待用户验收**，见下方本轮记录。用户已授权记录待验收后 commit，不 push。
@@ -15,6 +16,33 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。本次未安装/卸载 hooks。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-20：停下简化、立即中断、working 不被超时顶掉、区分会话
+- **停下**：删除 `HoldPanel`、`--snapshot --panel hold`、常驻提示和“结束这一轮”。点“停下”说一次“好，马上停～”；hook 第一次真的在检查点等着时说一次“已经停下啦～”（并行 hook、两段长轮询之间都不重复）；停下期间菜单第一项变成“继续”（没到检查点就点 = 取消）。在 CC 里说话照旧放行；30 分钟（`remote.pause_timeout`）没继续 → `continue: false` 结束这一轮，提醒一次“停太久了，这一轮先结束啦，在 CC 里说一声就能接着做”，该会话退出 working。
+- **立即中断**（工作遥控第二项）：hook 在 prompt / PreToolUse 时沿父进程链找 CC 进程（必须等于 `CLAUDE_PID`，带创建时间防 PID 复用），连同 session_id、tool_use_id、hook 自己的 pid 发给诗音。点击后对每个工作中的会话：校验 CC 进程 → 结束“在执行的工具开始之后才创建”的 CC 直接子进程树（排除 hook 进程；MCP 服务器等早就有的子进程不动）→ 设一次性中断标记，下一个 PreToolUse / PostToolUse 返回 `continue: false` → 会话标成空闲，说“已经中断啦，在 CC 里说一声就能继续”。没有工作中的会话时菜单灰掉；找不到进程时说明原因并退回普通停下。新模块 `shion/winproc.py`（ctypes 进程表，hook 也用）、`shion/interrupt.py`。
+- **working**：`PetState` 按会话记录（`WorkSession`）。prompt / PreToolUse 开始；PreToolUse 记下 tool_use_id，PostToolUse（新发 `tool_done`）/ PostToolUseFailure 配对清掉；有工具在执行时一直 working（单个最长 30 分钟），没有时距最近事件 5 分钟（调试 60 秒）退出。Stop 只结束那个会话，别的会话还在工作就 done 后回到 working。**注意**：prompt 现在也进入 working（以前要等第一个工具）。
+- **协议**：`/event` 新增可选 `session` / `tool_id` / `proc`（`server.parse_meta` 校验，进程名只认 claude/node/bun）；带会话时回调多一个 meta 参数，旧的两参数回调照常。`/pause/wait` 可带 session。HTTP 仍然没有任何入口能停下、结束或中断。hooks 配置没变，**不用重装**；需要重启诗音。
+- **台词**：三语新增 `menu_resume / menu_interrupt / work_held / interrupted / interrupt_no_process / interrupt_idle`，改 `stop_requested / work_stopped_timeout`，删 `menu_stop_pending / work_stopped / hold_*`；都不含“Claude”（有测试）。
+- **测试**：`tests/test_stop_work.py` 重写（30 项），新增 `tests/test_interrupt.py`（54 项：会话 working、30 分钟/5 分钟/60 秒、多会话 done 后回 working、中断标记一次性且只对该会话、meta 校验与防伪造、真实进程链找 CC、hook 带会话、PostToolUseFailure 不消耗标记、假进程表选择/排除 hook/防 PID 复用、真实进程树被结束、控制器各路径）；改了 4 处旧的 2 分钟超时断言和 hook 事件断言。完整 `PYTHONUTF8=1 .venv\Scripts\python -m pytest -q`：**814 passed、1 skipped**。
+- **真实 CC 联调**（2.1.289、haiku；假桌宠 = 真 PetController + 服务器，offscreen，隔离端口和数据目录；脚本在会话 scratchpad）：
+  1. `claude -p` 停下 → 3 秒后继续：Read 前原地等，说了一次“已经停下啦～”，继续后读完 a/b/c、写出 SUMMARY.md，正常 Stop；
+  2. `pause_timeout = 60`：停下后不继续，60 秒整 hook 返回 continue:false，CC 退出，没有 OUT.md，诗音提醒一次并回到空闲；
+  3. **终端版交互式 CC**（新控制台窗口）：跑 120 秒命令时点立即中断，命令 0.4 秒内被结束，CC 还活着、回到输入框，下一个工具显示“hook stopped continuation: 用户通过诗音让这一轮工作停下……”；
+  4. 调试模式（60 秒）跑 90 秒命令：16.6s→108.7s 一直 working，没被顶掉；
+  5. 两个 `claude -p` 同时跑（15 秒 / 45 秒命令）：先结束的说“做完啦”并在 3 秒后回到 working，两个都结束才空闲；
+  6. `claude -p` 立即中断：长命令被结束，下一个 PowerShell 调用被拦下、这一轮结束，`echo second-command-ran` 没执行；被结束的命令触发的 PostToolUseFailure 不再说“出错了”。
+- **关于 Ctrl+C（需要你决定）**：按要求先实测了 `GenerateConsoleCtrlEvent`（AttachConsole 到 CC 的控制台、发一次 CTRL_C_EVENT）。结果：终端版 CC **在 1～4 秒内整个退出**，不是像按 Esc 那样中断当前生成（CC 把控制台信号当成退出，键盘上的 Ctrl+C 走的是原始输入）。所以终端版也改用“结束工具进程 + 下个检查点停止”，没有发 Ctrl+C，也没有改成模拟按键。代价：**正在写、后面没有工具调用的回答拦不住**（写完这一轮就结束）。如果想让终端版也能立刻掐断正在写的回答，可选：①往 CC 的控制台输入缓冲区写一个 Esc 按键事件（`WriteConsoleInput`，不切窗口、不抢焦点，但本质是模拟按键）；②接受现状。
+- **踩坑**：①CC 不理会 PostToolUseFailure 返回的 `continue: false`，第一版在那里消耗了中断标记，结果 CC 接着跑了第二条命令；改成标记只给 PreToolUse / PostToolUse。②`.venv\Scripts\python.exe` 是启动器，hook 实际是它的子进程，所以 hook 链是 [真 python, 启动器]，排除 hook 要在 CC 直接子进程这一层做。③从 CC 的 Bash 工具里起的进程会继承“忽略 Ctrl+C”，测 Ctrl+C 时要先在启动器里 `SetConsoleCtrlHandler(NULL, FALSE)`，否则看起来像“发了没反应”。④haiku 偶尔不调工具或把测试指令当注入拒绝，重跑即可。⑤在 bash 里用 Python 打印 stream-json 中文会按 GBK 显示成乱码，文件本身是对的，别误判成 hook 编码问题。
+- **限制**：同上；子代理里的工具进程也会被结束（它们也是 CC 的子进程），子代理内 hook 返回 continue:false 是否连带结束主代理仍未实测。
+- **待用户验收**（请先重启诗音）：
+  - [ ] 右键 → 工作遥控：停下 / 立即中断（空闲时灰色）/ 做得好 / 有问题……；点停下说“好，马上停～”，到检查点说一次“已经停下啦～”，菜单第一项变“继续”，点继续 CC 接着干
+  - [ ] 停下后在 CC 里说话：自动继续
+  - [ ] **桌面端 Code 标签页**：让它跑一个长命令（如 `python -c "import time; time.sleep(120)"`），点立即中断：命令马上结束、这一轮停下，CC 本身和 MCP 不受影响；诗音说“已经中断啦……”，不说“出错了”
+  - [ ] 终端版同上再试一次；正在写长回答（没有工具调用）时点立即中断，确认现在的表现能否接受（见上面 Ctrl+C 一节）
+  - [ ] 两个会话同时工作时的表情和“做完啦”；一个超过 5 分钟的命令期间一直是工作中
+  - [ ] 切到英文、日文看新台词和菜单
+  - [ ] （可选）`remote.pause_timeout` 改成 60，确认超时提醒只出现一次
+- 上一轮“停下与暂停合并”里关于检查点面板的待验收项已被本轮取代。
 
 ## 2026-10-20：停下与暂停合并成一个流程
 - **挠痒放慢**（先单独提交 `e15de5c`）：`TICKLE_FRAME_SECONDS` 0.11→0.2、`TICKLE_TWIST_PERIOD` 0.32→0.6、`TICKLE_TWIST_DEGREES` 3→2.5；spec 参数和截图示例 `--tickle --at 0/0.2/0.4` 已同步。

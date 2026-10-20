@@ -24,7 +24,7 @@ def env(tmp_path):
         return text
 
     hub = RemoteHub()
-    srv = ShionServer(lambda t, d: events.append((t, d)), take, port=0, hub=hub)
+    srv = ShionServer(lambda t, d, m=None: events.append((t, d)), take, port=0, hub=hub)
     srv.start()
     yield srv, events, state, tmp_path
     hub.resume()
@@ -111,7 +111,7 @@ def test_tool_error_sends_tool_name_but_not_interrupts(env):
     srv, events, _, tmp = env
     run_hook("PostToolUseFailure", srv.port, tmp, stdin=json.dumps({"tool_name": "Bash", "error": "Exit code 1"}).encode())
     run_hook("PostToolUseFailure", srv.port, tmp, stdin=json.dumps({"tool_name": "Bash", "is_interrupt": True}).encode())
-    assert events == [("tool_error", "Bash")]
+    assert events == [("tool_error", "Bash"), ("tool_done", None)]  # Esc 中断：只说工具结束，不算出错
 
 
 def test_session_start_forwards_and_prints_nothing(env):
@@ -158,7 +158,7 @@ def test_post_tool_use_delivers_feedback_as_additional_context(env):
         "hookEventName": "PostToolUse",
         "additionalContext": "[诗音] 用户认为刚才的改动有问题：不对。请重新检查。",
     }}
-    assert events == [] and state["feedback"] == ""
+    assert events == [("tool_done", None)] and state["feedback"] == ""
     assert run_hook("PostToolUse", srv.port, tmp).stdout == b""  # 没有反馈就什么都不输出
 
 
