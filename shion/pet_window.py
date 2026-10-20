@@ -102,6 +102,7 @@ class PetWindow(QWidget):
 
         self._clock = clock
         self._fps_overlay = None
+        self._pause_badge = None  # 停下标记，第一次要显示时才建
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
         self._sequences: dict[str, tuple[str, ...]] = {}
@@ -180,6 +181,8 @@ class PetWindow(QWidget):
         self.move(round(feet_x - self.width() / 2), round(feet_y - self.height() + MARGIN_BOTTOM))
         self._mask_cache.clear()
         self._mask_key = None
+        if self._pause_badge is not None:
+            self._pause_badge.resize_to(height)
         if self._falling:
             self.start_fall()  # 改大小后重算落点，仍按真实经过的秒数下落
         self._refresh(self._clock())
@@ -214,20 +217,40 @@ class PetWindow(QWidget):
         super().moveEvent(e)
         self.moved.emit()
 
+    # ---- 停下标记 ----
+    def set_paused_badge(self, on: bool) -> None:
+        """头顶旁边的 ⏸：hook 真的在检查点停住后一直显示，直到继续（由控制器决定开关）。"""
+        if self._pause_badge is None:
+            if not on:
+                return
+            from shion.badge import PauseBadge
+            self._pause_badge = PauseBadge(self)
+        self._pause_badge.set_wanted(on)
+
+    @property
+    def paused_badge_shown(self) -> bool:
+        return self._pause_badge is not None and self._pause_badge.wanted
+
     def showEvent(self, e) -> None:
         super().showEvent(e)
         if self._fps_overlay is not None:
             self._fps_overlay.resume()
+        if self._pause_badge is not None:
+            self._pause_badge.refresh()
 
     def hideEvent(self, e) -> None:
         if self._fps_overlay is not None:
             self._fps_overlay.pause()
+        if self._pause_badge is not None:
+            self._pause_badge.hide()
         super().hideEvent(e)
 
     def closeEvent(self, e) -> None:
         self._timer.stop()
         if self._fps_overlay is not None:
             self._fps_overlay.pause()
+        if self._pause_badge is not None:
+            self._pause_badge.hide()
         super().closeEvent(e)
 
     def _is_head(self, pos: QPoint) -> bool:
@@ -426,6 +449,8 @@ class PetWindow(QWidget):
         self.update()
         if self._fps_overlay is not None:
             self._fps_overlay.follow()
+        if self._pause_badge is not None:
+            self._pause_badge.follow()
 
     def _sequence_sprite(self, group: str, elapsed: float, frame_seconds: float) -> str:
         frames = self._sequences[group]

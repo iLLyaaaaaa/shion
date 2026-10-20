@@ -16,6 +16,11 @@ EVENTS = [
 ]
 TIMEOUTS = {"SessionStart": 15, "PreToolUse": 1900, "PostToolUse": 1900, "PermissionRequest": 180}  # 要等用户点按钮，比各自的等待上限长
 DEFAULT_TIMEOUT = 5
+# 检查点：停下时会一直停在这里，CC 转圈处显示这段文字（官方 hooks 字段 statusMessage）
+STATUS_EVENTS = ("PreToolUse", "PostToolUse")
+STATUS_KEY = "hook_status_waiting"
+STATUS_DEFAULT = "诗音在看着～（一直停在这里就是暂停了，右键诗音点继续）"
+LANGS = ("zh", "en", "ja")
 
 
 def default_python(root: Path = ROOT) -> str:
@@ -28,6 +33,27 @@ def default_python(root: Path = ROOT) -> str:
 
 def default_hook_script(root: Path = ROOT) -> str:
     return (root / "hooks" / MARKER).as_posix()
+
+
+def save_language() -> str:
+    """存档里的语言（与 hooks/shion_hook.py 的 read_save / ui_text 同一规则），不是 zh/en/ja 就用 zh。"""
+    try:
+        directory = os.environ.get("SHION_DATA_DIR")
+        path = (Path(directory) if directory else Path(os.environ["APPDATA"]) / "Shion") / "state.json"
+        lang = json.loads(path.read_text(encoding="utf-8")).get("language")
+    except Exception:
+        lang = None
+    return lang if lang in LANGS else "zh"
+
+
+def status_message(lang: str, root: Path = ROOT) -> str:
+    """检查点 hook 的 statusMessage：按语言读 assets/lines 的 ui 文字，读不到用中文默认。"""
+    try:
+        raw = json.loads((root / "assets" / "lines" / f"{lang}.json").read_text(encoding="utf-8"))
+        text = raw["ui"][STATUS_KEY]
+        return text if isinstance(text, str) and text else STATUS_DEFAULT
+    except Exception:
+        return STATUS_DEFAULT
 
 
 def _is_shion(hook) -> bool:
@@ -66,8 +92,10 @@ def remove(settings: dict) -> dict:
     return out
 
 
-def merge(settings: dict, python: str, script: str) -> dict:
-    """返回加入 Shion hooks 的新 settings：先清掉旧的 Shion 条目，再追加，保留其他配置。"""
+def merge(settings: dict, python: str, script: str, status: str | None = None) -> dict:
+    """返回加入 Shion hooks 的新 settings：先清掉旧的 Shion 条目，再追加，保留其他配置。
+
+    status：给两个检查点（PreToolUse / PostToolUse）加的 statusMessage；None 不加。"""
     out = remove(settings)
     hooks = out.setdefault("hooks", {})
     if not isinstance(hooks, dict):
@@ -79,6 +107,8 @@ def merge(settings: dict, python: str, script: str) -> dict:
             "args": [script, event],
             "timeout": TIMEOUTS.get(event, DEFAULT_TIMEOUT),
         }
+        if status and event in STATUS_EVENTS:
+            entry["statusMessage"] = status
         group = {"hooks": [entry]}
         if event in ("PreToolUse", "PostToolUse", "PermissionRequest"):
             group = {"matcher": "*", **group}
@@ -112,14 +142,19 @@ def save_with_backup(path: Path, data: dict) -> Path | None:
     return backup
 
 
-def run(action: str, settings_path: str | None, python: str | None = None, script: str | None = None) -> int:
+def run(action: str, settings_path: str | None, python: str | None = None, script: str | None = None,
+        lang: str | None = None) -> int:
     path = Path(settings_path) if settings_path else Path.home() / ".claude" / "settings.json"
     if action == "uninstall" and not path.exists():
         print(f"没有需要卸载的：{path} 不存在")
         return 0
     try:
         current = load(path)
-        new = merge(current, python or default_python(), script or default_hook_script()) if action == "install" else remove(current)
+        if action == "install":
+            status = status_message(lang if lang in LANGS else save_language())
+            new = merge(current, python or default_python(), script or default_hook_script(), status)
+        else:
+            new = remove(current)
         if new == current and path.exists():
             print(f"没有变化，未改动：{path}")
             return 0

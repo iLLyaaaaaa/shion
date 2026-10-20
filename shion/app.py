@@ -159,6 +159,7 @@ def snapshot(
     face: str | None = None,
     cheek: str | None = None,
     tickle: bool = False,
+    badge: bool = False,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -197,6 +198,15 @@ def snapshot(
     t[0] += at
     win.advance_to(t[0])
     img = win.render_frame()
+    if badge:  # 停下标记：画在窗口坐标里，和真实窗口一样相对精灵本体定位
+        from shion.badge import badge_geometry, badge_size, render_badge
+        sw, sh = win.sprite_size
+        size = badge_size(win.sprite_height)
+        bx, by = badge_geometry((MARGIN_X, MARGIN_TOP, sw, sh), size, (0, 0, img.width(), img.height()),
+                                win._jump_offset)
+        p = QPainter(img)
+        p.drawImage(bx, by, render_badge(size))
+        p.end()
 
     if bubble:
         bt = [100.0]

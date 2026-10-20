@@ -104,6 +104,7 @@
     "work_held": "已经停下啦～",
     "hook_stop": "用户通过诗音让这一轮工作停下，请等待用户指示",
     "hook_stop_timeout": "用户很久没有回应，这一轮先结束，请等待用户指示",
+    "hook_status_waiting": "诗音在看着～（一直停在这里就是暂停了，右键诗音点继续）",
     "work_stopped_timeout": "停太久了，这一轮先结束啦，在 CC 里说一声就能接着做",
     "interrupted": "已经中断啦，在 CC 里说一声就能继续",
     "interrupt_no_process": "找不到正在工作的进程，先改成普通的停下啦",

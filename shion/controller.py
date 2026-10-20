@@ -82,6 +82,7 @@ class PetController(QObject):
         self.bubble = bubble
         self.hub = hub or RemoteHub()
         self._held_said = False  # 这次停下已经说过“已经停下啦～”
+        self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示 ⏸，直到继续）
         self._procs: dict[str, interrupt.CCProcess] = {}  # 会话 → hook 报来的 CC 进程（立即中断用）
         self._tool_wall: dict[str, dict[str, float]] = {}  # 会话 → {tool_use_id: 开始的 Unix 秒}
         self._interrupted: set[str] = set()  # 被立即中断、还没重新开始的会话
@@ -145,6 +146,7 @@ class PetController(QObject):
             or cur == "sleep" or self.state.save.activity_level == "quiet"
         )
         self.window.set_calm(calm)
+        self.window.set_paused_badge(self.state.paused and self._held_seen)
         if calm and self.window.idle_motion_active:
             self.window.stop_motion()
         if cur != self.window.sprite_name:
@@ -500,7 +502,7 @@ class PetController(QObject):
         if self.state.paused:
             return
         self.react(self.state.interact(self._now()))
-        self._held_said = False
+        self._held_said = self._held_seen = False
         self.hub.pause()
         self.state.paused = True
         if not self.state.save.bubble_muted:
@@ -521,12 +523,15 @@ class PetController(QObject):
     def _leave_pause(self) -> None:
         self.state.paused = False
         self._held_said = False
+        self._held_seen = False
 
     def _sync_pause(self) -> None:
         """hub 在服务线程里被解除停下（用户在 CC 里说话，或这一轮没碰到检查点就结束了）后，把界面状态同步过来；
         hook 第一次真的在检查点等着时说一次“已经停下啦～”。"""
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
+        if self.state.paused and not self._held_seen and self.hub.is_holding:
+            self._held_seen = True  # ⏸ 和静音无关；sync() 里显示
         if self.state.paused and not self._held_said and self.hub.is_holding:
             self._held_said = True
             if not self.state.save.bubble_muted:
@@ -581,7 +586,7 @@ class PetController(QObject):
             if not self.state.paused:
                 self.hub.pause()
                 self.state.paused = True
-                self._held_said = False
+                self._held_said = self._held_seen = False
             self.sync()
             return
         self.hub.request_interrupt(done)
