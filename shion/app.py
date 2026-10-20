@@ -153,10 +153,12 @@ def snapshot(
     squash: str | None = None,
     lang: str = "zh",
     from_state: str | None = None,
-    mirror: bool = False,
     jump: bool = False,
-    walk: bool = False,
+    turn: bool = False,
     drag: bool = False,
+    face: str | None = None,
+    cheek: str | None = None,
+    tickle: bool = False,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -176,19 +178,24 @@ def snapshot(
         win._animator.squash(t[0], squash)
     if jump:
         win.jump()
-    elif walk:
-        win.place_default()
-        win.walk(cross=True)
+    elif turn:
+        win.turn()
+    elif face:
+        win.face(1 if face == "right" else -1)
+    elif cheek:
+        from shion.behavior import CHEEK_RELEASE_SECONDS
+        win._pose = win._gesture_sprite("cheek", {"right": 1, "left": 2, "release": 3}[cheek], "stop")
+        win._cheek_pulling = cheek != "release"
+        win._pose_until = t[0] + CHEEK_RELEASE_SECONDS
+    elif tickle:
+        win._feed_tickle(t[0])
+        win._tickle_last = t[0] + at  # 截图模拟一直在挠，不在一秒后停止
     elif drag:
         from shion.behavior import DragPlayback
         win.set_state("drag", animate=False)
         win._drag_playback = DragPlayback(t[0])
     t[0] += at
     win.advance_to(t[0])
-    if mirror:
-        win.face(-1)
-    elif walk:
-        win.face(1)
     img = win.render_frame()
 
     if bubble:

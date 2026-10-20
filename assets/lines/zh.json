@@ -8,6 +8,10 @@
     "display_name": "诗音"
   },
   "lines": {
+    "cheek_pull": ["呜……脸、脸要被你拉长啦！", "不许捏！我又不是年糕！", "轻、轻一点啦，笨蛋……"],
+    "cheek_release": ["哼！这次先记着！", "我的脸才不是玩具！……下次轻点。", "都捏红了啦！你要负责！"],
+    "tickle": ["啊哈哈！住、住手！才没有觉得好玩！", "哈哈哈……那里不行啦！", "别挠了，哈哈……我、我要反击了！"],
+    "tickle_end": ["呼……呼……都怪你啦！", "哈啊……让我喘口气，笨蛋……", "呼……再来就、就不理你了！"],
     "permission_request": ["有东西要你决定哦"],
     "plan_ready": ["计划写好啦，去看看吧～"],
     "feedback_sent": ["已经转告啦"],
@@ -85,6 +89,7 @@
     ]
   },
   "ui": {
+    "action_face": "朝向鼠标",
     "hook_deny": "用户通过诗音否决了这个操作",
     "permission_title": "要不要同意？",
     "permission_allow": "同意",
@@ -127,8 +132,6 @@
     "activity_normal": "普通",
     "activity_lively": "活泼",
     "menu_action": "动作",
-    "action_walk": "散步一会儿",
-    "action_cross": "走到屏幕另一边",
     "action_jump": "跳一跳",
     "action_turn": "转个身",
     "hook_praise": "[诗音] 用户觉得你刚才做得很好。",

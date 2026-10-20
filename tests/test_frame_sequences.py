@@ -1,69 +1,24 @@
 """帧序列、缺图回退、脚底锚点及遮罩的集成测试。"""
-import math
 import shutil
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 
-from shion import behavior
 from shion.animator import SQUASH
 from shion.behavior import (
     JUMP_AIR_DURATION, JUMP_CROUCH_DURATION, JUMP_DURATION, JUMP_HEIGHT,
     JUMP_RISE_DURATION, JUMP_HOLD_DURATION, JUMP_FALL_DURATION,
-    LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT, WALK_BOB_HEIGHT, WALK_FRAME_SECONDS,
+    LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT,
 )
 from shion.pet_window import PetWindow, SPRITE_DIR, STATES
 from tests.test_controller import BODY, env, qapp
-from tests.test_feedback_ui import pixels, pixmap_pixels
+from tests.test_feedback_ui import pixels
 
 SEQUENCES = {group: tuple(f"{group}_{i}" for i in range(1, count + 1))
-             for group, count in (("walk", 8), ("jump", 4), ("drag", 4))}
-
-
-@pytest.mark.parametrize("cross", [False, True])
-def test_walk_loops_all_eight_frames_without_restarting_on_controller_sync(env, cross):
-    env.win.place_default()
-    env.win.walk(cross=cross)
-    for i in range(17):
-        if i:
-            env.advance(WALK_FRAME_SECONDS)
-        assert env.win.displayed_sprite == f"walk_{i % 8 + 1}"
-    env.ctl.handle_event("stop")
-    assert env.win.sprite_name == "done" and env.win.displayed_sprite.startswith("walk_")
-    env.win.stop_motion()
-    assert env.win.displayed_sprite == "done"
-
-
-def test_frame_rate_and_bob_follow_walk_speed(env, monkeypatch):
-    monkeypatch.setattr(behavior, "WALK_SPEED", 120)
-    monkeypatch.setattr(env.win, "_screen_avail", lambda *_: QRect(0, 0, 1920, 1040))
-    env.win.place_on((0, 0, 1920, 1040), 200)
-    start = env.win.x()
-    env.win.walk(cross=True)
-    assert env.win.displayed_sprite == "walk_1" and env.win._jump_offset == 0
-    env.advance(WALK_FRAME_SECONDS / 2)
-    assert env.win.displayed_sprite == "walk_2"
-    assert abs(env.win.x() - start) == pytest.approx(120 * WALK_FRAME_SECONDS / 2, abs=0.5)
-    assert env.win._jump_offset == pytest.approx(WALK_BOB_HEIGHT)
-    env.advance(WALK_FRAME_SECONDS / 2)
-    assert env.win.displayed_sprite == "walk_3"
-    assert env.win._jump_offset == pytest.approx(0, abs=1e-9)
-
-
-def test_walk_source_is_right_facing_and_left_is_pixel_mirrored(env, monkeypatch):
-    w = env.win
-    monkeypatch.setattr(w, "_screen_avail", lambda *_: QRect(0, 0, 1920, 1040))
-    for x, direction in ((200, 1), (1500, -1)):
-        w.place_on((0, 0, 1920, 1040), x)
-        w.walk(cross=True)
-        assert w.facing == direction
-        for name in SEQUENCES["walk"]:
-            assert np.array_equal(pixmap_pixels(w._pixmaps[name])[:, ::-1],
-                                  pixmap_pixels(w._mirrored_pixmaps[name]))
-        w.stop_motion()
+             for group, count in (("turn", 8), ("jump", 4), ("drag", 4), ("cheek", 3), ("tickle", 3))}
 
 
 @pytest.mark.parametrize("automatic", [False, True])
@@ -97,14 +52,14 @@ def test_jump_four_stages_45px_then_lands_with_squash_and_rebound(env, automatic
     assert not w.motion_active and np.array_equal(pixels(w), original)
 
 
-@pytest.mark.parametrize("action,elapsed", [("walk", 0.47), ("jump", 0.35), ("jump", 0.625), ("jump", 1.0)])
+@pytest.mark.parametrize("action,elapsed", [("turn", 0.47), ("jump", 0.35), ("jump", 0.625), ("jump", 1.0)])
 def test_motion_does_not_depend_on_dropped_frames(qapp, action, elapsed):
     windows = [PetWindow(clock=lambda: 100.0, autostart=False) for _ in range(2)]
     try:
         for w in windows:
             w.set_state("working", animate=False)
             w.place_default()
-            w.walk(cross=True) if action == "walk" else w.jump()
+            w.turn() if action == "turn" else w.jump()
         for i in range(1, int(elapsed * 60) + 1):
             windows[0].advance_to(100 + i / 60)
         for w in windows:
@@ -118,7 +73,7 @@ def test_motion_does_not_depend_on_dropped_frames(qapp, action, elapsed):
             w.close()
 
 
-@pytest.mark.parametrize("missing", ["walk_2", "walk_7", "jump_1", "jump_2", "drag_2"])
+@pytest.mark.parametrize("missing", ["turn_2", "turn_8", "tickle_3", "cheek_3", "jump_1", "jump_2", "drag_2"])
 @pytest.mark.parametrize("problem", ["absent", "corrupt", "wrong_canvas"])
 def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missing, problem):
     import shion.pet_window as module
@@ -138,7 +93,7 @@ def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missi
         group = missing.split("_")[0]
         assert group not in w._sequences
         assert all(name not in w._pixmaps for name in SEQUENCES[group])
-        assert ("jump" if group == "walk" else "walk") in w._sequences
+        assert ("jump" if group == "turn" else "turn") in w._sequences
         w.set_state("working", animate=False)
         if group == "jump":
             w.jump()
@@ -147,13 +102,15 @@ def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missi
             assert w._jump_offset == pytest.approx(LEGACY_JUMP_HEIGHT)
             w.advance_to(100 + LEGACY_JUMP_DURATION)
             assert not w.motion_active and w._jump_offset == 0
-        elif group == "walk":
-            w.place_default()
-            w.walk(cross=True)
-            w.advance_to(100.1)
-            assert w.displayed_sprite == "working"
-            assert w._jump_offset == pytest.approx(
-                behavior.WALK_HOP_HEIGHT * abs(math.sin(math.pi * 0.1 / behavior.WALK_HOP_PERIOD)))
+        elif group in ("turn", "tickle", "cheek"):
+            if group == "turn":
+                w.turn()
+                assert not w.motion_active and w.displayed_sprite == "working"
+            elif group == "tickle":
+                w._feed_tickle(100)
+                assert w.displayed_sprite == "happy"
+            else:
+                assert w._gesture_sprite("cheek", 3, "stop") == "stop"
         else:
             from shion.behavior import DragPlayback
             w.set_state("drag", animate=False)
@@ -165,20 +122,18 @@ def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missi
 
 
 @pytest.mark.parametrize("height", [160, 200, 260, 320])
-@pytest.mark.parametrize("direction", [1, -1])
-def test_motion_pixels_are_not_clipped_and_masks_cover_visible_pixels(env, height, direction):
+def test_motion_pixels_are_not_clipped_and_masks_cover_visible_pixels(env, height):
     w = env.win
     w.set_height(height)
     w.set_state("working", animate=False)
     w.place_default()
-    for action, times in (("walk", [i * 0.11 for i in range(8)]),
+    for action, times in (("turn", [i * 0.09 for i in range(8)]),
                           ("jump", [0, 0.075, 0.15, 0.24, 0.35, 0.44, 0.495, 0.625])):
-        w.walk(cross=True) if action == "walk" else w.jump()
+        w.turn() if action == "turn" else w.jump()
         start = env.mono[0]
         for elapsed in times:
             env.mono[0] = start + elapsed
             w.advance_to(env.mono[0])
-            w.face(direction)
             alpha = pixels(w)[:, :, 3]
             ys, xs = np.where(alpha > 0)
             assert ys.min() > 0 and ys.max() < alpha.shape[0] - 1
@@ -200,10 +155,10 @@ def test_mouse_press_interrupts_jump_without_a_delayed_landing(env):
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
 
 
-def test_snapshot_cli_exposes_walk_and_jump_sequence_stages(qapp, tmp_path):
+def test_snapshot_cli_exposes_turn_and_jump_sequence_stages(qapp, tmp_path):
     from shion.__main__ import main
     frames = []
-    for motion, elapsed in (("--walk", "0"), ("--walk", "0.11"), ("--jump", "0"), ("--jump", "0.35"),
+    for motion, elapsed in (("--turn", "0"), ("--turn", "0.09"), ("--jump", "0"), ("--jump", "0.35"),
                             ("--drag", "0"), ("--drag", "0.11")):
         out = tmp_path / f"{motion[2:]}-{elapsed}.png"
         assert main(["--snapshot", str(out), motion, "--at", elapsed]) == 0

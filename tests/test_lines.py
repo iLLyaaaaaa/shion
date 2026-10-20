@@ -12,7 +12,7 @@ NEEDED = {
     "poke", "stop", "dizzy", "drag", "wake", "neglect_return", "praise_menu",
     "claude_working", "claude_done", "pat", "greeting", "claude_waiting",
     "intro", "startup", "idle_talk",
-    "plan_ready",
+    "plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end",
 }
 
 
@@ -65,7 +65,7 @@ def test_every_shipped_language_is_complete(code):
 @pytest.mark.parametrize("code", ["zh", "en", "ja"])
 def test_ready_reminders_are_native_and_interface_has_no_claude(code):
     raw = _raw(code)
-    for key in ("plan_ready", "claude_done"):
+    for key in ("plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end", "claude_done"):
         assert raw["lines"][key]  # 必须原生提供，不能依赖中文回退
         assert Lines(code).pick(key) in raw["lines"][key]
     visible = list(raw["ui"].values()) + [s for pool in raw["lines"].values() for s in pool]
@@ -82,8 +82,8 @@ def test_shipped_languages_are_zh_en_ja_with_zh_first():
 def test_english_expression_and_action_menu_labels():
     lines = Lines("en")
     assert [lines.ui(key) for key in (
-        "expression_stop", "expression_neglect2", "menu_auto_expression", "action_cross"
-    )] == ["Flustered", "Teary", "Auto expressions", "Walk to the other side"]
+        "expression_stop", "expression_neglect2", "menu_auto_expression", "action_face"
+    )] == ["Flustered", "Teary", "Auto expressions", "Face the mouse"]
 
 
 # ---- 切换与回退 ----

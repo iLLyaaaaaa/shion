@@ -3,18 +3,17 @@ import shutil
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
 from shion import behavior as b
-from shion.animator import SQUASH
 from shion.debug import PaintCounter
 from shion.pet_window import PetWindow, SPRITE_DIR, STATES
 from tests.test_controller import BODY, env, qapp
 from tests.test_feedback_ui import move_global, pixels
 
 
-@pytest.mark.parametrize("group", ["walk", "jump", "drag"])
+@pytest.mark.parametrize("group", ["jump", "drag"])
 @pytest.mark.parametrize("count", [1, 3, 6, 12])
 def test_any_contiguous_frame_count_uses_numeric_order(qapp, tmp_path, monkeypatch, group, count):
     import shion.pet_window as module
@@ -40,20 +39,6 @@ def test_any_contiguous_frame_count_uses_numeric_order(qapp, tmp_path, monkeypat
             assert [w._sequence_sprite(group, i * 0.11, 0.11) for i in range(count * 2)] == list(names) * 2
     finally:
         w.close()
-
-
-def test_default_speed_reference_timing_and_step_squash(env, monkeypatch):
-    w = env.win
-    monkeypatch.setattr(w, "_screen_avail", lambda *_: QRect(0, 0, 1920, 1040))
-    w.place_on((0, 0, 1920, 1040), 200)
-    w.walk(cross=True)
-    start = w.x()
-    assert w._walk.speed == 60 and w._walk.frame_seconds == pytest.approx(0.11)
-    for step in range(3):
-        w.advance_to(100 + step * 0.22 + SQUASH["step"][0] * 0.3)
-        assert w.frame.sy == pytest.approx(0.97)
-    w.advance_to(101)
-    assert w.x() - start == 60
 
 
 def test_jump_smooth_height_boundaries_hold_and_accelerating_descent():
@@ -157,7 +142,7 @@ def test_drag_all_frames_tilt_and_mask_are_not_clipped(env, height, direction):
     w._animator.feed_velocity(1000, 100)
     for i in range(4):
         w.advance_to(100 + i * .11)
-        w.face(direction)
+        w._animator.feed_velocity(direction * 1000, 100 + i * .11)
         alpha = pixels(w)[:, :, 3]
         ys, xs = np.where(alpha > 0)
         assert ys.min() > 0 and ys.max() < alpha.shape[0] - 1

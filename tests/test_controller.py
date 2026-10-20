@@ -17,7 +17,7 @@ from shion.lines import Lines
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
 
 T0 = datetime(2026, 10, 19, 12, 0, 0)  # 白天，避开夜间睡眠
-BODY = QPoint(MARGIN_X + 60, MARGIN_TOP + 120)
+BODY = QPoint(MARGIN_X + 60, MARGIN_TOP + 170)  # 普通身体区，肚子由专用手势测试覆盖
 
 
 @pytest.fixture(scope="module")

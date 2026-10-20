@@ -7,11 +7,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QGuiApplication, QImage, QMouseEvent
+from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
 
-from shion.behavior import JUMP_DURATION, WALK_DURATION
-from shion.pet_window import MARGIN_BOTTOM, MARGIN_X
+from shion.behavior import JUMP_DURATION
 from shion.state import EXPRESSIONS, load
 from tests.test_controller import Env, BODY, env, find_action, qapp
 
@@ -67,18 +66,19 @@ def test_activity_menu_saves_and_checked_item_restores(env):
     assert find_action(find_action(again, "活跃度").menu(), "活泼").isChecked()
 
 
-@pytest.mark.parametrize("label,kind", [("散步一会儿", "walk"), ("走到屏幕另一边", "cross"), ("跳一跳", "jump"), ("转个身", "turn")])
+@pytest.mark.parametrize("label,kind", [("跳一跳", "jump"), ("转个身", "turn"), ("朝向鼠标", "face")])
 def test_action_menu_dispatches_the_selected_action(env, label, kind):
-    env.win.place_default()
-    before = env.win.facing
     menu = env.ctl.build_menu()
-    find_action(find_action(menu, "动作").menu(), label).trigger()
-    if kind in ("walk", "cross"):
-        assert env.win._walk is not None
-    elif kind == "jump":
-        assert env.win.motion_active and env.win._walk is None
+    actions = find_action(menu, "动作").menu()
+    assert [a.text() for a in actions.actions()] == ["跳一跳", "转个身", "朝向鼠标"]
+    find_action(actions, label).trigger()
+    assert env.win.motion_active
+    if kind == "jump":
+        assert env.win._jump_start is not None
+    elif kind == "turn":
+        assert env.win._turn_start is not None
     else:
-        assert env.win.facing == -before and not env.win.motion_active
+        assert env.win.displayed_sprite in ("turn_2", "turn_8")
 
 
 def test_fixed_expression_keeps_nudge_dialogue_without_autonomous_motion(env, monkeypatch):
@@ -133,36 +133,6 @@ def pixmap_pixels(pix):
     return np.frombuffer(img.constBits(), dtype=np.uint8).reshape(img.height(), img.bytesPerLine() // 4, 4)[:, :img.width()].copy()
 
 
-@pytest.mark.parametrize("state", ["idle", "happy", "dizzy", "drag", "working"])
-def test_mirror_pixels_and_mask_keep_anchor_and_transparent_corners(env, state):
-    w = env.win
-    w.set_state(state, animate=False)
-    original_pos = w.pos()
-    before = pixels(w)
-    w.turn()
-    after = pixels(w)
-    # 源贴图必须逐像素镜像；高 DPI -> 逻辑尺寸的 Qt 缩小滤波允许亚像素舍入，
-    # 渲染层独立检验脚底和镜像位置，不能要求非整数倍率下每个颜色完全相同。
-    source = pixmap_pixels(w._pixmaps[state])
-    mirrored = pixmap_pixels(w._mirrored_pixmaps[state])
-    assert np.array_equal(source[:, ::-1], mirrored)
-    expected = before[:, ::-1, 3]
-    actual = after[:, :, 3]
-    ey, ex = np.where(expected > 0)
-    ay, ax = np.where(actual > 0)
-    assert (ex.min(), ex.max(), ey.min(), ey.max()) == (ax.min(), ax.max(), ay.min(), ay.max())
-    foot_y = max(0, ay.max() - 7)
-    cols = np.arange(actual.shape[1])
-    def foot_center(alpha):
-        weights = alpha[foot_y:].sum(axis=0)
-        return (weights * cols).sum() / weights.sum()
-    assert abs(foot_center(expected) - foot_center(actual)) < 0.1
-    assert w.pos() == original_pos
-    ys, xs = np.where(after[:, :, 3] > 0)
-    assert all(w.mask().contains(QPoint(int(x), int(y))) for x, y in zip(xs, ys))
-    assert not w.mask().contains(QPoint(0, 0))
-
-
 def test_jump_does_not_clip_changes_mask_and_returns_to_same_feet(env):
     w = env.win
     w.set_state("working", animate=False)
@@ -178,49 +148,6 @@ def test_jump_does_not_clip_changes_mask_and_returns_to_same_feet(env):
     env.mono[0] += JUMP_DURATION / 2
     w.advance_to(env.mono[0])
     assert np.array_equal(original, pixels(w))
-
-
-def test_walk_finishes_on_new_saved_position_and_press_interrupts_immediately(env):
-    w = env.win
-    w.place_default()
-    start = w.x()
-    env.ctl.do_action("cross")
-    assert w.motion_active
-    env.advance(0.5)
-    assert w.x() != start
-    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)
-    stopped = w.x()
-    assert not w.motion_active
-    assert env.data.window["x"] == stopped
-    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
-    env.advance(5)
-    assert w.x() == stopped
-    env.ctl.do_action("cross")
-    env.advance(100)
-    assert not w.motion_active
-    avail = QGuiApplication.primaryScreen().availableGeometry()
-    assert avail.left() <= w.x() + MARGIN_X
-    assert w.x() + w.width() - MARGIN_X <= avail.right() + 1
-    assert w.y() + w.height() - MARGIN_BOTTOM == avail.bottom() + 1
-    assert env.data.window["x"] == w.x()
-    env.scheduler.flush()
-    assert load(env.path).window["x"] == w.x()
-
-
-def test_roam_duration_and_facing_follow_path(env):
-    w = env.win
-    w.place_default()
-    env.ctl.do_action("walk")
-    walk = w._walk
-    for i in range(1, 20):
-        env.advance(0.5)
-        assert w.motion_active
-        _, _, direction, _ = walk.sample(env.mono[0])
-        assert w.facing == direction
-    env.advance(0.5)
-    assert not w.motion_active
-    assert env.mono[0] == 100 + WALK_DURATION
-    assert env.data.window["x"] == w.x()
 
 
 def move_global(w, gp):
@@ -250,23 +177,6 @@ def test_real_drag_reversals_trigger_dizzy_only_after_landing(env):
     # 落地表情不受气泡冷却影响，晃晕台词不会抢掉刚说的拖动台词。
     env.advance(2.5)
     assert w.sprite_name == "idle"
-
-
-@pytest.mark.parametrize("state", ["idle", "happy", "dizzy"])
-def test_walk_visible_pixels_stay_within_current_screen(env, state):
-    w = env.win
-    w.set_height(320)
-    w.place_default()
-    w.set_state(state, animate=False)
-    avail = QGuiApplication.primaryScreen().availableGeometry()
-    for _ in range(2):
-        w.walk(cross=True)
-        duration = w._walk.duration
-        for elapsed in (duration - 0.01, duration, duration + 0.225):
-            w.advance_to(env.mono[0] + elapsed)
-            ys, xs = np.where(pixels(w)[:, :, 3] > 0)
-            assert xs.min() + w.x() >= avail.left()
-            assert xs.max() + w.x() <= avail.right()
 
 
 def test_working_interrupts_an_already_started_idle_jump(env):

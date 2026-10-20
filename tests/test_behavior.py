@@ -3,8 +3,8 @@ import random
 import pytest
 
 from shion.behavior import (
-    IDLE_INTERVALS, IDLE_TALK_COOLDOWN, SHAKE_DISTANCE, WALK_DURATION,
-    WALK_HOP_HEIGHT, IdleBehavior, ShakeTracker, Walk,
+    IDLE_INTERVALS, IDLE_TALK_COOLDOWN, SHAKE_DISTANCE,
+    IdleBehavior, ShakeTracker,
 )
 
 
@@ -61,40 +61,3 @@ def test_idle_talk_is_rare_and_respects_cooldown(monkeypatch):
     assert b.step(first, True, "lively") == "talk"
     assert b.step(b.next_at, True, "lively") != "talk"
     assert b.step(first + IDLE_TALK_COOLDOWN, True, "lively") == "talk"
-
-
-@pytest.mark.parametrize("cross", [True, False])
-def test_walk_bounds_direction_jumps_and_finishes(cross):
-    walk = Walk(250, -100, 500, 10, cross=cross, rng=random.Random(3))
-    prev_x = 250
-    for i in range(1, int(walk.duration * 60)):
-        x, jump, direction, done = walk.sample(10 + i / 60)
-        assert -100 <= x <= 500
-        assert 0 <= jump <= WALK_HOP_HEIGHT
-        assert direction in (-1, 1)
-        assert not done
-        if abs(x - prev_x) > 0.1:
-            # 转折刚好跨帧时，当前方向可以已更新；其余按速度方向。
-            assert abs(x - prev_x) <= walk.speed / 60 + 0.001
-        prev_x = x
-    x, jump, _, done = walk.sample(10 + walk.duration)
-    assert done and jump == 0
-    if cross:
-        assert x == -100
-    else:
-        assert walk.duration == WALK_DURATION
-    assert walk.sample(10 + walk.duration + 10)[0] == x
-
-
-def test_walk_sampling_is_independent_of_dropped_frames():
-    dense = Walk(100, 0, 800, 0, rng=random.Random(3))
-    sparse = Walk(100, 0, 800, 0, rng=random.Random(3))
-    for i in range(599):
-        dense.sample(i / 60)
-    assert dense.sample(10) == sparse.sample(10)
-
-
-@pytest.mark.parametrize("cross", [True, False])
-def test_walk_handles_zero_width_screen(cross):
-    w = Walk(50, 0, 0, 0, cross=cross)
-    assert w.sample(20) == (0, 0, 1, True)

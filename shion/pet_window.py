@@ -16,15 +16,18 @@ from typing import Callable
 import numpy as np
 from PySide6.QtCore import QPoint, QRect, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import (
-    QBitmap, QGuiApplication, QImage, QPainter, QPixmap, QRegion, QTransform,
+    QBitmap, QGuiApplication, QImage, QPainter, QPixmap, QRegion,
 )
 from PySide6.QtWidgets import QWidget
 
-from shion.animator import Animator, Frame, SQUASH, squash_scale
+from shion.animator import Animator, Frame
 from shion.behavior import (
     JUMP_DURATION, JUMP_HEIGHT,
-    LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT, WALK_BOB_FRAMES, WALK_BOB_HEIGHT,
-    SHAKE_WINDOW, DragPlayback, ShakeTracker, Walk, jump_sample,
+    LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT,
+    SHAKE_WINDOW, DragPlayback, ShakeTracker, jump_sample, TickleGesture,
+    TURN_FRAME_SECONDS, FACE_SECONDS, CHEEK_RELEASE_SECONDS, CHEEK_LIFT_DISTANCE,
+    TICKLE_STOP_SECONDS, TICKLE_FRAME_SECONDS, TICKLE_TWIST_DEGREES,
+    TICKLE_TWIST_PERIOD, TICKLE_SPEECH_SECONDS, BELLY_LIFT_DISTANCE, TICKLE_MOVE_DISTANCE,
 )
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
@@ -32,10 +35,17 @@ STATES = [
     "idle", "blink", "happy", "proud", "stop", "dizzy",
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
 ]
-SEQUENCE_GROUPS = ("walk", "jump", "drag")
+SEQUENCE_GROUPS = ("jump", "drag", "turn", "tickle", "cheek")
+EXACT_SEQUENCES = {"turn": 8, "tickle": 3, "cheek": 3}
 
 DEFAULT_HEIGHT = 200
-HEAD_FRAC = 0.45  # 精灵上方多少比例算头部（摸头判定区）
+# 依据 idle 448×512 画布测量；不包含窗口留边，各尺寸使用相同比例。
+HEAD_FRAC = 0.38
+CHEEK_BOTTOM_FRAC = 0.56
+BELLY_TOP_FRAC = 0.60
+BELLY_BOTTOM_FRAC = 0.78
+BELLY_LEFT_FRAC = 0.32
+BELLY_RIGHT_FRAC = 0.68
 MARGIN_X = 64  # 画布左右留边（倾斜 12° 时头部偏移约 50px）
 MARGIN_TOP = round(JUMP_HEIGHT) + 8  # 给原地跳留出空间
 MARGIN_BOTTOM = 6  # 倾斜时一只脚会往下沉，留出空间不被裁掉
@@ -73,7 +83,7 @@ class PetWindow(QWidget):
     menu_requested = Signal(QPoint)  # 全局坐标
     moved = Signal()  # 窗口位置变了（气泡跟随用）
     pressed = Signal()  # 左键按下即中断自主运动
-    motion_finished = Signal()  # 自主行走结束/中断后保存位置
+    gesture = Signal(str)  # cheek_pull / cheek_release / tickle / tickle_end / belly（静默）
 
     def __init__(
         self,
@@ -94,7 +104,6 @@ class PetWindow(QWidget):
         self._fps_overlay = None
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
-        self._mirrored_pixmaps: dict[str, QPixmap] = {}
         self._sequences: dict[str, tuple[str, ...]] = {}
         self._sw = 0  # 精灵逻辑宽高
         self._sh = 0
@@ -127,13 +136,22 @@ class PetWindow(QWidget):
         self._fall_y0 = 0.0
         self._last_tick = self._clock()
         self._shake = ShakeTracker()
-        self._walk: Walk | None = None
-        self._walk_floor = 0
+        self._turn_start: float | None = None
+        self._pose: str | None = None
+        self._pose_until = 0.0
+        self._automatic_pose = False
+        self._cheek_mode = False
+        self._cheek_pulling = False
+        self._belly_mode = False
+        self._tickle = TickleGesture()
+        self._tickle_start: float | None = None
+        self._tickle_last = 0.0
+        self._tickle_said = 0.0
+        self._rub_last = QPoint()
         self._jump_start: float | None = None
         self._jump_framed = False
         self._automatic_jump = False
         self._jump_offset = 0.0
-        self._facing = 1  # 原图朝向；+1 向右，-1 为镜像
 
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
@@ -213,25 +231,33 @@ class PetWindow(QWidget):
         super().closeEvent(e)
 
     def _is_head(self, pos: QPoint) -> bool:
-        """鼠标是否在精灵上方 45%（按未变换的精灵坐标）。"""
+        """按 idle 画布坐标划区，忽略窗口留边。"""
+        return self._hit_zone(pos) == "head"
+
+    def _hit_zone(self, pos: QPoint) -> str:
         sx = pos.x() - MARGIN_X
         sy = pos.y() - MARGIN_TOP
-        return 0 <= sx < self._sw and 0 <= sy < self._sh * HEAD_FRAC
+        if not (0 <= sx < self._sw and 0 <= sy < self._sh):
+            return "outside"
+        if sy < self._sh * HEAD_FRAC:
+            return "head"
+        if sy < self._sh * CHEEK_BOTTOM_FRAC:
+            return "cheek"
+        if (self._sh * BELLY_TOP_FRAC <= sy < self._sh * BELLY_BOTTOM_FRAC
+                and self._sw * BELLY_LEFT_FRAC <= sx < self._sw * BELLY_RIGHT_FRAC):
+            return "belly"
+        return "body"
 
     def _load_sprites(self) -> None:
         screen = QGuiApplication.primaryScreen()
         dpr = screen.devicePixelRatio() if screen else 1.0
         self._pixmaps.clear()
-        self._mirrored_pixmaps.clear()
         self._sequences.clear()
 
         def cache(name: str, src: QPixmap) -> None:
             pix = src.scaledToHeight(round(self._height * dpr), Qt.SmoothTransformation)
             pix.setDevicePixelRatio(dpr)
             self._pixmaps[name] = pix
-            mirrored = pix.transformed(QTransform().scale(-1, 1), Qt.FastTransformation)
-            mirrored.setDevicePixelRatio(dpr)
-            self._mirrored_pixmaps[name] = mirrored
 
         canvas = None
         for name in STATES:
@@ -248,6 +274,8 @@ class PetWindow(QWidget):
                               for path in SPRITE_DIR.glob(f"{group}_*.png")
                               if (match := re.fullmatch(rf"{group}_([1-9]\d*)", path.stem)))
             if not numbered or any(number != i for i, (number, _) in enumerate(numbered, 1)):
+                continue
+            if group in EXACT_SEQUENCES and len(numbered) != EXACT_SEQUENCES[group]:
                 continue
             names = tuple(name for _, name in numbered)
             sources = [QPixmap(str(SPRITE_DIR / f"{name}.png")) for name in names]
@@ -287,9 +315,9 @@ class PetWindow(QWidget):
     def _draw_sprite(self, p: QPainter, f: Frame) -> None:
         p.save()
         p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM - self._jump_offset)
-        p.rotate(f.angle)  # 倾斜是屏幕方向，镜像不应反转拖动速度的倾斜方向
+        p.rotate(f.angle)
         p.scale(f.sx, f.sy)
-        pixmaps = self._pixmaps if self._facing > 0 else self._mirrored_pixmaps
+        pixmaps = self._pixmaps
         target = QRectF(-self._sw / 2, -self._sh, self._sw, self._sh)
         layers = f.layers or ((f.sprite, 1.0),)
         if all(weight == 1.0 for _, weight in layers):
@@ -335,7 +363,7 @@ class PetWindow(QWidget):
     def _mask_for(self, f: Frame) -> QRegion:
         """遮罩 = 当前画出的不透明像素向外扩 MASK_GROW px。只有遮罩里的地方响应鼠标。"""
         names = tuple(sorted(name for name, weight in f.layers or ((f.sprite, 1.0),) if weight > 0))
-        key = (names, round(f.angle), round(f.sx, 2), round(f.sy, 2), self._facing, round(self._jump_offset))
+        key = (names, round(f.angle), round(f.sx, 2), round(f.sy, 2), round(self._jump_offset))
         if key == self._mask_key:
             return self._mask_cache[key]
         region = self._mask_cache.get(key)
@@ -365,15 +393,7 @@ class PetWindow(QWidget):
 
     def _refresh(self, now: float) -> None:
         f = self._animator.frame(now)
-        if self._walk is not None and "walk" in self._sequences:
-            elapsed = max(0.0, now - self._walk.start)
-            period = self._walk.frame_seconds * WALK_BOB_FRAMES
-            step_duration = min(SQUASH["step"][0], period * 0.4)
-            step_elapsed = (elapsed % period) * SQUASH["step"][0] / step_duration
-            sy = squash_scale("step", step_elapsed)
-            f = Frame(self._sequence_sprite("walk", elapsed, self._walk.frame_seconds),
-                      sx=1 / math.sqrt(sy), sy=sy)
-        elif self._jump_start is not None and self._jump_framed:
+        if self._jump_start is not None and self._jump_framed:
             elapsed = max(0.0, now - self._jump_start)
             _, progress, sy = jump_sample(elapsed)
             names = self._sequences["jump"]
@@ -384,10 +404,19 @@ class PetWindow(QWidget):
             name = names[int(self._drag_playback.phase + 1e-9) % len(names)]
             # 保留拖动倾斜，但不对序列帧做底层表情交叉淡化。
             f = replace(f, sprite=name, layers=())
+        elif self._tickle_start is not None:
+            elapsed = max(0.0, now - self._tickle_start)
+            name = (self._sequence_sprite("tickle", elapsed, TICKLE_FRAME_SECONDS)
+                    if "tickle" in self._sequences else "happy")
+            f = Frame(name, angle=TICKLE_TWIST_DEGREES * math.sin(2 * math.pi * elapsed / TICKLE_TWIST_PERIOD))
+        elif self._pose is not None:
+            f = Frame(self._pose)
+        elif self._turn_start is not None:
+            f = Frame(self._sequence_sprite("turn", now - self._turn_start, TURN_FRAME_SECONDS))
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
         f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
         if (f == self._frame and self._mask_key is not None
-                and self._mask_key[4:] == (self._facing, round(self._jump_offset))):
+                and self._mask_key[4] == round(self._jump_offset)):
             return
         self._frame = f
         old_key = self._mask_key
@@ -428,20 +457,17 @@ class PetWindow(QWidget):
         """推进一帧：拖动速度、下落、动画。定时器和测试/截图都走这里。"""
         dt = max(0.0, now - self._last_tick)
         self._last_tick = now
-        if self._walk is not None:
-            x, jump, direction, finished = self._walk.sample(now)
-            self._facing = direction
-            self.move(round(x), self._walk_floor)
-            self._jump_offset = jump
-            if "walk" in self._sequences and not finished:
-                elapsed = max(0.0, now - self._walk.start)
-                period = self._walk.frame_seconds * WALK_BOB_FRAMES
-                self._jump_offset = WALK_BOB_HEIGHT * abs(math.sin(math.pi * elapsed / period))
-            if finished:
-                self._walk = None
-                self._jump_offset = 0.0
-                self.motion_finished.emit()
-        elif self._jump_start is not None:
+        if self._turn_start is not None and now + 1e-9 >= self._turn_start + len(self._sequences["turn"]) * TURN_FRAME_SECONDS:
+            self._turn_start = None
+        if self._pose is not None and not self._cheek_pulling and now + 1e-9 >= self._pose_until:
+            self._pose = None
+        if self._tickle_start is not None:
+            if now - self._tickle_last + 1e-9 >= TICKLE_STOP_SECONDS:
+                self._end_tickle(speak=True)
+            elif now - self._tickle_said >= TICKLE_SPEECH_SECONDS:
+                self._tickle_said = now
+                self.gesture.emit("tickle")
+        if self._jump_start is not None:
             duration = JUMP_DURATION if self._jump_framed else LEGACY_JUMP_DURATION
             elapsed = max(0.0, now - self._jump_start)
             if self._jump_framed:
@@ -490,6 +516,15 @@ class PetWindow(QWidget):
         self._dragging = False
         self._moved = False
         self._pat_mode = self._is_head(e.position().toPoint())
+        zone = self._hit_zone(e.position().toPoint())
+        self._cheek_mode = zone == "cheek" and not self._caught_fall
+        self._cheek_pulling = False
+        self._belly_mode = zone == "belly" and not self._caught_fall
+        self._rub_last = QPoint(self._press_global)
+        self._tickle.begin_rub(self._press_global.x())
+        if not self._belly_mode:
+            self._end_tickle()
+            self._tickle.clicks.clear()
         self._pat_accum = 0.0
         self._pat_last_x = self._press_global.x()
         e.accept()
@@ -508,11 +543,41 @@ class PetWindow(QWidget):
             if math.hypot(d.x(), d.y()) <= DRAG_THRESHOLD:
                 if self._pat_mode:
                     self._pat_step(gp)
-                return
-            self._moved = True
+                if not self._belly_mode:
+                    return
+            else:
+                self._moved = True
         if self._pat_mode:
             self._pat_step(gp)
             return
+        d = gp - self._press_global
+        distance = math.hypot(d.x(), d.y())
+        if self._cheek_mode:
+            if distance <= CHEEK_LIFT_DISTANCE:
+                if abs(d.x()) > DRAG_THRESHOLD:
+                    first = not self._cheek_pulling
+                    self._cheek_pulling = True
+                    self._pose = self._gesture_sprite("cheek", 1 if d.x() > 0 else 2, "stop")
+                    if first:
+                        self.gesture.emit("cheek_pull")
+                    self._refresh(self._clock())
+                return
+            self._cheek_mode = self._cheek_pulling = False
+            self._pose = None
+        if self._belly_mode:
+            if distance <= BELLY_LIFT_DISTANCE:
+                movement = gp - self._rub_last
+                if math.hypot(movement.x(), movement.y()) >= TICKLE_MOVE_DISTANCE:
+                    self._rub_last = QPoint(gp)
+                    now = self._clock()
+                    self.gesture.emit("belly")
+                    rub = self._tickle.rub(gp.x(), now)
+                    if rub or self._tickle_start is not None:
+                        self._feed_tickle(now)
+                return
+            self._belly_mode = False
+        self._end_tickle()
+        self._tickle.clicks.clear()
         if not self._dragging:
             self._dragging = True
             now = self._clock()
@@ -528,6 +593,27 @@ class PetWindow(QWidget):
         self._shake.feed(gp.x(), self._clock())
         self.move(gp - self._grab_offset)
 
+    def _gesture_sprite(self, group: str, index: int, fallback: str) -> str:
+        names = self._sequences.get(group, ())
+        return names[index - 1] if len(names) >= index else fallback
+
+    def _feed_tickle(self, now: float) -> None:
+        self._tickle_last = now
+        if self._tickle_start is None:
+            self._pose = None
+            self._tickle_start = self._tickle_said = now
+            self.gesture.emit("tickle")
+        self._refresh(now)
+
+    def _end_tickle(self, *, speak: bool = False) -> None:
+        active = self._tickle_start is not None
+        self._tickle_start = None
+        if active:
+            self._tickle.clicks.clear()
+            self._tickle.begin_rub(self._rub_last.x())
+            if speak:
+                self.gesture.emit("tickle_end")
+
     def _pat_step(self, gp: QPoint) -> None:
         self._pat_accum += abs(gp.x() - self._pat_last_x)
         self._pat_last_x = gp.x()
@@ -540,6 +626,9 @@ class PetWindow(QWidget):
             return
         was_dragging = self._dragging
         was_pat = self._pat_mode and self._moved
+        was_cheek = self._cheek_pulling
+        was_cheek_move = self._cheek_mode and self._moved
+        was_belly = self._belly_mode
         double = self._double
         caught = self._caught_fall
         now = self._clock()
@@ -550,6 +639,7 @@ class PetWindow(QWidget):
         self._press_global = None
         self._dragging = False
         self._pat_mode = False
+        self._cheek_mode = self._cheek_pulling = self._belly_mode = False
         self._double = False
         self._caught_fall = False
         self._animator.set_drag(False, self._clock())
@@ -558,7 +648,18 @@ class PetWindow(QWidget):
             self.start_fall()
         elif caught:
             self.start_fall()  # 抓住下落中的桌宠又松开：继续落
-        elif not was_pat:
+        elif was_cheek:
+            self._pose = self._gesture_sprite("cheek", 3, "stop")
+            self._pose_until = now + CHEEK_RELEASE_SECONDS
+            self.gesture.emit("cheek_release")
+            self._refresh(now)
+        elif was_belly:
+            self.gesture.emit("belly")
+            if not self._moved:
+                if self._tickle.click(now) or self._tickle_start is not None:
+                    self._feed_tickle(now)
+            self._refresh(now)
+        elif not was_pat and not was_cheek_move:
             self._animator.squash(now, "click")
             self._refresh(now)
             self.clicked.emit()
@@ -569,62 +670,61 @@ class PetWindow(QWidget):
         self.stop_motion()
         self.menu_requested.emit(e.globalPos())
 
-    # ---- 原地动作 / 沿任务栏行走 ----
-    @property
-    def facing(self) -> int:
-        return self._facing
-
-    def face(self, direction: int) -> None:
-        self._facing = 1 if direction >= 0 else -1
+    # ---- 原地动作 ----
+    def face(self, direction: int, *, automatic: bool = False) -> None:
+        if self._dragging or self._falling or "turn" not in self._sequences:
+            return
+        self.stop_motion()
+        self._end_tickle()
+        self._automatic_pose = automatic
+        self._pose = self._gesture_sprite("turn", 2 if direction >= 0 else 8, "idle")
+        self._pose_until = self._clock() + FACE_SECONDS
         self._refresh(self._clock())
 
-    def turn(self) -> None:
-        self.face(-self._facing)
+    def turn(self, *, automatic: bool = False) -> None:
+        if self._dragging or self._falling or "turn" not in self._sequences:
+            return
+        self.stop_motion()
+        self._end_tickle()
+        self._automatic_pose = automatic
+        self._turn_start = self._clock()
+        self._refresh(self._clock())
 
     def set_calm(self, calm: bool) -> None:
         self._animator.calm = calm
 
     @property
     def motion_active(self) -> bool:
-        return self._walk is not None or self._jump_start is not None
+        return (self._jump_start is not None or self._turn_start is not None
+                or self._pose is not None or self._tickle_start is not None)
 
     @property
     def idle_motion_active(self) -> bool:
-        return self._jump_start is not None and self._automatic_jump
+        return ((self._jump_start is not None and self._automatic_jump)
+                or (self._automatic_pose and (self._turn_start is not None or self._pose is not None)))
 
     @property
     def is_pressed(self) -> bool:
         return self._press_global is not None
 
     def stop_motion(self) -> None:
-        walking = self._walk is not None
-        self._walk = None
+        self._turn_start = None
+        if not self._cheek_pulling:
+            self._pose = None
+        self._automatic_pose = False
         self._jump_start = None
         self._jump_offset = 0.0
         self._refresh(self._clock())
-        if walking:
-            self.motion_finished.emit()
 
     def jump(self, *, automatic: bool = False) -> None:
         if self._dragging or self._falling:
             return
         self.stop_motion()
+        self._end_tickle()
         self._automatic_jump = automatic
         self._jump_framed = "jump" in self._sequences
         self._jump_start = self._clock()
         self.advance_to(self._jump_start)
-
-    def walk(self, *, cross: bool = False, rng=None) -> None:
-        if self._dragging or self._falling:
-            return
-        self.stop_motion()
-        self.snap_to_floor()
-        avail = self._screen_avail(self.geometry().center())
-        lo = avail.left() - MARGIN_X
-        hi = avail.right() + 1 - self.width() + MARGIN_X
-        self._walk_floor = self.y()
-        self._walk = Walk(self.x(), lo, hi, self._clock(), cross=cross, rng=rng)
-        self.advance_to(self._clock())
 
     def consume_shaken(self) -> bool:
         shaken = self._shake.shaken

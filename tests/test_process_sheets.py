@@ -41,7 +41,7 @@ def test_wrong_frame_count_stops_before_writing_outputs(sheets, monkeypatch, tmp
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("group,count", [("walk", 8), ("jump", 4), ("drag", 4)])
+@pytest.mark.parametrize("group,count", [("walk", 8), ("jump", 4), ("drag", 4), ("turn", 8), ("tickle", 3), ("cheek", 3)])
 def test_current_raw_sheets_split_to_expected_count_and_outputs_decode(sheets, group, count):
     assert sheets.EXPECTED[f"{group}_sheet"] == count
     frames = sheets.split_frames(sheets.ps.load_clean(sheets.ps.RAW / f"{group}_sheet.png"))

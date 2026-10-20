@@ -106,6 +106,7 @@ class PetController(QObject):
         w = window
         w.hovered.connect(self._on_hover)
         w.patted.connect(self._on_pat)
+        w.gesture.connect(self._on_gesture)
         w.clicked.connect(self._on_click)
         w.double_clicked.connect(self._on_double_click)
         w.drag_started.connect(self._on_drag_started)
@@ -113,7 +114,6 @@ class PetController(QObject):
         w.menu_requested.connect(self.show_menu)
         w.moved.connect(self._on_window_moved)
         w.pressed.connect(self._on_pressed)
-        w.motion_finished.connect(self.save_position)
 
         self._watch_screens()
 
@@ -157,9 +157,10 @@ class PetController(QObject):
             self.state.save.activity_level,
         )
         if action == "turn":
-            self.window.turn()
+            self.window.turn(automatic=True)
         elif action == "face":
-            self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1)
+            self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1,
+                             automatic=True)
         elif action == "jump":
             self.window.jump(automatic=True)
         elif action == "expression":
@@ -264,6 +265,12 @@ class PetController(QObject):
         self._on_pressed()
         self._status_timer.stop()
         self.react(self.state.click(self._now()), category="poke")
+        self.sync()
+
+    def _on_gesture(self, key: str) -> None:
+        self._on_pressed()
+        self._status_timer.stop()
+        self.react(self.state.gesture(key, self._now()))
         self.sync()
 
     def _on_double_click(self) -> None:
@@ -389,12 +396,12 @@ class PetController(QObject):
     def do_action(self, name: str) -> None:
         self.react(self.state.interact(self._now()))
         self._idle.next_at = None
-        if name in ("walk", "cross"):
-            self.window.walk(cross=name == "cross", rng=self._rng)
-        elif name == "jump":
+        if name == "jump":
             self.window.jump()
         elif name == "turn":
             self.window.turn()
+        elif name == "face":
+            self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1)
         self.sync()
 
     # ------------------------------------------------------------ 来自 Claude 的事件
@@ -743,7 +750,7 @@ class PetController(QObject):
             act.triggered.connect(lambda _=False, lv=level: self.set_activity(lv))
 
         action_menu = menu.addMenu(ui("menu_action"))
-        for name in ("walk", "cross", "jump", "turn"):
+        for name in ("jump", "turn", "face"):
             action_menu.addAction(ui("action_" + name)).triggered.connect(lambda _=False, n=name: self.do_action(n))
 
         size_menu = menu.addMenu(ui("menu_size"))

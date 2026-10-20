@@ -7,6 +7,10 @@
     "display_name": "Shion"
   },
   "lines": {
+    "cheek_pull": ["Mmph! My cheeks aren't stretchy toys!", "H-hey! I'm not a mochi!", "G-gently, you dummy..."],
+    "cheek_release": ["Hmph! I'm remembering this!", "My face isn't a toy! ...Be gentler next time.", "You made my cheeks all red! Fix it!"],
+    "tickle": ["Ahaha! S-stop! I'm not enjoying this!", "Hahaha... Not there, you dummy!", "Quit it, haha... I-I'll get you back!"],
+    "tickle_end": ["Hah... hah... This is all your fault!", "Phew... Let me catch my breath, dummy...", "Hah... Again and I'll ignore you!"],
     "permission_request": ["Something needs your call!"],
     "plan_ready": ["The plan's ready! Take a look~"],
     "feedback_sent": ["Passed it on!"],
@@ -84,6 +88,7 @@
     ]
   },
   "ui": {
+    "action_face": "Face the mouse",
     "hook_deny": "The user denied this action through Shion.",
     "permission_title": "Approve this?",
     "permission_allow": "Allow",
@@ -126,8 +131,6 @@
     "activity_normal": "Normal",
     "activity_lively": "Lively",
     "menu_action": "Actions",
-    "action_walk": "Take a short walk",
-    "action_cross": "Walk to the other side",
     "action_jump": "Jump",
     "action_turn": "Turn around",
     "hook_praise": "[Shion] The user thinks you did a great job just now.",

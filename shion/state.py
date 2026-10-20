@@ -533,6 +533,15 @@ class PetState:
         self._log_state(now)
         return reactions
 
+    def gesture(self, key: str, now: datetime) -> list[Reaction]:
+        """捏脸和肚子交互不加好感度、不计普通戳或摸头。"""
+        if key not in {"belly", "cheek_pull", "cheek_release", "tickle", "tickle_end"}:
+            return []
+        self._touch(now, attend=True)
+        self._poke_count, self._last_poke = 0, None
+        self._log_state(now)
+        return [] if key == "belly" else [_say(key)]
+
     def feedback_good(self, now: datetime) -> list[Reaction]:
         """右键菜单“做得好”：加入反馈队列，等下次送达 Claude。"""
         reactions = self._touch(now, attend=False)

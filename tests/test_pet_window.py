@@ -17,7 +17,7 @@ from shion.pet_window import (
     PetWindow, landing_geometry,
 )
 
-BODY = QPoint(MARGIN_X + 60, MARGIN_TOP + 120)  # 精灵身体中间
+BODY = QPoint(MARGIN_X + 60, MARGIN_TOP + 170)  # 身体下部，避开新增肚子交互区
 
 
 @pytest.fixture(scope="module")
@@ -299,14 +299,14 @@ def test_hover_cursor_open_hand_on_head_only(win):
     win.show()
     QTest.mouseMove(win, HEAD)
     assert win.cursor().shape() == Qt.OpenHandCursor
-    QTest.mouseMove(win, BODY + QPoint(0, 40))
+    QTest.mouseMove(win, BODY - QPoint(0, 30))
     assert win.cursor().shape() != Qt.OpenHandCursor
 
 
-def test_head_zone_is_top_45_percent(win):
+def test_head_zone_is_top_38_percent(win):
     sh = win.sprite_size[1]
     x = MARGIN_X + 60
-    assert win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.40)))
+    assert win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.30)))
     assert not win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.50)))
 
 

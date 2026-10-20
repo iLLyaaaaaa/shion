@@ -15,15 +15,22 @@ IDLE_ACTIONS = ("turn", "face", "jump", "expression")
 IDLE_ACTION_WEIGHTS = (1, 1, 1, 1)
 IDLE_EXPRESSIONS = ("happy", "idle")
 IDLE_EXPRESSION_WEIGHTS = (1, 1)
-WALK_DURATION = 10.0
-WALK_SPEED = 60.0
-WALK_MIN_LEG = 40.0
-WALK_HOP_HEIGHT = 10.0
-WALK_HOP_PERIOD = 0.45
-WALK_FRAME_SECONDS = 0.110
-WALK_REFERENCE_SPEED = 60.0
-WALK_BOB_HEIGHT = 3.0
-WALK_BOB_FRAMES = 2  # 两帧一步，起伏随步频变化
+TURN_FRAME_SECONDS = 0.090
+FACE_SECONDS = 2.0
+CHEEK_RELEASE_SECONDS = 2.0
+CHEEK_LIFT_DISTANCE = 80.0
+TICKLE_CLICK_WINDOW = 1.5
+TICKLE_CLICK_COUNT = 3
+TICKLE_STOP_SECONDS = 1.0
+TICKLE_FRAME_SECONDS = 0.110
+TICKLE_TWIST_DEGREES = 3.0
+TICKLE_TWIST_PERIOD = 0.32
+TICKLE_SPEECH_SECONDS = 4.0
+BELLY_LIFT_DISTANCE = 40.0
+RUB_DISTANCE = 8.0
+RUB_REVERSALS = 2
+RUB_WINDOW = 1.5
+TICKLE_MOVE_DISTANCE = 2.0
 JUMP_CROUCH_DURATION = 0.15
 JUMP_RISE_DURATION = 0.09
 JUMP_HOLD_DURATION = 0.20
@@ -137,47 +144,36 @@ class IdleBehavior:
         return self.rng.choices(IDLE_ACTIONS, weights=IDLE_ACTION_WEIGHTS, k=1)[0]
 
 
-class Walk:
-    """预先生成折线路径，采样只依赖经过时间，掉帧不会使行走变慢。"""
+class TickleGesture:
+    """滑动点击窗口和有效往返；单向长拖或小抖动不会当成挠痒。"""
 
-    def __init__(self, x: float, lo: float, hi: float, now: float, *,
-                 cross: bool = False, rng: random.Random | None = None):
-        rng = rng or random.Random()
-        self.start = now
-        self.speed = WALK_SPEED
-        self.frame_seconds = WALK_FRAME_SECONDS * WALK_REFERENCE_SPEED / self.speed
-        self.lo, self.hi = lo, max(lo, hi)
-        x = max(self.lo, min(x, self.hi))
-        self.points = [(0.0, x)]
-        if cross:
-            target = self.lo if x >= (self.lo + self.hi) / 2 else self.hi
-            self.duration = abs(target - x) / self.speed
-            self.points.append((self.duration, target))
-        else:
-            self.duration = WALK_DURATION
-            t = 0.0
-            while t < self.duration and self.hi > self.lo:
-                target = rng.uniform(self.lo, self.hi)
-                if abs(target - x) < WALK_MIN_LEG:
-                    target = self.lo if x >= (self.lo + self.hi) / 2 else self.hi
-                leg = abs(target - x) / self.speed
-                end = min(t + leg, self.duration)
-                x += (target - x) * ((end - t) / leg)
-                self.points.append((end, x))
-                t = end
+    def __init__(self):
+        self.clicks: deque[float] = deque()
+        self.begin_rub(0.0)
 
-    def sample(self, now: float) -> tuple[float, float, int, bool]:
-        elapsed = max(0.0, now - self.start)
-        finished = elapsed + 1e-9 >= self.duration
-        if finished:
-            elapsed = self.duration
-        direction = 1
-        x = self.points[-1][1]
-        for (a, xa), (b, xb) in zip(self.points, self.points[1:]):
-            direction = 1 if xb >= xa else -1
-            if elapsed <= b:
-                p = min(1.0, max(0.0, (elapsed - a) / (b - a))) if b > a else 1.0
-                x = xa + (xb - xa) * p
-                break
-        jump = 0.0 if finished else WALK_HOP_HEIGHT * abs(math.sin(math.pi * elapsed / WALK_HOP_PERIOD))
-        return max(self.lo, min(x, self.hi)), jump, direction, finished
+    def click(self, now: float) -> bool:
+        while self.clicks and now - self.clicks[0] > TICKLE_CLICK_WINDOW + 1e-9:
+            self.clicks.popleft()
+        self.clicks.append(now)
+        return len(self.clicks) >= TICKLE_CLICK_COUNT
+
+    def begin_rub(self, x: float) -> None:
+        self.extreme = x
+        self.direction = 0
+        self.reversals: deque[float] = deque()
+
+    def rub(self, x: float, now: float) -> bool:
+        delta = x - self.extreme
+        if not self.direction:
+            if abs(delta) >= RUB_DISTANCE:
+                self.direction = 1 if delta > 0 else -1
+                self.extreme = x
+        elif delta * self.direction >= 0:
+            self.extreme = x
+        elif abs(delta) >= RUB_DISTANCE:
+            self.direction *= -1
+            self.extreme = x
+            self.reversals.append(now)
+        while self.reversals and now - self.reversals[0] > RUB_WINDOW + 1e-9:
+            self.reversals.popleft()
+        return len(self.reversals) >= RUB_REVERSALS

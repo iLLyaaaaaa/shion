@@ -16,7 +16,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--at", type=float, default=0.0, help="截图用：切到该状态后第几秒的那一帧")
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
-    p.add_argument("--mirror", action="store_true", help="截图用：水平镜像，脚底锚点不变")
     p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating"], default=None,
                    help="截图用：授权、反馈、对话首页、零食列表或吃零食效果")
     p.add_argument("--panel-text", default="git status", help="截图用：同意/否决面板里显示的内容")
@@ -24,7 +23,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--panel-expand", action="store_true", help="截图用：展开长内容")
     motion = p.add_mutually_exclusive_group()
     motion.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
-    motion.add_argument("--walk", action="store_true", help="截图用：0 秒时开始行走，配合 --at 检查帧序列")
+    motion.add_argument("--turn", action="store_true", help="截图用：转一圈，配合 --at 检查八帧")
+    motion.add_argument("--face", choices=["left", "right"], help="截图用：朝向鼠标的左右侧身")
+    motion.add_argument("--cheek", choices=["left", "right", "release"], help="截图用：捏脸与松手")
+    motion.add_argument("--tickle", action="store_true", help="截图用：持续挠痒痒")
     motion.add_argument("--drag", action="store_true", help="截图用：循环拖动帧，配合 --at 检查帧序列")
     args = p.parse_args(argv)
 
@@ -35,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
                                   args.panel_more, args.panel_expand)
     if args.snapshot:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
-                            args.from_state, args.mirror, args.jump, args.walk, args.drag)
+                            args.from_state, jump=args.jump, turn=args.turn, drag=args.drag,
+                            face=args.face, cheek=args.cheek, tickle=args.tickle)
     return app.run()
 
 
