@@ -32,9 +32,13 @@ SHEETS = {
     "turn_sheet": ("turn", "first_head", False),  # 原地转一圈（侧面、背面头宽不同，只用第 1 帧正面的头宽来定比例）：正面→右前→右侧→…→左前
     "tickle_sheet": ("tickle", "height", False),   # 被挠痒痒
     "cheek_sheet": ("cheek", "height", False),   # 捏脸：1 往画面右拉、2 往画面左拉、3 松手后鼓腮生气
+    "bed_sheet": ("bed", "head", False),         # 床上睡觉（带道具）：1 吸气、2 呼气
+    "desk_sheet": ("desk", "first_head", False),       # 趴桌子发呆（带道具）：1 发呆、2 眨眼、3 叹气
 }
+# 带道具的动作比人宽，单独指定画布宽度（高度和脚底位置不变），并按整体边界居中而不是按头居中
+WIDE = {"bed_sheet": 640, "desk_sheet": 448}
 # 每张分帧图应有的帧数；切出来的帧数不对时报错，避免生成错乱的动画
-EXPECTED = {"walk_sheet": 8, "jump_sheet": 4, "drag_sheet": 4, "turn_sheet": 8, "tickle_sheet": 3, "cheek_sheet": 3}
+EXPECTED = {"walk_sheet": 8, "jump_sheet": 4, "drag_sheet": 4, "turn_sheet": 8, "tickle_sheet": 3, "cheek_sheet": 3, "bed_sheet": 2, "desk_sheet": 3}
 HEAD_TOP = 0.28     # 头部宽度测量范围：人物上部 28%（避开举起的手臂）
 MIN_FRAME_AREA = 5000  # 像素数大于这个值的连通块才算一帧
 
@@ -110,8 +114,8 @@ def main():
     idle = ps.load_clean(ps.RAW / "idle.png")
     idle_scale = ps.FIG_H / idle.height
     target_head = head_width(idle) * idle_scale
-    W, H = ps.CANVAS
     for sheet, (prefix, mode, keep_lift) in SHEETS.items():
+        W, H = (WIDE[sheet], ps.CANVAS[1]) if sheet in WIDE else ps.CANVAS
         path = ps.RAW / f"{sheet}.png"
         if not path.exists():
             print(f"跳过：没有 {path.name}")
@@ -134,9 +138,12 @@ def main():
         for i, (fig0, bottom) in enumerate(frames, 1):
             fig = fig0.resize((round(fig0.width * s), round(fig0.height * s)), Image.LANCZOS)
             lift = round((ground - bottom) * s) if keep_lift else 0
-            x = round(W / 2 - ps.head_center_x(fig))
+            if sheet in WIDE:
+                x = round((W - fig.width) / 2)
+            else:
+                x = round(W / 2 - ps.head_center_x(fig))
             y = H - ps.BOTTOM - fig.height - lift
-            canvas = Image.new("RGBA", ps.CANVAS, (0, 0, 0, 0))
+            canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
             canvas.paste(fig, (x, y), fig)
             if x < 0 or y < 0 or x + fig.width > W:
                 print(f"警告：{prefix}_{i} 超出画布（x={x}, y={y}, 尺寸={fig.size}）")
