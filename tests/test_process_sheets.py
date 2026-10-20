@@ -41,7 +41,7 @@ def test_wrong_frame_count_stops_before_writing_outputs(sheets, monkeypatch, tmp
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("group,count", [("walk", 8), ("jump", 4), ("drag", 4), ("turn", 8), ("tickle", 3), ("cheek", 3)])
+@pytest.mark.parametrize("group,count", [("walk", 8), ("jump", 4), ("drag", 4), ("turn", 8), ("tickle", 3), ("cheek", 3), ("bed", 2), ("desk", 3)])
 def test_current_raw_sheets_split_to_expected_count_and_outputs_decode(sheets, group, count):
     assert sheets.EXPECTED[f"{group}_sheet"] == count
     frames = sheets.split_frames(sheets.ps.load_clean(sheets.ps.RAW / f"{group}_sheet.png"))
@@ -49,4 +49,14 @@ def test_current_raw_sheets_split_to_expected_count_and_outputs_decode(sheets, g
     for i in range(1, count + 1):
         with Image.open(sheets.ps.OUT / f"{group}_{i}.png") as image:
             image.load()
-            assert image.size == sheets.ps.CANVAS and image.mode == "RGBA"
+            assert image.size == (sheets.WIDE.get(f"{group}_sheet", sheets.ps.CANVAS[0]), sheets.ps.CANVAS[1])
+            assert image.mode == "RGBA"
+
+
+@pytest.mark.parametrize("group,width", [("bed", 640), ("desk", 448)])
+def test_props_are_centered_as_a_whole_and_share_bottom_baseline(sheets, group, width):
+    for i in range(1, sheets.EXPECTED[group + "_sheet"] + 1):
+        with Image.open(sheets.ps.OUT / f"{group}_{i}.png") as image:
+            left, top, right, bottom = image.getbbox()
+            assert abs((left + right) / 2 - width / 2) <= 2
+            assert bottom == sheets.ps.CANVAS[1] - sheets.ps.BOTTOM

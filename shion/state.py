@@ -162,6 +162,7 @@ class SaveData:
     fixed_expression: Optional[str] = None
     activity_level: str = "normal"
     snacks: dict = field(default_factory=lambda: {"date": "", "count": 0})
+    release_to_taskbar: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -180,6 +181,7 @@ class SaveData:
             "fixed_expression": self.fixed_expression,
             "activity_level": self.activity_level,
             "snacks": dict(self.snacks),
+            "release_to_taskbar": self.release_to_taskbar,
         }
 
     @classmethod
@@ -203,6 +205,7 @@ class SaveData:
         d.bubble_muted = _bool(raw.get("bubble_muted"), False)
         d.inject_praise = _bool(raw.get("inject_praise"), True)
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
+        d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
         expr = raw.get("fixed_expression")
@@ -353,6 +356,8 @@ class PetState:
         self._last_logged: Optional[str] = None
         self.paused = False  # 用户在诗音上点了“暂停”（不存档）
         self._menu_sleep = False
+        self._resting = False
+        self._resting_auto = False
         self._eating_until: Optional[datetime] = None
         if self.save.schema_version < SAVE_VERSION:
             self.save.schema_version = SAVE_VERSION
@@ -386,6 +391,8 @@ class PetState:
             return "working"
         if self._is_asleep(now):
             return "sleep"
+        if self._resting and (not self._resting_auto or self._neglect_level(now) == 1):
+            return "desk"
         if self._idle_expression and now < self._idle_expression[1]:
             return self._idle_expression[0]
         return ("idle", "neglect1", "neglect2")[self._neglect_level(now)]
@@ -409,6 +416,7 @@ class PetState:
     def can_idle(self, now: datetime) -> bool:
         return (
             not self._dragging and not self.is_working(now)
+            and not self.paused and self.current(now) != "desk"
             and self._eating_until is None
             and not self.save.fixed_expression and not self._is_asleep(now)
             and not (self._manual and now < self._manual[1])
@@ -447,6 +455,8 @@ class PetState:
     def tick(self, now: datetime) -> list[Reaction]:
         """定时调用：清理到期的临时状态和 working，日期翻天时清零统计；返回“催你回来”等主动反应。"""
         self._roll_stats(now)
+        if self._resting_auto and self._neglect_level(now) != 1:
+            self._resting = self._resting_auto = False
         if self._eating_until is not None and now >= self._eating_until:
             self._eating_until = None
             if self.save.snacks["count"] < self.config.snack_limit:
@@ -502,6 +512,16 @@ class PetState:
             self._set_temp(expression, now)
         elif expression in ("idle", "neglect2"):
             self._temp = (expression, now + self.config.react_for)
+
+    def rest_at_desk(self, now: datetime, *, automatic: bool = False) -> None:
+        if not automatic:
+            self._touch(now, attend=True)
+            self._temp = None
+        self._resting = True
+        self._resting_auto = automatic
+
+    def sleep_in_bed(self, now: datetime) -> bool:
+        return self._menu_sleep or (self._in_night(now) and self._is_asleep(now))
 
     def drag_start(self, now: datetime) -> list[Reaction]:
         reactions = self._touch(now, attend=True)
@@ -662,6 +682,7 @@ class PetState:
         self._roll_stats(now)
         was_asleep = self._is_asleep(now)
         self._menu_sleep = False
+        self._resting = self._resting_auto = False
         prev_level = self._neglect_level(now)
 
         self._last_activity = now

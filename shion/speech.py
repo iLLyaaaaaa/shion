@@ -21,6 +21,7 @@ MEDIUM_KEYS = {
     "intro", "startup", "greeting", "wake", "neglect_return", "praise_menu",
     "feedback_sent", "feedback_bad", "resumed",
     "cheek_release", "tickle_end",
+    "bedtime", "desk_rest",
 }
 
 

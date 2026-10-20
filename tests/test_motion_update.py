@@ -92,6 +92,7 @@ def start_drag(e, *, dx=10, dy=-250):
 
 
 def test_drag_loops_through_fall_and_restores_pinned_state_on_landing(env):
+    env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     w = env.win
     env.data.fixed_expression = "proud"
     env.ctl.sync()
@@ -112,6 +113,7 @@ def test_drag_loops_through_fall_and_restores_pinned_state_on_landing(env):
 
 
 def test_vertical_drag_accelerates_and_regrab_preserves_phase(env):
+    env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     w = env.win
     initial = start_drag(env)
     env.advance(.01)

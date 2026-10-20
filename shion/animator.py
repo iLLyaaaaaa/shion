@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
+from shion.behavior import PropPlayback
 
 BREATH_STATES = {"idle", "neglect1"}
 BREATH_PERIOD = 3.0
@@ -89,6 +90,7 @@ class Animator:
         self._from_layers: tuple[tuple[str, float], ...] = ()
         self._from_pose: Frame | None = None
         self.calm = False
+        self._props = PropPlayback(self._rng)
 
     # ---- 状态 ----
     @property
@@ -102,6 +104,8 @@ class Animator:
         self._from_layers = (previous.layers or ((previous.sprite, 1.0),)) if previous else ()
         self._from_pose = previous
         self._state = name
+        if name in ("bed", "desk"):
+            self._props.reset(now)
         self._t0 = now
         self._blinks = []
         self._schedule_blink(now)
@@ -167,7 +171,7 @@ class Animator:
         return False
 
     def _layers(self, now: float) -> tuple[tuple[str, float], ...]:
-        current = {self._state: 1.0}
+        current = {self._props.sprite(self._state, now) if self._state in ("bed", "desk") else self._state: 1.0}
         if self._state == "idle":
             for start, end in self._blinks:
                 if start <= now < end + TRANSITION:
@@ -185,11 +189,13 @@ class Animator:
     # ---- 合成 ----
     def frame(self, now: float) -> Frame:
         sprite = "blink" if self._blinking(now) else self._state
+        if self._state in ("bed", "desk"):
+            sprite = self._props.sprite(self._state, now)
         sy = 1.0
         sx = 1.0
         angle = 0.0
 
-        if self._state in BREATH_STATES or self.calm:
+        if self._state not in ("bed", "desk") and (self._state in BREATH_STATES or self.calm):
             t = now - self._t0
             sy *= 1.0 + (BREATH_AMP / 2) * (1.0 - math.cos(2 * math.pi * t / BREATH_PERIOD))
 

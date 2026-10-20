@@ -125,6 +125,7 @@ def test_cheek_direction_can_reverse_without_restarting_dialogue(env):
 
 @pytest.mark.parametrize("delta", [QPoint(81, 0), QPoint(-81, 0), QPoint(0, -81)])
 def test_cheek_becomes_lift_after_80px_without_release_anger(env, delta):
+    env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     w = env.win
     w.place_default()
     gp = press(w)
@@ -238,6 +239,7 @@ def test_continued_tickle_repeats_laughter_without_restarting_frames(env):
 
 
 def test_belly_long_drag_lifts_and_cancels_laughter_without_poke(env):
+    env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     w = env.win
     w.place_default()
     gp = press(w, .69)

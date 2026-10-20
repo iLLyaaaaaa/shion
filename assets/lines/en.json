@@ -7,6 +7,8 @@
     "display_name": "Shion"
   },
   "lines": {
+    "bedtime": ["Good night… you can have a little corner of the bed.", "Shion is heading to bed. Do not stay up too late.", "Just a little nap… remember to wake me."],
+    "desk_rest": ["Resting here a bit… I am still keeping you company.", "I am thinking, obviously.", "Let me borrow the desk for a moment."],
     "cheek_pull": ["Mmph! My cheeks aren't stretchy toys!", "H-hey! I'm not a mochi!", "G-gently, you dummy..."],
     "cheek_release": ["Hmph! I'm remembering this!", "My face isn't a toy! ...Be gentler next time.", "You made my cheeks all red! Fix it!"],
     "tickle": ["Ahaha! S-stop! I'm not enjoying this!", "Hahaha... Not there, you dummy!", "Quit it, haha... I-I'll get you back!"],
@@ -88,6 +90,9 @@
     ]
   },
   "ui": {
+    "action_bed": "Go to bed",
+    "action_desk": "Rest at the desk",
+    "menu_release_to_taskbar": "Fall to the taskbar on release",
     "action_face": "Face the mouse",
     "hook_deny": "The user denied this action through Shion.",
     "permission_title": "Approve this?",

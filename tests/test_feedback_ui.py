@@ -70,7 +70,7 @@ def test_activity_menu_saves_and_checked_item_restores(env):
 def test_action_menu_dispatches_the_selected_action(env, label, kind):
     menu = env.ctl.build_menu()
     actions = find_action(menu, "动作").menu()
-    assert [a.text() for a in actions.actions()] == ["跳一跳", "转个身", "朝向鼠标"]
+    assert [a.text() for a in actions.actions()] == ["跳一跳", "转个身", "朝向鼠标", "去睡觉", "趴一会儿"]
     find_action(actions, label).trigger()
     assert env.win.motion_active
     if kind == "jump":
@@ -158,6 +158,7 @@ def move_global(w, gp):
 
 def test_real_drag_reversals_trigger_dizzy_only_after_landing(env):
     w = env.win
+    w.release_to_taskbar = True
     w.place_default()
     initial = w.mapToGlobal(BODY)
     QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)

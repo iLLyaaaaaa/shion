@@ -4,14 +4,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from shion.pet_window import STATES
+from shion.pet_window import STATES, PROP_STATES
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="shion", description="Shion 桌宠")
     p.add_argument("--snapshot", metavar="OUT.png", help="离屏渲染一帧存成 PNG 后退出")
-    p.add_argument("--state", default="idle", choices=STATES, help="截图用的精灵（默认 idle）")
-    p.add_argument("--from-state", choices=STATES, help="截图用：从这张精灵交叉淡化到 --state")
+    p.add_argument("--state", default="idle", choices=STATES + list(PROP_STATES), help="截图用的精灵（默认 idle）")
+    p.add_argument("--from-state", choices=STATES + list(PROP_STATES), help="截图用：从这张精灵交叉淡化到 --state")
     p.add_argument("--bubble", default=None, help="截图里头顶的气泡文字（--at 是打字进度，不给则显示完整）")
     p.add_argument("--at", type=float, default=0.0, help="截图用：切到该状态后第几秒的那一帧")
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")

@@ -133,7 +133,7 @@ def test_v3_migration_and_snack_validation(tmp_path):
         assert SaveData.from_dict({"snacks": value}).snacks["count"] == 0
 
 
-@pytest.mark.parametrize("ident,expected", [("headpat", "happy"), ("well_done", "proud"), ("stay_with_me", "happy"), ("goodnight", "sleep")])
+@pytest.mark.parametrize("ident,expected", [("headpat", "happy"), ("well_done", "proud"), ("stay_with_me", "happy"), ("goodnight", "bed")])
 def test_preset_changes_expression_without_rewards(env, ident, expected):
     env.ctl.choose_dialogue("talks", ident)
     assert env.win.sprite_name == expected
@@ -167,13 +167,13 @@ def test_goodnight_preserves_higher_priority_state(env, block, expected):
     env.data.fixed_expression = None
     env.state.paused = False
     env.advance(301)
-    assert env.win.sprite_name == "sleep"
+    assert env.win.sprite_name == "bed"
 
 
 def test_muted_or_high_priority_speech_keeps_menu_behaviour(env):
     env.ctl.set_muted(True)
     env.ctl.choose_dialogue("talks", "goodnight")
-    assert env.win.sprite_name == "sleep" and not env.said
+    assert env.win.sprite_name == "bed" and not env.said
     env.ctl.choose_dialogue("snacks", "cookie")
     env.advance(2)
     assert env.data.affection == 2 and not env.said
@@ -222,7 +222,7 @@ def test_menu_opens_without_keyboard_arming_and_click_enables_navigation(env, qa
     QTest.keyClick(panel, Qt.Key_0)
     assert panel.page == "talks"
     QTest.keyClick(panel, Qt.Key_3)
-    assert not panel.isVisible() and env.win.sprite_name == "sleep"
+    assert not panel.isVisible() and env.win.sprite_name == "bed"
 
 
 def test_focus_loss_disables_keyboard_until_another_click(env, qapp):
@@ -268,9 +268,9 @@ def test_opening_keeps_other_window_focus_and_typing(env, qapp):
 def test_goodnight_clears_short_reaction_and_suppresses_idle_behaviour(env):
     env.ctl.choose_dialogue("talks", "well_done")
     env.ctl.choose_dialogue("talks", "goodnight")
-    assert env.win.sprite_name == "sleep"
+    assert env.win.sprite_name == "bed"
     env.advance(30)
-    assert env.win.sprite_name == "sleep" and env.ctl._idle.next_at is None
+    assert env.win.sprite_name == "bed" and env.ctl._idle.next_at is None
 
 
 def test_mouse_selection_busy_state_and_idle_pause(env):

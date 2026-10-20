@@ -167,6 +167,7 @@ def test_drag_signals_switch_sprite_and_save_position(env):
 
 
 def test_real_mouse_drag_keeps_drag_sprite_while_falling(env):
+    env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     env.win.place_default()
     env.win.show()
     QTest.mousePress(env.win, Qt.LeftButton, Qt.NoModifier, BODY)
@@ -195,7 +196,7 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "松手后落到任务栏", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
@@ -543,12 +544,13 @@ def test_relocate_returns_to_default_when_window_is_off_all_screens(env):
     assert env.win.y() + env.win.height() - 6 == avail.bottom() + 1
 
 
-def test_relocate_resnaps_to_floor_when_taskbar_changes(env):
+def test_relocate_preserves_floating_position_when_taskbar_changes(env):
     avail = QGuiApplication.primaryScreen().availableGeometry()
     env.win.place_default()
     env.win.move(env.win.x(), env.win.y() - 80)  # 比如任务栏变矮后，窗口悬空了
+    y = env.win.y()
     env.ctl.relocate()
-    assert env.win.y() + env.win.height() - 6 == avail.bottom() + 1
+    assert env.win.y() == y
 
 
 def test_relocate_does_nothing_while_dragging_or_falling(env):

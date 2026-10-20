@@ -1,4 +1,4 @@
-"""透明置顶的桌宠窗口：显示精灵、动画、拖动、松手重力下落。
+"""透明置顶的桌宠窗口：显示精灵、动画、拖动、原地停放或重力下落。
 
 窗口画布比精灵大一圈（留边），这样倾斜、晃动时不会被裁掉。
 脚底中心固定在画布底边的中点，所有变换都以它为锚点。
@@ -28,6 +28,7 @@ from shion.behavior import (
     TURN_FRAME_SECONDS, FACE_SECONDS, CHEEK_RELEASE_SECONDS, CHEEK_LIFT_DISTANCE,
     TICKLE_STOP_SECONDS, TICKLE_FRAME_SECONDS, TICKLE_TWIST_DEGREES,
     TICKLE_TWIST_PERIOD, TICKLE_SPEECH_SECONDS, BELLY_LIFT_DISTANCE, TICKLE_MOVE_DISTANCE,
+    ReleaseVelocity, RELEASE_FAST_SPEED,
 )
 
 SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
@@ -35,8 +36,9 @@ STATES = [
     "idle", "blink", "happy", "proud", "stop", "dizzy",
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
 ]
-SEQUENCE_GROUPS = ("jump", "drag", "turn", "tickle", "cheek")
-EXACT_SEQUENCES = {"turn": 8, "tickle": 3, "cheek": 3}
+PROP_STATES = ("bed", "desk")
+SEQUENCE_GROUPS = ("jump", "drag", "turn", "tickle", "cheek", "bed", "desk")
+EXACT_SEQUENCES = {"turn": 8, "tickle": 3, "cheek": 3, "bed": 2, "desk": 3}
 
 DEFAULT_HEIGHT = 200
 # 依据 idle 448×512 画布测量；不包含窗口留边，各尺寸使用相同比例。
@@ -120,6 +122,8 @@ class PetWindow(QWidget):
         self._press_global: QPoint | None = None
         self._grab_offset = QPoint()
         self._dragging = False
+        self.release_to_taskbar = False
+        self._release_velocity = ReleaseVelocity()
         self._last_drag_pos = QPoint()
         self._drag_playback: DragPlayback | None = None
         self._falling = False
@@ -204,6 +208,17 @@ class PetWindow(QWidget):
         r = QRect(*avail)
         nx, ny = landing_geometry(r, self.width(), self.height(), x, MARGIN_X, MARGIN_BOTTOM)
         self.move(nx, ny)
+
+    def clamp_position(self, avail: QRect | None = None) -> None:
+        """只把精灵本体夹回屏内，保留悬空的纵向位置。"""
+        avail = avail if avail is not None else self._screen_avail(self.geometry().center())
+        x, floor = landing_geometry(avail, self.width(), self.height(), self.x(), MARGIN_X, MARGIN_BOTTOM)
+        self.move(x, max(avail.top() - MARGIN_TOP, min(self.y(), floor)))
+
+    @property
+    def is_floating(self) -> bool:
+        avail = self._screen_avail(self.geometry().center())
+        return self.y() + self.height() - MARGIN_BOTTOM < avail.bottom() + 1
 
     def head_anchor(self) -> QPoint:
         """头顶中心（全局坐标），给爱心和提示定位。"""
@@ -291,6 +306,7 @@ class PetWindow(QWidget):
             if name == "idle":
                 canvas = src.size()
                 self._sw = round(self._pixmaps[name].width() / dpr)
+                self.normal_width = self._sw
                 self._sh = round(self._pixmaps[name].height() / dpr)
         for group in SEQUENCE_GROUPS:
             numbered = sorted((int(match[1]), path.stem)
@@ -303,7 +319,9 @@ class PetWindow(QWidget):
             names = tuple(name for _, name in numbered)
             sources = [QPixmap(str(SPRITE_DIR / f"{name}.png")) for name in names]
             # 可选帧必须整组齐全且同画布；缺图或坏图沿用原来的程序动画。
-            if any(src.isNull() or src.size() != canvas for src in sources):
+            expected_canvas = sources[0].size()
+            if (any(src.isNull() or src.size() != expected_canvas for src in sources)
+                    or expected_canvas.height() != canvas.height()):
                 continue
             for name, src in zip(names, sources):
                 cache(name, src)
@@ -314,7 +332,7 @@ class PetWindow(QWidget):
         return self._sw, self._sh
 
     def set_state(self, name: str, *, animate: bool = True) -> None:
-        if name not in STATES:
+        if name not in STATES and name not in PROP_STATES:
             raise ValueError(f"未知精灵：{name}")
         now = self._clock()
         self._animator.set_state(name, now, immediate=not animate)
@@ -341,26 +359,31 @@ class PetWindow(QWidget):
         p.rotate(f.angle)
         p.scale(f.sx, f.sy)
         pixmaps = self._pixmaps
-        target = QRectF(-self._sw / 2, -self._sh, self._sw, self._sh)
         layers = f.layers or ((f.sprite, 1.0),)
+        dpr = pixmaps[f.sprite].devicePixelRatio()
+        pixel_width = max(pixmaps[name].width() for name, _ in layers)
+        pixel_height = max(pixmaps[name].height() for name, _ in layers)
+        target = QRectF(-pixel_width / dpr / 2, -pixel_height / dpr, pixel_width / dpr, pixel_height / dpr)
         if all(weight == 1.0 for _, weight in layers):
             for name, _ in layers:
                 pix = pixmaps[name]
-                p.drawPixmap(target, pix, QRectF(pix.rect()))
+                r = QRectF(-pix.width() / dpr / 2, -pix.height() / dpr, pix.width() / dpr, pix.height() / dpr)
+                p.drawPixmap(r, pix, QRectF(pix.rect()))
         else:
             # 在预乘 RGBA 上加权，避免 SourceOver 使重叠身体闪透。
             # numpy 是项目现有依赖；整数权重总和固定，保持不透明像素 alpha=255。
             pix = pixmaps[f.sprite]
-            accum = np.zeros((pix.height(), pix.width() * 4), dtype=np.uint32)
+            accum = np.zeros((pixel_height, pixel_width, 4), dtype=np.uint32)
             remaining = 65536
             for index, (name, weight) in enumerate(layers):
                 iw = remaining if index == len(layers) - 1 else min(remaining, round(weight * 65536))
                 remaining -= iw
                 src = pixmaps[name].toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
-                pixels = np.frombuffer(src.constBits(), dtype=np.uint8).reshape(src.height(), src.bytesPerLine())
-                accum += pixels.astype(np.uint32) * iw
+                pixels = np.frombuffer(src.constBits(), dtype=np.uint8).reshape(src.height(), src.bytesPerLine() // 4, 4)[:, :src.width()]
+                left = (pixel_width - src.width()) // 2
+                accum[pixel_height-src.height():, left:left+src.width()] += pixels.astype(np.uint32) * iw
             pixels = ((accum + 32768) >> 16).astype(np.uint8)
-            mix = QImage(pixels.data, pix.width(), pix.height(), pix.width() * 4, QImage.Format_ARGB32_Premultiplied).copy()
+            mix = QImage(pixels.data, pixel_width, pixel_height, pixel_width * 4, QImage.Format_ARGB32_Premultiplied).copy()
             mix.setDevicePixelRatio(pix.devicePixelRatio())
             p.drawImage(target, mix, QRectF(mix.rect()))
         p.restore()
@@ -416,6 +439,13 @@ class PetWindow(QWidget):
 
     def _refresh(self, now: float) -> None:
         f = self._animator.frame(now)
+        def available(name):
+            if name.startswith("bed_") and "bed" not in self._sequences:
+                return "sleep"
+            if name.startswith("desk_") and "desk" not in self._sequences:
+                return "neglect1"
+            return name
+        f = replace(f, sprite=available(f.sprite), layers=tuple((available(n), w) for n, w in f.layers))
         if self._jump_start is not None and self._jump_framed:
             elapsed = max(0.0, now - self._jump_start)
             _, progress, sy = jump_sample(elapsed)
@@ -436,6 +466,25 @@ class PetWindow(QWidget):
             f = Frame(self._pose)
         elif self._turn_start is not None:
             f = Frame(self._sequence_sprite("turn", now - self._turn_start, TURN_FRAME_SECONDS))
+        # 淡化的所有图按各自原宽绘制；切换画布只移动左边缘，脚底中心不动。
+        names = [name for name, _ in f.layers] or [f.sprite]
+        if self.sprite_name in self._pixmaps:
+            names.append(self.sprite_name)
+        if self.sprite_name in PROP_STATES and self.sprite_name in self._sequences:
+            names.append(self._sequences[self.sprite_name][0])
+        width = max(round(self._pixmaps[n].width() / self._pixmaps[n].devicePixelRatio()) for n in names)
+        if width != self._sw:
+            feet_x = self.x() + self.width() / 2
+            old_pos = self.pos()
+            self._sw = width
+            self.setFixedSize(width + 2 * MARGIN_X, self.height())
+            self.move(round(feet_x - self.width() / 2), self.y())
+            self._mask_cache.clear()
+            self._mask_key = None
+            self.clamp_position()
+            if self._press_global is not None:
+                self._grab_offset += old_pos - self.pos()
+            self.moved.emit()  # 即使夹边后左上角相同，气泡也要重新定位
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
         f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
         if (f == self._frame and self._mask_key is not None
@@ -537,6 +586,8 @@ class PetWindow(QWidget):
         self._caught_fall = self._falling
         self._stop_fall()
         self._press_global = e.globalPosition().toPoint()
+        self._release_velocity = ReleaseVelocity()
+        self._release_velocity.feed(self._clock(), self._press_global.x(), self._press_global.y())
         self._grab_offset = self._press_global - self.pos()
         self._dragging = False
         self._moved = False
@@ -563,6 +614,7 @@ class PetWindow(QWidget):
             self._update_hover_cursor(e.position().toPoint())
             return
         gp = e.globalPosition().toPoint()
+        self._release_velocity.feed(self._clock(), gp.x(), gp.y())
         if not self._moved:
             d = gp - self._press_global
             if math.hypot(d.x(), d.y()) <= DRAG_THRESHOLD:
@@ -669,10 +721,18 @@ class PetWindow(QWidget):
         self._caught_fall = False
         self._animator.set_drag(False, self._clock())
         self._update_hover_cursor(e.position().toPoint())
-        if was_dragging:
-            self.start_fall()
-        elif caught:
-            self.start_fall()  # 抓住下落中的桌宠又松开：继续落
+        if was_dragging or caught:
+            gp = e.globalPosition().toPoint()
+            speed = self._release_velocity.speed(now, gp.x(), gp.y())
+            if self.release_to_taskbar or speed >= RELEASE_FAST_SPEED:
+                self.start_fall()
+            else:
+                self.clamp_position()
+                self._drag_playback = None
+                self._drag_active = False
+                self.drag_finished.emit()
+                self._animator.squash(now, "click")
+                self._refresh(now)
         elif was_cheek:
             self._pose = self._gesture_sprite("cheek", 3, "stop")
             self._pose_until = now + CHEEK_RELEASE_SECONDS

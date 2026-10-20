@@ -10,13 +10,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QTimer, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
-from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior
+from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior, NEGLECT_DESK_CHANCE
 from shion.effects import HeartOverlay, CrumbOverlay, MOUTH_FRACTION
 from shion.dialogue import DialoguePanel
 from shion.menu_content import MenuContent, localized
@@ -101,6 +101,8 @@ class PetController(QObject):
         self._rng = random.Random()
         self._idle = IdleBehavior()
         self._menu_open = False
+        self._neglect_checked = False
+        window.release_to_taskbar = state.save.release_to_taskbar
         self.activity = ActivityLog()
         self._last_activity_say: Optional[tuple[str, datetime]] = None
 
@@ -141,14 +143,23 @@ class PetController(QObject):
         """把状态机当前应显示的精灵同步给窗口（只在变化时切换，不打断呼吸相位）。"""
         now = self._now()
         cur = self.state.current(now)
+        if cur == "neglect1" and not self._neglect_checked:
+            self._neglect_checked = True
+            if self._rng.random() < NEGLECT_DESK_CHANCE:
+                self.state.rest_at_desk(now, automatic=True)
+                cur = self.state.current(now)
+        elif cur not in ("neglect1", "desk"):
+            self._neglect_checked = False
         calm = (
             self.state.is_working(now) or bool(self.state.save.fixed_expression)
-            or cur == "sleep" or self.state.save.activity_level == "quiet"
+            or cur in ("sleep", "desk") or self.state.save.activity_level == "quiet"
         )
         self.window.set_calm(calm)
         self.window.set_paused_badge(self.state.paused and self._held_seen)
         if calm and self.window.idle_motion_active:
             self.window.stop_motion()
+        if cur == "sleep" and self.state.sleep_in_bed(now):
+            cur = "bed"
         if cur != self.window.sprite_name:
             self.window.set_state(cur)
 
@@ -301,7 +312,8 @@ class PetController(QObject):
 
     # ------------------------------------------------------------ 存档 / 位置
     def save_position(self) -> None:
-        self.state.save.window["x"] = self.window.x()
+        # 存成普通画布的左边缘，重启/宽画布切换后脚底中心仍一致。
+        self.state.save.window["x"] = round(self.window.x() + (self.window.sprite_size[0] - self.window.normal_width) / 2)
         self.state.save.window["y"] = self.window.y()
         self.scheduler.mark_dirty(self._now())
 
@@ -313,7 +325,7 @@ class PetController(QObject):
         return out
 
     def restore_position(self) -> None:
-        """按存档恢复位置：放回原来那块屏、脚底贴它的底边；找不到就用默认右下角。"""
+        """按存档恢复原屏和悬空位置；旧档无 y 时贴底，原屏移除时回默认右下角。"""
         save = self.state.save.window
         x, y = save.get("x"), save.get("y")
         if isinstance(x, int):
@@ -322,7 +334,12 @@ class PetController(QObject):
                 self.window.width(), self.window.height(),
             )
             if rect is not None:
-                self.window.place_on(rect, x)
+                x = round(x - (self.window.sprite_size[0] - self.window.normal_width) / 2)
+                if isinstance(y, int):
+                    self.window.move(x, y)
+                    self.window.clamp_position(QRect(*rect))
+                else:
+                    self.window.place_on(rect, x)
                 return
         self.window.place_default()
 
@@ -341,20 +358,20 @@ class PetController(QObject):
         self.relocate()
 
     def relocate(self, *_args) -> None:
-        """窗口跑出所有屏幕就回默认位置，否则重新贴底。拖动/下落中不动。"""
+        """窗口跑出所有屏幕就回默认位置，否则只夹边。拖动/下落中不动。"""
         if self.window.is_dragging or self.window.is_falling:
             return
         self.window.stop_motion()
         x, y, w, h = self.window.body_rect()
         cx, cy = x + w // 2, y + h // 2
         if any(rx <= cx < rx + rw and ry <= cy < ry + rh for rx, ry, rw, rh in self._screen_rects()):
-            self.window.snap_to_floor()
+            self.window.clamp_position()
         else:
             self.window.place_default()
 
     def set_size(self, height: int) -> None:
         self.window.set_height(height)
-        self.window.snap_to_floor()
+        self.window.clamp_position()
         self.state.save.window["height"] = height
         self.save_position()
         self.sync()
@@ -403,6 +420,7 @@ class PetController(QObject):
         self.sync()
 
     def do_action(self, name: str) -> None:
+        self.window.stop_motion()
         self.react(self.state.interact(self._now()))
         self._idle.next_at = None
         if name == "jump":
@@ -411,7 +429,18 @@ class PetController(QObject):
             self.window.turn()
         elif name == "face":
             self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1)
+        elif name == "bed":
+            self.state.menu_talk(self._now(), sleep=True)
+            self.say_key("bedtime", category="dialogue")
+        elif name == "desk":
+            self.state.rest_at_desk(self._now())
+            self.say_key("desk_rest", category="dialogue")
         self.sync()
+
+    def set_release_to_taskbar(self, on: bool) -> None:
+        self.state.save.release_to_taskbar = on
+        self.window.release_to_taskbar = on
+        self.scheduler.mark_dirty(self._now())
 
     # ------------------------------------------------------------ 来自 Claude 的事件
     def handle_event(self, etype: str, detail: Optional[str] = None, meta: Optional[dict] = None) -> None:
@@ -827,7 +856,7 @@ class PetController(QObject):
             act.triggered.connect(lambda _=False, lv=level: self.set_activity(lv))
 
         action_menu = menu.addMenu(ui("menu_action"))
-        for name in ("jump", "turn", "face"):
+        for name in ("jump", "turn", "face", "bed", "desk"):
             action_menu.addAction(ui("action_" + name)).triggered.connect(lambda _=False, n=name: self.do_action(n))
 
         size_menu = menu.addMenu(ui("menu_size"))
@@ -840,6 +869,11 @@ class PetController(QObject):
             act.setChecked(h == cur)
             group.addAction(act)
             act.triggered.connect(lambda _=False, h=h: self.set_size(h))
+
+        release = menu.addAction(ui("menu_release_to_taskbar"))
+        release.setCheckable(True)
+        release.setChecked(self.state.save.release_to_taskbar)
+        release.triggered.connect(self.set_release_to_taskbar)
 
         mute = menu.addAction(ui("menu_mute"))
         mute.setCheckable(True)

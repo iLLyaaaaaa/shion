@@ -437,6 +437,7 @@ def test_tilt_while_dragging_then_resets_after_release(fwin):
 
 
 def test_catching_a_falling_pet_and_letting_go_resumes_fall(fwin):
+    fwin.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     r = Rec(fwin)
     avail = QGuiApplication.primaryScreen().availableGeometry()
     fwin.move(avail.left() + 50, avail.top())

@@ -46,6 +46,71 @@ DRAG_FRAME_SECONDS = 0.110
 DRAG_MIN_FRAME_SECONDS = 0.060
 DRAG_FAST_SPEED = 800.0
 DRAG_RATE_TAU = 0.08
+RELEASE_FAST_SPEED = 450.0  # px/s，达到此速度视为甩出
+RELEASE_SAMPLE_SECONDS = 0.12
+BED_FRAME_SECONDS = 0.9
+DESK_BLINK_INTERVAL = (3.0, 6.0)
+DESK_BLINK_SECONDS = 0.15
+DESK_SIGH_INTERVAL = (10.0, 20.0)
+DESK_SIGH_SECONDS = 1.2
+NEGLECT_DESK_CHANCE = 0.35
+
+
+class ReleaseVelocity:
+    """取松手前一小段鼠标轨迹；停手后速度归零，不沿用最后一次移动速度。"""
+
+    def __init__(self):
+        self.samples = deque()
+
+    def feed(self, now: float, x: float, y: float) -> None:
+        if self.samples and now == self.samples[-1][0]:
+            self.samples[-1] = (now, x, y)
+        else:
+            self.samples.append((now, x, y))
+        while len(self.samples) > 2 and self.samples[1][0] <= now - RELEASE_SAMPLE_SECONDS:
+            self.samples.popleft()
+
+    def speed(self, now: float, x: float, y: float) -> float:
+        self.feed(now, x, y)
+        start, sx, sy = self.samples[0]
+        cutoff = now - RELEASE_SAMPLE_SECONDS
+        if len(self.samples) > 1 and start < cutoff:
+            end, ex, ey = self.samples[1]
+            p = min(1.0, (cutoff - start) / max(1e-9, end - start))
+            sx, sy = sx + (ex - sx) * p, sy + (ey - sy) * p
+            start = cutoff
+        return math.hypot(x - sx, y - sy) / (now - start) if now > start else 0.0
+
+
+class PropPlayback:
+    """床和桌子的独立时间线；按预定时刻推进，掉帧不会延长眨眼或叹气。"""
+
+    def __init__(self, rng=None):
+        self.rng = rng or random.Random()
+        self.start = 0.0
+        self.blink = self.sigh = math.inf
+        self.active = ("desk_1", -math.inf)
+
+    def reset(self, now: float) -> None:
+        self.start = now
+        self.blink = now + self.rng.uniform(*DESK_BLINK_INTERVAL)
+        self.sigh = now + self.rng.uniform(*DESK_SIGH_INTERVAL)
+        self.active = ("desk_1", now)
+
+    def sprite(self, state: str, now: float) -> str:
+        if state == "bed":
+            return f"bed_{int(max(0, now - self.start) / BED_FRAME_SECONDS + 1e-9) % 2 + 1}"
+        while min(self.blink, self.sigh) <= now:
+            if self.sigh <= self.blink:
+                at = self.sigh
+                self.active = ("desk_3", at + DESK_SIGH_SECONDS)
+                self.sigh = at + self.rng.uniform(*DESK_SIGH_INTERVAL)
+                self.blink = max(self.blink, self.active[1])
+            else:
+                at = self.blink
+                self.active = ("desk_2", at + DESK_BLINK_SECONDS)
+                self.blink = at + self.rng.uniform(*DESK_BLINK_INTERVAL)
+        return self.active[0] if now < self.active[1] else "desk_1"
 
 
 def jump_sample(elapsed: float) -> tuple[float, float, float]:
