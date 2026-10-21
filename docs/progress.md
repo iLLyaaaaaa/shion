@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-21 待机“活着感”**：仅代码实现 idle / neglect1 的 2.5% 呼吸、working 的 0.8% 轻呼吸、idle ±1.5° 慢摇摆和 0.6 秒随机换重心；动作/状态互斥、独立随机时间线和有界 LRU 轮廓缓存。全量 **1210 passed、3 skipped、2 warnings（366.42 秒）**；原生 Windows 150% 专项 **17 passed**，离屏 150% / 200% 专项通过，`--snapshot` 已自查。动态观感、真实桌面点穿和高分屏表现 **待用户验收**。用户已确认方案，授权记录待验收后本地 commit，不 push。
 - **2026-10-21 问题 A、C 与授权面板及时收起**：诗音结束的这一轮（立即中断 / 停下拿到 stop / 停太久）紧接着的 Stop 不再算完成；Notification `idle_prompt` 清掉该会话的工作中；工作中点“做得好/有问题”改说“马上转告”；用户在 CC 里自己答了授权后，诗音面板马上收起。B 不修、改预期；桌面端 statusMessage 不显示记为已知限制。用户已验收的桌面端项已打勾。全量 **1172 passed、2 skipped、2 warnings（335 秒；跳过项和 Pillow 警告同前）**。没开嵌套 CC、没重装 hooks（事件列表没变）。本地 commit，不 push。
 - **2026-10-21 终端版 CC 自动验收**：嵌套终端版 CC（haiku）+ 隔离端口/数据目录的测试诗音，逐项跑完终端版待验收项，自动通过的已打勾并标“CC 自动验收”，详见同名一节。发现 3 个问题（中断后又说任务完成、授权框和诗音面板同时显示、Esc 取消工具后一直工作中），只报告未修；锁屏导致焦点项不能完全证明。用户级 `~/.claude/settings.json` 的 model 被 `/model haiku` 改成 haiku，原值未知，待用户决定。测试后 `PYTHONUTF8=1`、offscreen 全量 **1132 passed、2 skipped、2 warnings**（日志 `.venv/preview-run/cc-auto/pytest.log`；本轮在 CC 内运行，进程链用例不再跳过）。只改了本文件，不 push。
 - **2026-10-21 称呼中性化**：仅调整三语台词、对话/零食与好感配置中的用户称呼，共 49 处；独立呼语直接省略，其余按语境使用“你 / you / あなた”，保持原有语气和内容。spec 已明确诗音不使用性别化称呼。指定资源中的三种旧称呼均检索为 0；代码、测试、JSON 结构及数值未改。`PYTHONUTF8=1`、`QT_QPA_PLATFORM=offscreen`，`.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/neutral-address-full` → **1131 passed、3 skipped、2 warnings**（314.98 秒；跳过项和既有 Pillow 警告同上一轮），`git diff --check` 通过，日志在已忽略的 `.venv/preview-run/neutral-address-full.log`。此前动态验收清单继续保留。本轮按用户要求本地 commit，不 push。
@@ -26,6 +27,28 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-21：待机“活着感”（待用户验收）
+- **范围**：用户确认方案后实现；只改程序、测试和规格/进度，无新增素材、依赖，不改 hooks、台词、存档格式或既有待机转身/小跳调度。截图、日志和测试临时文件均在已忽略的 `.venv/preview-run/idle-life/`，不提交。
+- **做了什么**：
+  - `animator.py`：idle / neglect1 呼吸改为 sy=1.000～1.025、3 秒；working 独立使用 sy=1.000～1.008、4 秒，即使没有 controller 的 calm 也生效。其他 calm 表情保留原来的轻呼吸，道具帧保持原样。
+  - 仅 idle（含眨眼）增加脚底中心 ±1.5°、4.5 秒正弦摇摆，恢复后 0.3 秒平滑进入。随机换重心普通每 8～15 秒、活泼每 5～10 秒，持续 0.6 秒：2% 下蹲 + 0.6% 轻回弹，或随机左右歪 3°；歪身平滑接管慢摇摆，不叠成 4.5°。
+  - 新增姿态在拖动、下落、按住鼠标、跳跃（含缺图回退）、转身、侧身、捏脸/挠痒、道具、非 idle、calm、固定表情和安静档期间取消，恢复重新等待、不补播。微动作使用独立随机流，按真实时间计算，不改变状态、好感或交互/睡眠计时。
+  - `pet_window.py`：保留画面细粒度动画与脚底锚点，mask 使用 1° / 0.01 缩放量化与 4px 扩边，64 项 LRU 逐项淘汰，避免满后整批清空；量化和绘制精度也集中成常量。
+  - `--snapshot`：新增 `--weight-shift crouch|left|right`、`--height 160|200|260|320`、`--activity quiet|normal|lively`，确定性查看新姿态；未打开原始素材。
+- **测试**：新增 `tests/test_idle_life.py` 39 项，覆盖轻呼吸、摇摆边界与平滑进入、微动作曲线/峰值/频率、禁用和重排、掉帧一致性、动作互斥、四档大小的扩大画布检查、所有非透明像素的 mask 覆盖、透明角点、锚点/位置稳定、缓存复用/逐项淘汰和截图入口。另更新原有呼吸断言；原先使用 working 当静止基准的下落/跳跃像素测试改用 neglect2，工作状态的跳跃恢复测试改验实际工作呼吸。
+- **验证**：
+  - 针对调整后的跳跃/下落及全部新增测试 **74 passed**（35.93 秒）；此前专项其余用例通过。
+  - 离屏 `QT_SCALE_FACTOR=1.5` 的新增测试 + 帧序列测试 **73 passed**（44.71 秒）；`QT_SCALE_FACTOR=2` 的几何/缓存/截图专项 **8 passed**（17.61 秒）。原生 Windows `DPR=1.5` 的几何/动作互斥/活跃度/缓存专项 **17 passed**（19.36 秒）。均使用仓库 `.venv\Scripts\python` 和项目内 `--basetemp`。
+  - 原生 Windows 150%、320 大小、固定随机种子 42，模拟推进 60 秒 / 3600 帧（含眨眼与随机微动作），mask 只重建 **32 次**、最终缓存 33 项（上限 64）；推进过程约 0.172 秒。仅衡量时间线/遮罩开销，没有显示窗口/实际呈现，不作为桌面 FPS 或实际占用验收。
+  - `PYTHONUTF8=1`、`QT_QPA_PLATFORM=offscreen`，`.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/idle-life/final-tmp` → **1210 passed、3 skipped、2 warnings（366.42 秒）**。跳过：对话/暂停标签两项 offscreen 非激活显示，及一项需在 CC 内运行的进程链测试；警告为既有 Pillow `getdata` 弃用。日志 `final.log`；`git diff --check` 通过。首次全量仅发现旧 working 静止像素断言，修正后反馈 UI 模块 **20 passed**，再完整重跑得到上述结果。
+  - `--snapshot` 已生成呼吸峰值、working、左右慢摇摆、下蹲/回弹、左右歪身、安静档和四档大小截图；已查看生成的对照图，无明显裁切或错位。静态截图及自动检查不能证明真实桌面动态感和点穿。
+- **踩坑**：默认系统 `pytest-of-<user>` 临时目录访问受限，改用项目内已忽略的 `--basetemp`；未改权限。working 新增呼吸后，旧“恢复后 sy=1 / 像素完全相同”断言不再适用，按新曲线验证恢复，不削弱位移/落地检查。
+- **待用户验收**（先重启诗音）：
+  - [ ] 普通 idle 呼吸和慢摇摆自然，偶尔下蹲回弹或左右换重心；活泼更频繁，安静无摇摆/换重心
+  - [ ] working 只有轻呼吸；neglect1 呼吸更明显；固定表情、睡觉、趴桌、拖动、跳跃、转身/侧身、捏脸/挠痒不叠新待机姿态；恢复无补播或突跳
+  - [ ] 160 / 200 / 260 / 320 与高分屏下无裁切、脚底/窗口抖动，动态轮廓与透明区点穿正常；帧率和占用可接受
+- **下一步**：用户真机验收上述项目及之前保留的清单；不 push。
 
 ## 2026-10-21：问题 A、C 与授权面板及时收起
 - **官方文档查证**（code.claude.com/docs/en/hooks）：Notification 的类型字段是 `notification_type`，`idle_prompt` 是 CC 回复完约 60 秒用户没输入时触发；`PermissionDenied` **只在 auto 模式触发**，手动否决授权框时不触发，所以没接；PermissionRequest 输入没有 `tool_use_id`，只能按工具名 + 参数和 PostToolUse 配对；取消正在运行的工具不触发 PostToolUseFailure（C 的根因）。

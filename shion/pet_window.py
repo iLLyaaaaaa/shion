@@ -9,6 +9,7 @@ import math
 import os
 import re
 import time
+from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -53,6 +54,10 @@ MARGIN_TOP = round(JUMP_HEIGHT) + 8  # 给原地跳留出空间
 MARGIN_BOTTOM = 6  # 倾斜时一只脚会往下沉，留出空间不被裁掉
 MASK_GROW = 4  # 遮罩向外扩的像素，吸收角度/缩放量化的误差
 MASK_CACHE_MAX = 64
+MASK_ANGLE_STEP = 1.0
+MASK_SCALE_STEP = 0.01
+DRAW_SCALE_DIGITS = 3
+DRAW_ANGLE_DIGITS = 2
 PAT_DISTANCE = 40  # px，摸头累计移动多少算一次
 DRAG_THRESHOLD = 6  # px，超过才算拖动
 GRAVITY = 2400.0  # px/s²
@@ -115,7 +120,7 @@ class PetWindow(QWidget):
 
         self._animator = Animator()
         self._frame = Frame("idle")
-        self._mask_cache: dict[tuple, QRegion] = {}
+        self._mask_cache: OrderedDict[tuple, QRegion] = OrderedDict()
         self._mask_key: tuple | None = None
 
         # 拖动 / 下落
@@ -411,7 +416,9 @@ class PetWindow(QWidget):
     def _mask_for(self, f: Frame) -> QRegion:
         """遮罩 = 当前画出的不透明像素向外扩 MASK_GROW px。只有遮罩里的地方响应鼠标。"""
         names = tuple(sorted(name for name, weight in f.layers or ((f.sprite, 1.0),) if weight > 0))
-        key = (names, round(f.angle), round(f.sx, 2), round(f.sy, 2), round(self._jump_offset))
+        key = (names, round(f.angle / MASK_ANGLE_STEP) * MASK_ANGLE_STEP,
+               round(f.sx / MASK_SCALE_STEP) * MASK_SCALE_STEP,
+               round(f.sy / MASK_SCALE_STEP) * MASK_SCALE_STEP, round(self._jump_offset))
         if key == self._mask_key:
             return self._mask_cache[key]
         region = self._mask_cache.get(key)
@@ -434,12 +441,15 @@ class PetWindow(QWidget):
                 region |= base.translated(dx, dy)
             region &= QRegion(self.rect())
             if len(self._mask_cache) >= MASK_CACHE_MAX:
-                self._mask_cache.clear()
+                self._mask_cache.popitem(last=False)
             self._mask_cache[key] = region
+        self._mask_cache.move_to_end(key)
         self._mask_key = key
         return region
 
     def _refresh(self, now: float) -> None:
+        self._animator.idle_enabled = not (self.motion_active or self._dragging or self._falling
+                                          or self.is_pressed or self._drag_playback is not None)
         f = self._animator.frame(now)
         def available(name):
             if name.startswith("bed_") and "bed" not in self._sequences:
@@ -488,7 +498,8 @@ class PetWindow(QWidget):
                 self._grab_offset += old_pos - self.pos()
             self.moved.emit()  # 即使夹边后左上角相同，气泡也要重新定位
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
-        f = replace(f, sx=round(f.sx, 3), sy=round(f.sy, 3), angle=round(f.angle, 2))
+        f = replace(f, sx=round(f.sx, DRAW_SCALE_DIGITS), sy=round(f.sy, DRAW_SCALE_DIGITS),
+                    angle=round(f.angle, DRAW_ANGLE_DIGITS))
         if (f == self._frame and self._mask_key is not None
                 and self._mask_key[4] == round(self._jump_offset)):
             return
@@ -785,6 +796,9 @@ class PetWindow(QWidget):
 
     def set_calm(self, calm: bool) -> None:
         self._animator.calm = calm
+
+    def set_activity(self, level: str) -> None:
+        self._animator.activity_level = level
 
     @property
     def motion_active(self) -> bool:

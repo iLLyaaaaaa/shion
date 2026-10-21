@@ -1,4 +1,5 @@
 """帧序列、缺图回退、脚底锚点及遮罩的集成测试。"""
+import math
 import shutil
 
 import numpy as np
@@ -7,7 +8,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 
-from shion.animator import SQUASH
+from shion.animator import SQUASH, WORKING_BREATH_AMP, WORKING_BREATH_PERIOD
 from shion.behavior import (
     JUMP_AIR_DURATION, JUMP_CROUCH_DURATION, JUMP_DURATION, JUMP_HEIGHT,
     JUMP_RISE_DURATION, JUMP_HOLD_DURATION, JUMP_FALL_DURATION,
@@ -21,11 +22,14 @@ SEQUENCES = {group: tuple(f"{group}_{i}" for i in range(1, count + 1))
              for group, count in (("turn", 8), ("jump", 4), ("drag", 4), ("cheek", 3), ("tickle", 3))}
 
 
+def working_breath(elapsed):
+    return 1 + WORKING_BREATH_AMP / 2 * (1 - math.cos(2 * math.pi * elapsed / WORKING_BREATH_PERIOD))
+
+
 @pytest.mark.parametrize("automatic", [False, True])
 def test_jump_four_stages_45px_then_lands_with_squash_and_rebound(env, automatic):
     w = env.win
     w.set_state("working", animate=False)
-    original = pixels(w)
     pos = w.pos()
     w.jump(automatic=automatic)
     assert w.displayed_sprite == "jump_1" and w._jump_offset == 0
@@ -45,11 +49,13 @@ def test_jump_four_stages_45px_then_lands_with_squash_and_rebound(env, automatic
         assert w.pos() == pos
     land = SQUASH["jump_land"][0]
     w.advance_to(100 + JUMP_DURATION + land * 0.3)
-    assert w.frame.sy == pytest.approx(SQUASH["jump_land"][1], abs=0.001)
+    assert w.frame.sy == pytest.approx(SQUASH["jump_land"][1] * working_breath(JUMP_DURATION + land * .3), abs=0.001)
     w.advance_to(100 + JUMP_DURATION + land * 0.8)
     assert w.frame.sy > 1
     w.advance_to(100 + JUMP_DURATION + land + 0.01)
-    assert not w.motion_active and np.array_equal(pixels(w), original)
+    assert not w.motion_active and w.displayed_sprite == "working"
+    assert w.frame.sy == pytest.approx(working_breath(JUMP_DURATION + land + .01), abs=.001)
+    assert w.frame.sx == 1 and w.frame.angle == 0
 
 
 @pytest.mark.parametrize("action,elapsed", [("turn", 0.47), ("jump", 0.35), ("jump", 0.625), ("jump", 1.0)])
@@ -151,7 +157,8 @@ def test_mouse_press_interrupts_jump_without_a_delayed_landing(env):
     QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)
     assert not w.motion_active and w._jump_offset == 0 and w.displayed_sprite == "working"
     env.advance(1)
-    assert w.frame.sy == 1 and w.displayed_sprite == "working"
+    assert w.frame.sy == pytest.approx(working_breath(JUMP_CROUCH_DURATION + JUMP_AIR_DURATION / 2 + 1), abs=.001)
+    assert w.displayed_sprite == "working"
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
 
 

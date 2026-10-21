@@ -164,6 +164,7 @@ class PetController(QObject):
             or cur in ("sleep", "desk") or self.state.save.activity_level == "quiet"
         )
         self.window.set_calm(calm)
+        self.window.set_activity(self.state.save.activity_level)
         self.window.set_paused_badge(self.state.paused and self._held_seen,
                                      text=self.lines.ui("pause_label"), tooltip=self.lines.ui("pause_label_hint"),
                                      fallback=self.lines.font_fallback)

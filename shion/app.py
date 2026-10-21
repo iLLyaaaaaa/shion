@@ -161,6 +161,9 @@ def snapshot(
     cheek: str | None = None,
     tickle: bool = False,
     badge: bool = False,
+    height: int = 200,
+    activity: str = "normal",
+    weight_shift: str | None = None,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -172,7 +175,9 @@ def snapshot(
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
     app = QApplication.instance() or QApplication(sys.argv)
     t = [100.0]  # 假时钟，不用真的等
-    win = PetWindow(clock=lambda: t[0], autostart=False, debug=False)
+    win = PetWindow(height=height, clock=lambda: t[0], autostart=False, debug=False)
+    win.set_activity(activity)
+    win.set_calm(activity == "quiet")
     win.set_state(from_state or state, animate=False)
     if from_state:
         win.set_state(state)
@@ -196,6 +201,9 @@ def snapshot(
         from shion.behavior import DragPlayback
         win.set_state("drag", animate=False)
         win._drag_playback = DragPlayback(t[0])
+    elif weight_shift:
+        win._animator._idle_life.active = (t[0], "crouch" if weight_shift == "crouch" else "lean",
+                                          -1 if weight_shift == "left" else 1)
     t[0] += at
     win.advance_to(t[0])
     img = win.render_frame()

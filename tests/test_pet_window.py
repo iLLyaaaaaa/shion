@@ -139,7 +139,7 @@ def test_fall_distance_and_landing_do_not_depend_on_frame_count(qapp):
     windows = [PetWindow(clock=lambda: 100.0, autostart=False) for _ in range(2)]
     try:
         for w in windows:
-            w.set_state("working", animate=False)  # 排除 idle 呼吸，单独检查下落
+            w.set_state("neglect2", animate=False)  # 无呼吸，单独检查下落
             w.move(100, 0)
             w.start_fall()
         for i in range(1, 13):
@@ -202,7 +202,7 @@ def test_anchor_idle_breath_does_not_float(fwin):
 def test_breath_actually_changes_frame(fwin):
     fwin.set_state("neglect1")
     at(fwin, 1.5)
-    assert fwin.frame.sy == pytest.approx(1.012, abs=1e-3)
+    assert fwin.frame.sy == pytest.approx(1.025, abs=1e-3)
 
 
 def test_anchor_squash_keeps_feet_in_place(fwin):

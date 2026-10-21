@@ -1,4 +1,5 @@
 """animator 纯逻辑测试：不依赖 Qt，时间全部手动给。"""
+import math
 import random
 
 import pytest
@@ -17,16 +18,16 @@ def test_breath_bounds_and_period():
     a = make("idle")
     sys_ = [a.frame(t / 100).sy for t in range(0, 301)]
     assert min(sys_) == pytest.approx(1.0, abs=1e-6)
-    assert max(sys_) == pytest.approx(1.012, abs=1e-4)
+    assert max(sys_) == pytest.approx(1.025, abs=1e-4)
     # 周期 3 秒：t 和 t+3 相同
     assert a.frame(0.7).sy == pytest.approx(a.frame(3.7).sy, abs=1e-9)
     # 半周期最大
-    assert a.frame(1.5).sy == pytest.approx(1.012, abs=1e-6)
+    assert a.frame(1.5).sy == pytest.approx(1.025, abs=1e-6)
 
 
 def test_breath_also_in_neglect1_but_not_elsewhere():
-    assert make("neglect1").frame(1.5).sy == pytest.approx(1.012, abs=1e-6)
-    for st in ["happy", "dizzy", "working", "sleep", "neglect2", "drag", "stop"]:
+    assert make("neglect1").frame(1.5).sy == pytest.approx(1.025, abs=1e-6)
+    for st in ["happy", "dizzy", "sleep", "neglect2", "drag", "stop"]:
         assert make(st).frame(1.5).sy == 1.0, st
 
 
@@ -127,7 +128,7 @@ def test_sway_limits():
     h = make("happy")
     angles = [h.frame(t / 100).angle for t in range(0, 300)]
     assert max(angles) == pytest.approx(2.5, abs=0.01)
-    assert make("idle").frame(0.5).angle == 0.0
+    assert make("idle").frame(0.5).angle == pytest.approx(A.IDLE_SWAY_AMP * math.sin(2 * math.pi * 0.5 / A.IDLE_SWAY_PERIOD))
 
 
 def run_tilt(a, vx, seconds, t0=0.0, fps=60):
@@ -167,7 +168,7 @@ def test_tilt_is_smooth_and_returns_to_zero_after_release():
 
 
 def test_velocity_ignored_when_not_dragging():
-    a = make("idle")
+    a = make("neglect2")
     a.feed_velocity(1000, 0.1)
     assert a.frame(0.2).angle == 0.0
 
@@ -220,7 +221,10 @@ def test_calm_mode_keeps_breath_without_sway(name):
     a = make(name)
     a.calm = True
     assert a.frame(1.5).angle == 0
-    assert a.frame(1.5).sy == pytest.approx(1.012)
+    expected = 1.025 if name == "idle" else 1.012
+    if name == "working":
+        expected = 1 + A.WORKING_BREATH_AMP / 2 * (1 - math.cos(2 * math.pi * 1.5 / A.WORKING_BREATH_PERIOD))
+    assert a.frame(1.5).sy == pytest.approx(expected)
 
 
 def test_animation_result_does_not_depend_on_dropped_frames():

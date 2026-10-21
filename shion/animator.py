@@ -12,7 +12,20 @@ from shion.behavior import PropPlayback
 
 BREATH_STATES = {"idle", "neglect1"}
 BREATH_PERIOD = 3.0
-BREATH_AMP = 0.012  # sy 在 1.000 ~ 1.012 之间
+BREATH_AMP = 0.025  # sy 在 1.000 ~ 1.025 之间
+WORKING_BREATH_AMP = 0.008
+WORKING_BREATH_PERIOD = 4.0
+CALM_BREATH_AMP = 0.012  # 其余固定表情沿用原来的轻呼吸
+
+IDLE_SWAY_AMP = 1.5
+IDLE_SWAY_PERIOD = 4.5
+IDLE_SWAY_FADE = 0.3
+WEIGHT_INTERVALS = {"normal": (8.0, 15.0), "lively": (5.0, 10.0)}
+WEIGHT_DURATION = 0.6
+WEIGHT_ANGLE = 3.0
+WEIGHT_CROUCH = 0.02
+WEIGHT_REBOUND = 0.006
+WEIGHT_CROUCH_PORTION = 0.65
 
 BLINK_MIN, BLINK_MAX = 3.0, 6.0
 BLINK_DURATION = 0.120
@@ -70,6 +83,51 @@ def squash_scale(kind: str, elapsed: float) -> float:
     return 1.0 + 0.3 * depth * math.sin(math.pi * q)
 
 
+class IdleLife:
+    """独立的待机姿态时间线；不改变状态/交互计时，错过的微动作不补播。"""
+
+    def __init__(self, rng: random.Random):
+        self.rng = rng
+        self.context = None
+        self.start = 0.0
+        self.next_at = math.inf
+        self.active = (-math.inf, "crouch", 1)
+
+    def configure(self, now: float, enabled: bool, level: str) -> None:
+        context = (enabled, level)
+        if context == self.context:
+            return
+        self.context = context
+        self.start = now
+        self.active = (-math.inf, "crouch", 1)
+        self.next_at = (now + self.rng.uniform(*WEIGHT_INTERVALS[level])
+                        if enabled and level in WEIGHT_INTERVALS else math.inf)
+
+    def sample(self, now: float) -> tuple[float, float]:
+        if not self.context or not self.context[0]:
+            return 1.0, 0.0
+        elapsed = max(0.0, now - self.start)
+        fade = math.sin(min(1.0, elapsed / IDLE_SWAY_FADE) * math.pi / 2) ** 2
+        angle = IDLE_SWAY_AMP * math.sin(2 * math.pi * elapsed / IDLE_SWAY_PERIOD) * fade
+        while self.next_at <= now:
+            at = self.next_at
+            self.active = (at, self.rng.choice(("crouch", "lean")), self.rng.choice((-1, 1)))
+            self.next_at = at + self.rng.uniform(*WEIGHT_INTERVALS[self.context[1]])
+        at, kind, side = self.active
+        p = (now - at) / WEIGHT_DURATION
+        if not 0 < p < 1:
+            return 1.0, angle
+        pulse = math.sin(math.pi * p) ** 2
+        if kind == "lean":
+            # 接管慢摇摆，峰值严格为 ±3°，两端位置和速度连续。
+            return 1.0, angle * (1 - pulse) + side * WEIGHT_ANGLE * pulse
+        if p < WEIGHT_CROUCH_PORTION:
+            sy = 1 - WEIGHT_CROUCH * math.sin(math.pi * p / WEIGHT_CROUCH_PORTION) ** 2
+        else:
+            sy = 1 + WEIGHT_REBOUND * math.sin(math.pi * (p - WEIGHT_CROUCH_PORTION) / (1 - WEIGHT_CROUCH_PORTION)) ** 2
+        return sy, angle
+
+
 class Animator:
     def __init__(self, rng: random.Random | None = None):
         self._rng = rng or random.Random()
@@ -91,6 +149,12 @@ class Animator:
         self._from_pose: Frame | None = None
         self.calm = False
         self._props = PropPlayback(self._rng)
+        # 随机流独立，微动作不改变眨眼/道具的随机时间线。
+        life_rng = random.Random()
+        life_rng.setstate(self._rng.getstate())
+        self._idle_life = IdleLife(life_rng)
+        self.idle_enabled = True
+        self.activity_level = "normal"
 
     # ---- 状态 ----
     @property
@@ -114,6 +178,12 @@ class Animator:
         elif immediate:
             self._squash_kind = None
         self._initialized = True
+        self._configure_idle(now)
+
+    def _configure_idle(self, now: float) -> None:
+        self._idle_life.configure(now, self._state == "idle" and not self.calm
+                                  and not self._dragging and self.idle_enabled
+                                  and self.activity_level != "quiet", self.activity_level)
 
     def _schedule_blink(self, now: float) -> None:
         self._next_blink = now + self._rng.uniform(BLINK_MIN, BLINK_MAX)
@@ -195,9 +265,19 @@ class Animator:
         sx = 1.0
         angle = 0.0
 
-        if self._state not in ("bed", "desk") and (self._state in BREATH_STATES or self.calm):
+        if self._state not in ("bed", "desk") and (self._state in BREATH_STATES or self._state == "working" or self.calm):
             t = now - self._t0
-            sy *= 1.0 + (BREATH_AMP / 2) * (1.0 - math.cos(2 * math.pi * t / BREATH_PERIOD))
+            amp = BREATH_AMP if self._state in BREATH_STATES else CALM_BREATH_AMP
+            period = BREATH_PERIOD
+            if self._state == "working":
+                amp, period = WORKING_BREATH_AMP, WORKING_BREATH_PERIOD
+            sy *= 1.0 + (amp / 2) * (1.0 - math.cos(2 * math.pi * t / period))
+
+        self._configure_idle(now)
+        life_sy, life_angle = self._idle_life.sample(now)
+        sy *= life_sy
+        sx /= math.sqrt(life_sy)
+        angle += life_angle
 
         if self._state in SWAY and not self.calm:
             amp, period = SWAY[self._state]
