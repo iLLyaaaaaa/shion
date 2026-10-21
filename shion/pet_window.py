@@ -111,6 +111,7 @@ class PetWindow(QWidget):
 
         self._clock = clock
         self._fps_overlay = None
+        self._sleep_z = None
         self._pause_badge = None  # 暂停文字标签，第一次要显示时才建
         self._height = height
         self._pixmaps: dict[str, QPixmap] = {}
@@ -238,6 +239,8 @@ class PetWindow(QWidget):
 
     def moveEvent(self, e) -> None:
         super().moveEvent(e)
+        if self._sleep_z is not None:
+            self._sleep_z.follow()
         self.moved.emit()
 
     # ---- 停下标记 ----
@@ -258,12 +261,15 @@ class PetWindow(QWidget):
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
+        self._refresh(self._clock())
         if self._fps_overlay is not None:
             self._fps_overlay.resume()
         if self._pause_badge is not None:
             self._pause_badge.refresh()
 
     def hideEvent(self, e) -> None:
+        if self._sleep_z is not None:
+            self._sleep_z.stop()
         if self._fps_overlay is not None:
             self._fps_overlay.pause()
         if self._pause_badge is not None:
@@ -272,6 +278,8 @@ class PetWindow(QWidget):
 
     def closeEvent(self, e) -> None:
         self._timer.stop()
+        if self._sleep_z is not None:
+            self._sleep_z.stop()
         if self._fps_overlay is not None:
             self._fps_overlay.pause()
         if self._pause_badge is not None:
@@ -486,6 +494,7 @@ class PetWindow(QWidget):
         # 量化到肉眼分辨不出的精度：呼吸这类缓慢变化不必每帧重绘
         f = replace(f, sx=round(f.sx, DRAW_SCALE_DIGITS), sy=round(f.sy, DRAW_SCALE_DIGITS),
                     angle=round(f.angle, DRAW_ANGLE_DIGITS))
+        self._sync_sleep_z(now, f)
         if (f == self._frame and self._mask_key is not None
                 and self._mask_key[4] == round(self._jump_offset)):
             return
@@ -499,6 +508,20 @@ class PetWindow(QWidget):
             self._fps_overlay.follow()
         if self._pause_badge is not None:
             self._pause_badge.follow()
+
+    def _sync_sleep_z(self, now: float, frame: Frame) -> None:
+        state = ("bed" if frame.sprite.startswith("bed_") else "sleep" if frame.sprite == "sleep" else None)
+        if (self.sprite_name not in ("sleep", "bed") or self.motion_active
+                or self._dragging or self._falling or self.is_pressed):
+            state = None
+        if self._sleep_z is None:
+            if state is None:
+                return
+            from shion.effects import SleepZOverlay
+            from shion.windowing import set_topmost
+            self._sleep_z = SleepZOverlay(self, SPRITE_DIR / "fx_z.png")
+            set_topmost(self._sleep_z, bool(self.windowFlags() & Qt.WindowStaysOnTopHint))
+        self._sleep_z.advance(now, state)
 
     def _action_frame(self, now: float, f: Frame) -> Frame:
         """只取动作帧；不推进时间线，供结束时采样预定的最后一帧。"""

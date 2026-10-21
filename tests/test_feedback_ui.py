@@ -135,7 +135,7 @@ def pixmap_pixels(pix):
 
 def test_jump_does_not_clip_changes_mask_and_returns_to_same_feet(env):
     w = env.win
-    w.set_state("neglect2", animate=False)  # 静止基准，working 现在有轻呼吸。
+    w.set_state("done", animate=False)  # 静止基准，working 有轻呼吸，neglect2 有慢摇。
     original = pixels(w)
     w.jump()
     env.mono[0] += JUMP_DURATION / 2

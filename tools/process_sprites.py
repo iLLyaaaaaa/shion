@@ -28,6 +28,19 @@ SCALE_FROM_STANDING = ["sleep", "drag", "neglect2"]
 EXTRA_SCALE = {"neglect2": 0.82, "sleep": 1.06}  # 目测微调：让头的大小和 idle 一致
 
 
+def largest_component(img: Image.Image, rank: int = 0) -> Image.Image:
+    """按清理后的 alpha 连通面积排序；0 为人物，sleep 的 1 为最大的 Z。"""
+    a = np.array(img)
+    labels, count = nd.label(a[..., 3] > 0)
+    if count <= rank:
+        raise ValueError(f"需要第 {rank + 1} 个连通块，实际只有 {count} 个")
+    areas = np.bincount(labels.ravel())[1:]
+    chosen = sorted(range(count), key=lambda i: (-areas[i], i))[rank] + 1
+    a[labels != chosen] = 0
+    result = Image.fromarray(a)
+    return result.crop(result.getbbox())
+
+
 def load_clean(path: Path) -> Image.Image:
     a = np.array(Image.open(path).convert("RGBA"))
     al = a[..., 3]
@@ -63,8 +76,16 @@ def head_center_x(img: Image.Image) -> float:
     return float((top.sum(0) * xs).sum() / top.sum())
 
 
-def main():
+def main(only: list[str] | None = None):
     imgs = {p.stem: load_clean(p) for p in RAW.glob("*.png") if not p.stem.endswith("_sheet")}  # *_sheet 由 process_sheets.py 处理
+    selected = set(imgs) if only is None else set(only)
+    unknown = selected - imgs.keys()
+    if unknown:
+        raise ValueError(f"没有原图：{sorted(unknown)}")
+    if "sleep" in selected:
+        save_retry(largest_component(imgs["sleep"], rank=1), OUT / "fx_z.png")
+    if "sleep" in imgs:
+        imgs["sleep"] = largest_component(imgs["sleep"])
     base = FIG_H / imgs["idle"].height
     scales = {}
     for n in STANDING:
@@ -78,6 +99,8 @@ def main():
             scales[n] = base * avg
     W, H = CANVAS
     for n, img in imgs.items():
+        if n not in selected:
+            continue
         s = scales.get(n, base) * EXTRA_SCALE.get(n, 1.0)
         fig = img.resize((round(img.width * s), round(img.height * s)), Image.LANCZOS)
         cx = head_center_x(fig)
@@ -92,4 +115,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", nargs="+", help="只生成指定状态，如 --only sleep（同时导出 fx_z）")
+    main(parser.parse_args().only)

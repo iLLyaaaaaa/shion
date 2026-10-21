@@ -49,8 +49,10 @@ DRAG_RATE_TAU = 0.08
 RELEASE_FAST_SPEED = 450.0  # px/s，达到此速度视为甩出
 RELEASE_SAMPLE_SECONDS = 0.12
 BED_FRAME_SECONDS = 0.9
-DESK_BLINK_INTERVAL = (3.0, 6.0)
+DESK_BLINK_INTERVAL = (1.5, 3.5)
 DESK_BLINK_SECONDS = 0.15
+DESK_DOUBLE_BLINK_CHANCE = 0.20
+DESK_DOUBLE_BLINK_GAP = 0.25  # 第一次闭眼结束到第二次开始
 DESK_SIGH_INTERVAL = (10.0, 20.0)
 DESK_SIGH_SECONDS = 1.2
 NEGLECT_DESK_CHANCE = 0.35
@@ -90,27 +92,36 @@ class PropPlayback:
         self.start = 0.0
         self.blink = self.sigh = math.inf
         self.active = ("desk_1", -math.inf)
+        self.second_blink = math.inf
 
     def reset(self, now: float) -> None:
         self.start = now
         self.blink = now + self.rng.uniform(*DESK_BLINK_INTERVAL)
         self.sigh = now + self.rng.uniform(*DESK_SIGH_INTERVAL)
         self.active = ("desk_1", now)
+        self.second_blink = math.inf
 
     def sprite(self, state: str, now: float) -> str:
         if state == "bed":
             return f"bed_{int(max(0, now - self.start) / BED_FRAME_SECONDS + 1e-9) % 2 + 1}"
-        while min(self.blink, self.sigh) <= now:
-            if self.sigh <= self.blink:
+        while min(self.blink, self.sigh, self.second_blink) <= now:
+            if self.sigh <= min(self.blink, self.second_blink):
                 at = self.sigh
                 self.active = ("desk_3", at + DESK_SIGH_SECONDS)
                 self.sigh = at + self.rng.uniform(*DESK_SIGH_INTERVAL)
                 self.blink = max(self.blink, self.active[1])
+                self.second_blink = math.inf
+            elif self.second_blink <= self.blink:
+                at = self.second_blink
+                self.active = ("desk_2", at + DESK_BLINK_SECONDS)
+                self.second_blink = math.inf
             else:
                 at = self.blink
                 self.active = ("desk_2", at + DESK_BLINK_SECONDS)
                 self.blink = at + self.rng.uniform(*DESK_BLINK_INTERVAL)
-        return self.active[0] if now < self.active[1] else "desk_1"
+                if self.rng.random() < DESK_DOUBLE_BLINK_CHANCE:
+                    self.second_blink = at + DESK_BLINK_SECONDS + DESK_DOUBLE_BLINK_GAP
+        return self.active[0] if now + 1e-9 < self.active[1] else "desk_1"
 
 
 def jump_sample(elapsed: float) -> tuple[float, float, float]:

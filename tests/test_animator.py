@@ -168,7 +168,7 @@ def test_tilt_is_smooth_and_returns_to_zero_after_release():
 
 
 def test_velocity_ignored_when_not_dragging():
-    a = make("neglect2")
+    a = make("done")
     a.feed_velocity(1000, 0.1)
     assert a.frame(0.2).angle == 0.0
 

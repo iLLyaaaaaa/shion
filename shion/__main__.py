@@ -33,6 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     motion.add_argument("--tickle", action="store_true", help="截图用：持续挠痒痒")
     motion.add_argument("--drag", action="store_true", help="截图用：循环拖动帧，配合 --at 检查帧序列")
     motion.add_argument("--weight-shift", choices=["crouch", "left", "right"], help="截图用：0 秒触发换重心，配合 --at 0～0.6")
+    motion.add_argument("--nod", action="store_true", help="截图用：working 在 0 秒点头，配合 --at 0～0.4")
+    motion.add_argument("--desk-blink", choices=["single", "double"], help="截图用：desk 在 0 秒眨眼")
     args = p.parse_args(argv)
 
     from shion import app
@@ -44,7 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
                             args.from_state, jump=args.jump, turn=args.turn, drag=args.drag,
                             face=args.face, cheek=args.cheek, tickle=args.tickle, badge=args.badge,
-                            height=args.height, activity=args.activity, weight_shift=args.weight_shift)
+                            height=args.height, activity=args.activity, weight_shift=args.weight_shift,
+                            nod=args.nod, desk_blink=args.desk_blink)
     return app.run()
 
 

@@ -110,11 +110,13 @@ def head_width(img: Image.Image) -> int:
     return int(top.sum(1).max())
 
 
-def main():
+def main(only: list[str] | None = None):
     idle = ps.load_clean(ps.RAW / "idle.png")
     idle_scale = ps.FIG_H / idle.height
     target_head = head_width(idle) * idle_scale
     for sheet, (prefix, mode, keep_lift) in SHEETS.items():
+        if only is not None and prefix not in only:
+            continue
         W, H = (WIDE[sheet], ps.CANVAS[1]) if sheet in WIDE else ps.CANVAS
         path = ps.RAW / f"{sheet}.png"
         if not path.exists():
@@ -122,6 +124,8 @@ def main():
             continue
         full = ps.load_clean(path)  # 已裁到整体边界
         frames = split_frames(full)
+        if prefix == "bed":
+            frames = [(ps.largest_component(frame), bottom) for frame, bottom in frames]
         want = EXPECTED.get(sheet)
         if want and len(frames) != want:
             raise SystemExit(f"{sheet}.png 切出了 {len(frames)} 帧，应该是 {want} 帧，请检查原图")
@@ -152,4 +156,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", nargs="+", choices=[p for p, _, _ in SHEETS.values()],
+                        help="只生成指定动作，如 --only bed")
+    main(parser.parse_args().only)

@@ -15,6 +15,12 @@ BREATH_PERIOD = 3.0
 BREATH_AMP = 0.025  # sy 在 1.000 ~ 1.025 之间
 WORKING_BREATH_AMP = 0.008
 WORKING_BREATH_PERIOD = 4.0
+WORKING_NOD_INTERVAL = (3.0, 5.0)
+WORKING_NOD_DURATION = 0.4
+WORKING_NOD_COMPRESSION = 0.015
+WORKING_NOD_ANGLE = 1.0
+NEGLECT_SWAY_AMP = 1.2
+NEGLECT_SWAY_PERIOD = 3.5
 CALM_BREATH_AMP = 0.012  # 其余固定表情沿用原来的轻呼吸
 
 IDLE_SWAY_AMP = 1.5
@@ -153,6 +159,12 @@ class Animator:
         life_rng = random.Random()
         life_rng.setstate(self._rng.getstate())
         self._idle_life = IdleLife(life_rng)
+        nod_rng = random.Random()
+        nod_rng.setstate(self._rng.getstate())
+        self._nod_rng = nod_rng
+        self._nod_enabled = False
+        self._next_nod = math.inf
+        self._nod_at = -math.inf
         self.idle_enabled = True
         self.activity_level = "normal"
 
@@ -178,7 +190,11 @@ class Animator:
         elif immediate:
             self._squash_kind = None
         self._initialized = True
+        self._nod_enabled = False
+        self._next_nod = math.inf
+        self._nod_at = -math.inf
         self._configure_idle(now)
+        self._configure_nod(now)
 
     def _configure_idle(self, now: float) -> None:
         self._idle_life.configure(now, self._state == "idle" and not self.calm
@@ -187,6 +203,22 @@ class Animator:
 
     def _schedule_blink(self, now: float) -> None:
         self._next_blink = now + self._rng.uniform(BLINK_MIN, BLINK_MAX)
+
+    def _configure_nod(self, now: float) -> None:
+        # working 在控制器中本来就设 calm；轻点头仍保留，动作层/按住/拖动时取消。
+        enabled = self._state == "working" and self.idle_enabled and not self._dragging
+        if enabled != self._nod_enabled:
+            self._nod_enabled = enabled
+            self._nod_at = -math.inf
+            self._next_nod = now + self._nod_rng.uniform(*WORKING_NOD_INTERVAL) if enabled else math.inf
+
+    def _nod_sample(self, now: float) -> float:
+        self._configure_nod(now)
+        while self._next_nod <= now:
+            self._nod_at = self._next_nod
+            self._next_nod += self._nod_rng.uniform(*WORKING_NOD_INTERVAL)
+        p = (now - self._nod_at) / WORKING_NOD_DURATION
+        return math.sin(math.pi * p) ** 2 if self._nod_enabled and 0 < p < 1 else 0.0
 
     # ---- 压扁 ----
     def squash(self, now: float, kind: str) -> None:
@@ -278,6 +310,14 @@ class Animator:
         sy *= life_sy
         sx /= math.sqrt(life_sy)
         angle += life_angle
+
+        nod = self._nod_sample(now)
+        sy *= 1 - WORKING_NOD_COMPRESSION * nod
+        angle += WORKING_NOD_ANGLE * nod
+
+        if (self._state == "neglect2" and not self.calm and not self._dragging
+                and self.idle_enabled and self.activity_level != "quiet"):
+            angle += NEGLECT_SWAY_AMP * math.sin(math.tau * (now - self._t0) / NEGLECT_SWAY_PERIOD)
 
         if self._state in SWAY and not self.calm:
             amp, period = SWAY[self._state]

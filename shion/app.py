@@ -166,6 +166,8 @@ def snapshot(
     height: int = 200,
     activity: str = "normal",
     weight_shift: str | None = None,
+    nod: bool = False,
+    desk_blink: str | None = None,
 ) -> int:
     """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
 
@@ -207,9 +209,30 @@ def snapshot(
     elif weight_shift:
         win._animator._idle_life.active = (t[0], "crouch" if weight_shift == "crouch" else "lean",
                                           -1 if weight_shift == "left" else 1)
+    elif nod:
+        win._animator._nod_at = t[0]
+    elif desk_blink:
+        from shion.behavior import DESK_BLINK_SECONDS, DESK_DOUBLE_BLINK_GAP
+        props = win._animator._props
+        props.active = ("desk_2", t[0] + DESK_BLINK_SECONDS)
+        props.blink = props.sigh = float("inf")
+        props.second_blink = t[0] + DESK_BLINK_SECONDS + DESK_DOUBLE_BLINK_GAP if desk_blink == "double" else float("inf")
+    # 截图重建睡眠的发射时刻；正式运行掉帧时仍不补发历史粒子。
+    if win._sleep_z is not None and win._sleep_z.particles.sleeping:
+        from shion.effects import Z_INTERVAL
+        index = 1
+        while index * Z_INTERVAL < at:
+            win._sleep_z.advance(t[0] + index * Z_INTERVAL, win._sleep_z.state)
+            index += 1
     t[0] += at
     win.advance_to(t[0])
     img = win.render_frame()
+    if win._sleep_z is not None:
+        from shion.effects import sleep_z_anchor
+        from PySide6.QtCore import QPointF
+        painter = QPainter(img)
+        win._sleep_z.draw(painter, QPointF(win.mapFromGlobal(sleep_z_anchor(win, win._sleep_z.state))))
+        painter.end()
     if badge:  # 暂停文字标签：与真实窗口一样相对精灵本体定位
         from shion.badge import badge_geometry, label_font, render_badge
         sw, sh = win.sprite_size
@@ -251,6 +274,7 @@ def snapshot(
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)
         return 1
+    win.close()
     print(f"saved {out} ({img.width()}x{img.height()})")
     del app
     return 0

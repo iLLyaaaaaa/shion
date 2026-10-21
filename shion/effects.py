@@ -5,10 +5,11 @@ import random
 import time
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPoint, QPointF, QTimer, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath
+from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
 from shion.animator import ease_out
@@ -24,6 +25,140 @@ HEART_DRIFT = 15.0
 HEART_SCALE = (0.8, 1.2)
 ORANGE = QColor("#F58236")
 MOUTH_FRACTION = 0.45
+
+# Z 的距离/尺寸均以本体高 200 逻辑像素为基准，所有四档大小同比缩放。
+Z_BASE_HEIGHT = 200.0
+Z_INTERVAL = 0.9
+Z_MAX_PARTICLES = 3
+Z_LIFETIME = 2.4
+Z_DRIFT = 40.0  # 向右上总路程
+Z_SCALE = (0.5, 1.0)
+Z_SWING_DEGREES = 8.0
+Z_SWING_PERIOD = 1.2
+Z_FADE_START = 2 / 3
+Z_WAKE_FADE = 0.15
+Z_SIZE = 24.0
+Z_OVERLAY_SIZE = 128.0
+Z_ORIGIN = (32.0, 96.0)
+Z_ANCHORS = {"sleep": (0.88, 0.23), "bed": (0.70, 0.18)}
+Z_CANVAS_ASPECT = {"sleep": 448 / 512, "bed": 640 / 512}
+
+
+class SleepZParticles:
+    """睡眠粒子独立时间线；掉帧不补发，唤醒时从当前透明度立即淡出。"""
+
+    def __init__(self):
+        self.born: list[float] = []
+        self.sleeping = False
+        self.last_spawn = -math.inf
+        self.wake_at = math.inf
+
+    def clear(self) -> None:
+        self.__init__()
+
+    def update(self, now: float, sleeping: bool) -> None:
+        if sleeping and not self.sleeping:
+            self.born.clear()  # 不让上次起床尚未消失的 Z 重新变亮
+            self.last_spawn = -math.inf
+            self.wake_at = math.inf
+        elif not sleeping and self.sleeping:
+            self.wake_at = now
+        self.sleeping = sleeping
+        self.born = [born for born in self.born if now - born < Z_LIFETIME]
+        if now - self.wake_at >= Z_WAKE_FADE - 1e-9:
+            self.born.clear()
+        if (sleeping and now - self.last_spawn >= Z_INTERVAL - 1e-9
+                and len(self.born) < Z_MAX_PARTICLES):
+            self.born.append(now)
+            self.last_spawn = now
+
+    def items(self, now: float) -> list[tuple[float, float, float, float, float]]:
+        result = []
+        wake_alpha = max(0.0, min(1.0, 1 - (now - self.wake_at) / Z_WAKE_FADE))
+        for born in self.born:
+            age = now - born
+            p = age / Z_LIFETIME
+            if not 0 <= p < 1:
+                continue
+            # 匀速让相邻发射保持间距，避免末端减速时三枚 Z 堆在一起。
+            distance = Z_DRIFT * p / math.sqrt(2)
+            scale = Z_SCALE[0] + (Z_SCALE[1] - Z_SCALE[0]) * p
+            angle = Z_SWING_DEGREES * math.sin(math.tau * age / Z_SWING_PERIOD)
+            alpha = min(1.0, (1 - p) / (1 - Z_FADE_START)) * wake_alpha
+            if alpha > 0:
+                result.append((distance, -distance, scale, angle, alpha))
+        return result
+
+
+def sleep_z_anchor(pet, state: str) -> QPoint:
+    x, y = Z_ANCHORS[state]
+    height = pet.sprite_height
+    # 按各自素材画布宽计算，淡化收窄时仍以脚底中心为准。
+    return pet.mapToGlobal(QPoint(round(pet.width() / 2 + (x - .5) * height * Z_CANVAS_ASPECT[state]),
+                                 round(pet.body_rect()[1] - pet.y() + y * height)))
+
+
+class SleepZOverlay(QWidget):
+    """由桌宠帧时钟驱动的 Z 窗口；完全点穿，不加入身体 mask。"""
+
+    def __init__(self, pet, sprite_path: Path):
+        super().__init__(pet)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowTransparentForInput
+                            | Qt.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.pet = pet
+        self.particles = SleepZParticles()
+        self.image = QImage(str(sprite_path))
+        self.state = "sleep"
+        self.scale = 1.0
+        self.now = 0.0
+
+    def follow(self) -> None:
+        self.scale = self.pet.sprite_height / Z_BASE_HEIGHT
+        size = math.ceil(Z_OVERLAY_SIZE * self.scale)
+        self.setFixedSize(size, size)
+        anchor = sleep_z_anchor(self.pet, self.state)
+        self.move(anchor.x() - round(Z_ORIGIN[0] * self.scale),
+                  anchor.y() - round(Z_ORIGIN[1] * self.scale))
+
+    def advance(self, now: float, state: str | None) -> None:
+        if state is not None:
+            if state != self.state:
+                self.particles.clear()
+            self.state = state
+        self.now = now
+        self.particles.update(now, state is not None)
+        self.follow()
+        self.setVisible(self.pet.isVisible() and bool(self.particles.items(now)) and not self.image.isNull())
+        self.update()
+
+    def draw(self, painter: QPainter, origin: QPointF) -> None:
+        if self.image.isNull():
+            return
+        painter.save()
+        painter.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+        painter.translate(origin)
+        painter.scale(self.scale, self.scale)
+        for x, y, scale, angle, alpha in self.particles.items(self.now):
+            painter.save()
+            painter.translate(x, y)
+            painter.rotate(angle)
+            painter.setOpacity(alpha)
+            width = Z_SIZE * scale
+            height = width * self.image.height() / self.image.width()
+            painter.drawImage(QRectF(-width / 2, -height / 2, width, height), self.image)
+            painter.restore()
+        painter.restore()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        self.draw(painter, QPointF(Z_ORIGIN[0] * self.scale, Z_ORIGIN[1] * self.scale))
+        painter.end()
+
+    def stop(self) -> None:
+        self.particles.clear()
+        self.hide()
 
 
 @dataclass

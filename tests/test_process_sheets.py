@@ -60,3 +60,37 @@ def test_props_are_centered_as_a_whole_and_share_bottom_baseline(sheets, group, 
             left, top, right, bottom = image.getbbox()
             assert abs((left + right) / 2 - width / 2) <= 2
             assert bottom == sheets.ps.CANVAS[1] - sheets.ps.BOTTOM
+
+
+def test_largest_component_and_z_use_area_not_position_or_bbox(sheets):
+    a = np.zeros((100, 120, 4), dtype=np.uint8)
+    a[50:90, 0:40] = (20, 30, 40, 255)
+    a[0:10, 90:100] = (50, 60, 70, 255)
+    a[20:25, 60:65] = (80, 90, 100, 255)
+    # 细长块边界很大，面积仍小于最大的 Z。
+    a[5:85, 110:111] = 255
+    image = Image.fromarray(a)
+    assert sheets.ps.largest_component(image).size == (40, 40)
+    z = sheets.ps.largest_component(image, rank=1)
+    assert z.size == (10, 10) and z.getpixel((0, 0)) == (50, 60, 70, 255)
+    with pytest.raises(ValueError):
+        sheets.ps.largest_component(Image.new("RGBA", (10, 10)))
+
+
+def test_selective_sleep_and_bed_generation_only_writes_requested_outputs(sheets, monkeypatch, tmp_path):
+    monkeypatch.setattr(sheets.ps, "OUT", tmp_path)
+    sentinel = tmp_path / "idle.png"
+    sentinel.write_bytes(b"must not change")
+    sheets.ps.main(["sleep"])
+    sheets.main(["bed"])
+    assert {p.name for p in tmp_path.iterdir()} == {"idle.png", "sleep.png", "fx_z.png", "bed_1.png", "bed_2.png"}
+    assert sentinel.read_bytes() == b"must not change"
+    # 同原图像素清理后的第二大连通块逐像素一致。
+    expected = sheets.ps.largest_component(sheets.ps.load_clean(sheets.ps.RAW / "sleep.png"), rank=1)
+    assert np.array_equal(np.array(expected), np.array(Image.open(tmp_path / "fx_z.png")))
+    for name in ("sleep", "bed_1", "bed_2"):
+        from scipy import ndimage as nd
+        image = Image.open(tmp_path / f"{name}.png")
+        labels, _ = nd.label(np.array(image)[..., 3] > 40)
+        assert sum(area > 20 for area in np.bincount(labels.ravel())[1:]) == 1
+        assert (tmp_path / f"{name}.png").read_bytes() == (sheets.ps.ROOT / "assets/sprites" / f"{name}.png").read_bytes()

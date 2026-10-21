@@ -28,7 +28,7 @@ def test_bed_breathing_boundaries(elapsed, expected):
 def test_desk_blinks_sighs_and_skips_missed_frames():
     p = b.PropPlayback(random.Random(2))
     p.reset(100)
-    assert 103 <= p.blink <= 106 and 110 <= p.sigh <= 120
+    assert 101.5 <= p.blink <= 103.5 and 110 <= p.sigh <= 120
     blink = p.blink
     assert p.sprite("desk", blink - .001) == "desk_1"
     assert p.sprite("desk", blink) == "desk_2"

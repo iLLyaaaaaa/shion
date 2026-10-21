@@ -483,7 +483,7 @@ class PetController(QObject):
 
     def _pet_windows(self):
         return (self.window, self.bubble, self.overlay, self._crumbs,
-                self.window._pause_badge, self.window._fps_overlay)
+                self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z)
 
     def _dialog_windows(self):
         return (self._dialogue, self._input_panel, self._perm_panel, self._about)
