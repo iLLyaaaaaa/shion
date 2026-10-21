@@ -118,7 +118,7 @@ def test_idle_actions_keep_final_window_position(env, action, monkeypatch):
     monkeypatch.setattr(env.ctl._idle, "step", lambda *args: action)
     env.ctl.tick()
     if action == "talk":
-        assert env.said[-1] in env.ctl.lines._lines["idle_talk"]
+        assert env.said[-1] in env.ctl.lines._lines["time_noon"]
     env.win.advance_to(env.mono[0] + JUMP_DURATION + 0.1)
     assert env.win.pos() == original
 

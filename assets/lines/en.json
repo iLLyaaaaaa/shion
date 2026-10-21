@@ -7,6 +7,11 @@
     "display_name": "Shion"
   },
   "lines": {
+    "time_morning": ["Morning. Let's do our best today too.", "Had breakfast? No coding on an empty stomach.", "Mm… I just woke up too."],
+    "time_noon": ["It's lunchtime—go eat first!", "You'll need a full stomach for the afternoon.", "What's for lunch? …Just asking."],
+    "time_evening": ["It's getting dark. Good work today.", "Don't forget dinner.", "You got a lot done today. I saw it all."],
+    "time_late": ["It's this late… still going?", "A little more, then bed. Promise.", "I'll stay up with you a bit… just a bit."],
+    "time_dawn": ["The sun's almost up! Go to bed!", "Staying up is bad for you… I'll worry.", "The rest can wait till tomorrow."],
     "bedtime": ["Good night… you can have a little corner of the bed.", "Shion is heading to bed. Do not stay up too late.", "Just a little nap… remember to wake me."],
     "desk_rest": ["Resting here a bit… I am still keeping you company.", "I am thinking, obviously.", "Let me borrow the desk for a moment."],
     "cheek_pull": ["Mmph! My cheeks aren't stretchy toys!", "H-hey! I'm not a mochi!", "G-gently, you dummy..."],
@@ -20,7 +25,7 @@
     "feedback_bad_working": ["Got it! Passing that on right now~"],
     "resumed": ["Back to work!"],
     "startup": ["I'm back to keep you company~", "Shion's here. Let's have a good day!", "Hello again! My little spot on your desktop is still here."],
-    "idle_talk": ["Remember to take a break today.", "I'll keep you company~", "Hmm... something sweet would be nice.", "I'm not waiting for head pats!"],
+    "idle_talk": ["Remember to take a break today.", "I'll keep you company~", "Hmm... something sweet would be nice.", "I'm not waiting for head pats!", "How's the weather outside?", "Get up and stretch if you've been sitting a while.", "Hehe～ I'm cute today too, right?", "A little bored… n-not really."],
     "poke": [
       "Hm?",
       "Hey, what's with the poking?",
@@ -40,7 +45,10 @@
       "...hehe.",
       "I guess one more pat is fine.",
       "That feels nice...",
-      "Shion loves head pats... I-I mean, it's fine, I guess."
+      "Shion loves head pats... I-I mean, it's fine, I guess.",
+      "You're messing up my hair…",
+      "One more… just one.",
+      "Hmph, only because you're being so earnest."
     ],
     "praise_menu": [
       "Got it! I'll pass that on when work resumes~"
@@ -50,20 +58,33 @@
     ],
     "claude_working": [
       "Working hard...",
-      "Shh, don't distract it."
+      "Shh, don't distract it.",
+      "It's hard at work. I'll keep an eye on it～",
+      "Shh… the typing sounds nice.",
+      "Good progress. Just a little longer.",
+      "Want to grab some water while it works?"
     ],
     "claude_done": [
       "All done! Take a look at the results~",
-      "Task complete~ Come see how it turned out!"
+      "Task complete~ Come see how it turned out!",
+      "Done! It handed in its homework～",
+      "All set～ go check it?",
+      "It's finished. Gonna praise it?",
+      "Ding～ fresh out of the oven!",
+      "Results are in. I didn't peek, honest."
     ],
     "claude_waiting": [
       "Something needs your confirmation.",
-      "I think it wants to ask you something."
+      "I think it wants to ask you something.",
+      "It's waiting for your nod.",
+      "Hey～ there's something you need to decide!"
     ],
     "greeting": [
       "Time to get to work!",
       "Here we go again~",
-      "Shion is ready!"
+      "Shion is ready!",
+      "Okay, what are we doing today?",
+      "Let's go～ I'll be right here watching."
     ],
     "wake": [
       "Mmh... morning.",
@@ -85,12 +106,16 @@
     "tool_error": [
       "Ouch… an error!",
       "Uh-oh, something went wrong",
-      "Th-that failed?"
+      "Th-that failed?",
+      "It's fine, just try again.",
+      "Hmm, it got stuck… take a look?"
     ],
     "nudge": [
       "The results are waiting for you~",
       "It finished a while ago!",
-      "Come take a look~"
+      "Come take a look~",
+      "It'll get sad if you don't look soon.",
+      "I'm not worried on its behalf or anything."
     ],
     "pat_level_1": [
       {

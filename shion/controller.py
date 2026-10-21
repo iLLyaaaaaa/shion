@@ -207,7 +207,8 @@ class PetController(QObject):
             )
             self.sync()
         elif action == "talk":
-            self.say_key("idle_talk")
+            if not self._try_time_speech():
+                self.say_key("idle_talk")
         self.scheduler.poll(now)
         if self._crumbs is not None and self._crumbs.isVisible():
             self._crumbs.follow(self._mouth_anchor())
@@ -241,30 +242,34 @@ class PetController(QObject):
         if not self._speech.allows(self.window.monotonic_time(), priority, category):
             return False
         level, rules = self.state.affection_level, self.state.affection
-        pool_key = key
         rare = False
-        if level is not None and key in ("pat", "neglect_return", "idle_talk"):
-            pool_key = f"{key}_level_{level}"
-            if key == "idle_talk" and level == len(rules.levels):
-                now = self.window.monotonic_time()
-                rare = now - self._last_rare_idle >= rules.rare_cooldown and self._rng.random() < rules.rare_chance
-                if rare:
-                    pool_key = "idle_thanks"
-        if level is None:
-            text = self.lines.pick(key)
-        else:
-            text = self.lines.pick(pool_key, level=level)
-            if not text and pool_key != key:
-                text = self.lines.pick(key, level=level)
-        if rare and text:
+        if level is not None and key == "idle_talk" and level == len(rules.levels):
+            now = self.window.monotonic_time()
+            rare = now - self._last_rare_idle >= rules.rare_cooldown and self._rng.random() < rules.rare_chance
+        text = self.lines.pick("idle_thanks", level) if rare else None
+        if not text:
+            rare = False
+            text = self.lines.pick_for_level(key, level)
+        accepted = self.say(text, priority=priority, category=category) if text else False
+        if rare and accepted:
             self._last_rare_idle = self.window.monotonic_time()
-        return self.say(text, priority=priority, category=category) if text else False
+        return accepted
+
+    def _try_time_speech(self) -> bool:
+        """只在明确的启动/交互/闲聊机会调用，不由 tick 自动补播。"""
+        now = self._now()
+        key = self.state.pending_time_speech(now)
+        if key is not None and self.say_key(key):
+            self.state.mark_time_speech_spoken(key, now)
+            return True
+        return False
 
     def greet_startup(self, first_start: bool, from_hook: bool = False) -> None:
         """首次介绍自己；普通重启用 startup，hook 拉起留给 session_start 问候。"""
         if first_start or not from_hook:
             self.say_key("intro" if first_start else "startup")
         self.react(self.state.gain_affection("open", self._now()))
+        self._try_time_speech()
 
     def say_text(self, text: str, *, priority: Priority = Priority.LOW,
                  category: str = "claude_working") -> bool:
@@ -319,6 +324,7 @@ class PetController(QObject):
         if self.overlay is not None:
             self.overlay.burst(self.window.head_anchor(), start_session=self._pat_session.new_session)
         self.sync()
+        self._try_time_speech()
 
     def _on_click(self) -> None:
         self.window.stop_motion()
@@ -326,12 +332,14 @@ class PetController(QObject):
         self._status_timer.stop()
         self.react(self.state.click(self._now()), category="poke")
         self.sync()
+        self._try_time_speech()
 
     def _on_gesture(self, key: str) -> None:
         self._on_pressed()
         self._status_timer.stop()
         self.react(self.state.gesture(key, self._now()))
         self.sync()
+        self._try_time_speech()
 
     def _on_double_click(self) -> None:
         self.react(self.state.interact(self._now()))
@@ -344,11 +352,13 @@ class PetController(QObject):
         self._status_timer.stop()
         self.react(self.state.drag_start(self._now()), category="drag")
         self.sync()
+        self._try_time_speech()
 
     def _on_drag_finished(self) -> None:
         self.react(self.state.drag_end(self._now(), shaken=self.window.consume_shaken()), category="drag")
         self.save_position()
         self.sync()
+        self._try_time_speech()
 
     # ------------------------------------------------------------ 存档 / 位置
     def save_position(self) -> None:
@@ -415,6 +425,7 @@ class PetController(QObject):
         self.state.save.window["height"] = height
         self.save_position()
         self.sync()
+        self._try_time_speech()
 
     def set_language(self, code: str) -> None:
         """切换语言，立即生效并存档：之后的台词、菜单、状态文字都用新语言，旧气泡收起。"""
@@ -428,11 +439,13 @@ class PetController(QObject):
             self._dialogue.refresh()
         self.scheduler.mark_dirty(self._now())
         self.sync()
+        self._try_time_speech()
 
     def set_privacy(self, private: bool) -> None:
         self.state.save.privacy_mode = private
         self.activity.clear()  # 之前记下的文件名等不会在切换后冒出来
         self.scheduler.mark_dirty(self._now())
+        self._try_time_speech()
 
     def set_muted(self, muted: bool) -> None:
         self.state.save.bubble_muted = muted
@@ -441,16 +454,19 @@ class PetController(QObject):
         if muted and self.bubble is not None:
             self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
+        self._try_time_speech()
 
     def select_expression(self, name: str) -> None:
         self.window.stop_motion()
         self.state.select_expression(name, self._now())
         self.sync()
+        self._try_time_speech()
 
     def fix_expression(self, fixed: bool) -> None:
         self.window.stop_motion()
         self.state.fix_expression(fixed, self._now())
         self.sync()
+        self._try_time_speech()
 
     def set_activity(self, level: str) -> None:
         if level not in ACTIVITY_LEVELS:
@@ -459,6 +475,7 @@ class PetController(QObject):
         self._idle.next_at = None
         self.scheduler.mark_dirty(self._now())
         self.sync()
+        self._try_time_speech()
 
     def do_action(self, name: str) -> None:
         self.window.stop_motion()
@@ -477,11 +494,13 @@ class PetController(QObject):
             self.state.rest_at_desk(self._now())
             self.say_key("desk_rest", category="dialogue")
         self.sync()
+        self._try_time_speech()
 
     def set_release_to_taskbar(self, on: bool) -> None:
         self.state.save.release_to_taskbar = on
         self.window.release_to_taskbar = on
         self.scheduler.mark_dirty(self._now())
+        self._try_time_speech()
 
     def _pet_windows(self):
         return (self.window, self.bubble, self.overlay, self._crumbs,
@@ -506,6 +525,7 @@ class PetController(QObject):
         self.state.save.always_on_top = on
         self._apply_topmost()
         self.scheduler.mark_dirty(self._now())
+        self._try_time_speech()
 
     def _bring_forward(self) -> None:
         for window in (*self._pet_windows(), *self._dialog_windows()):
@@ -847,10 +867,12 @@ class PetController(QObject):
         if self.hub.permissions.decide(rid, allow):
             log.info("授权决定：%s", "同意" if allow else "否决")
         self._sync_permission()
+        self._try_time_speech()
 
     def feedback_good(self) -> None:
         self.react(self.state.feedback_good(self._now()))
         self.sync()
+        self._try_time_speech()
 
     def open_bad_feedback(self) -> None:
         """“有问题……”：弹出一行输入框，发送后加入反馈队列。"""
@@ -867,6 +889,7 @@ class PetController(QObject):
     def feedback_bad(self, text: str = "") -> None:
         self.react(self.state.feedback_bad(text, self._now()))
         self.sync()
+        self._try_time_speech()
 
     def take_feedback_text(self) -> str:
         """取走反馈队列，合成要注入给 Claude 的文字（给 /feedback/take 用）；没有就返回空串。"""
@@ -952,6 +975,7 @@ class PetController(QObject):
         if recent:
             text += "\n" + self.lines.ui("recent_header") + "\n" + "\n".join(recent)
         self.say(text)
+        self._try_time_speech()
 
     # ------------------------------------------------------------ 菜单
     def _mouth_anchor(self) -> QPoint:
@@ -1001,6 +1025,7 @@ class PetController(QObject):
             self.state.menu_talk(now, response.expression, sleep=item.action == "sleep")
             self.react(self.state.gain_affection("talk", now, item.id))
         self.sync()
+        self._try_time_speech()
 
     def build_menu(self) -> QMenu:
         menu = QMenu()

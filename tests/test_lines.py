@@ -13,7 +13,19 @@ NEEDED = {
     "claude_working", "claude_done", "pat", "greeting", "claude_waiting",
     "intro", "startup", "idle_talk",
     "plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end",
+    "time_morning", "time_noon", "time_evening", "time_late", "time_dawn",
 }
+
+
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+def test_expanded_native_pools_and_time_lines(lang):
+    raw = json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))["lines"]
+    counts = {"claude_working": 6, "claude_done": 7, "claude_waiting": 4,
+              "tool_error": 5, "nudge": 5, "idle_talk": 8, "pat": 7, "greeting": 5}
+    counts.update({f"time_{period}": 3 for period in ("morning", "noon", "evening", "late", "dawn")})
+    for key, count in counts.items():
+        assert len(raw[key]) == count
+        assert len(set(raw[key])) == count
 
 
 def test_zh_json_has_every_key_the_state_machine_uses():

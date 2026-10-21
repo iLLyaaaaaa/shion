@@ -34,6 +34,7 @@ def test_medium_menu_speech_interrupts_low_but_not_other_medium(env):
 
 
 def test_continuous_pat_says_twice_without_reducing_hearts_or_stats(env, monkeypatch):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     env.data.activity_level = "quiet"
     bursts = []
     original = env.overlay.burst
@@ -60,6 +61,7 @@ def test_continuous_pat_says_twice_without_reducing_hearts_or_stats(env, monkeyp
 
 
 def test_blocked_pat_is_dropped_without_retry_before_six_seconds(env):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     env.ctl.handle_event("stop", "好了")
     accepted = list(env.said)
     env.win.patted.emit()
@@ -73,6 +75,7 @@ def test_blocked_pat_is_dropped_without_retry_before_six_seconds(env):
 
 
 def test_poke_variants_and_shaken_drag_use_source_cooldowns(env, monkeypatch):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     monkeypatch.setattr(env.state._rng, "random", lambda: 0)
     for _ in range(3):
         env.win.clicked.emit()
@@ -175,6 +178,7 @@ def test_plan_jump_survives_calm_sync(env, mode):
 
 
 def test_mute_and_language_dismiss_current_priority_but_keep_low_cooldown(env):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     env.ctl.handle_event("stop")
     env.ctl.set_muted(True)
     env.ctl.set_muted(False)
@@ -198,7 +202,7 @@ def test_status_keeps_mute_exemption_and_respects_priority(env):
 def test_suppressed_category_does_not_consume_random_line_selection(env, monkeypatch):
     env.ctl.handle_event("stop")
     picked = []
-    monkeypatch.setattr(env.ctl.lines, "pick", lambda key: picked.append(key) or "新台词")
+    monkeypatch.setattr(env.ctl.lines, "pick", lambda key, level=None: picked.append(key) or "新台词")
     assert not env.ctl.say_key("poke") and not picked
     env.advance(10)
     assert env.ctl.say_key("poke") and picked == ["poke"]

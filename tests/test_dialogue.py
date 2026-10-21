@@ -179,6 +179,8 @@ def test_muted_or_high_priority_speech_keeps_menu_behaviour(env):
     env.advance(2)
     assert env.data.affection == 2 and not env.said
     env.ctl.set_muted(False)
+    assert env.said[-1] in env.ctl.lines._lines["time_noon"]
+    env.said.clear()
     env.ctl.say("important", priority=Priority.HIGH)
     env.ctl.choose_dialogue("talks", "headpat")
     assert env.said == ["important"] and env.win.sprite_name == "happy"

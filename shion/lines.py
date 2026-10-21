@@ -15,6 +15,8 @@ log = logging.getLogger("shion.lines")
 
 LINES_DIR = Path(__file__).resolve().parent.parent / "assets" / "lines"
 FALLBACK_LANG = "zh"
+CURRENT_LEVEL_WEIGHT = 0.60
+LEVELED_KEYS = {"pat", "neglect_return", "idle_talk"}
 
 
 def _read(path: Path) -> dict:
@@ -121,9 +123,41 @@ class Lines:
         except (KeyError, IndexError, ValueError):
             return text
 
-    def pick(self, key: str, level: int | None = None) -> Optional[str]:
-        pool = [s if isinstance(s, str) else s["text"] for s in self._lines.get(key, [])
+    def _pool(self, key: str, level: int | None) -> list[str]:
+        return [s if isinstance(s, str) else s["text"] for s in self._lines.get(key, [])
                 if isinstance(s, str) or level is None or s.get("min_level", 1) <= level]
+
+    def pick_for_level(self, key: str, level: int | None) -> Optional[str]:
+        """先按池加权，再在池内等概率抽句；基础类别共用连续去重记录。"""
+        if level is None or key not in LEVELED_KEYS:
+            return self.pick(key, level)
+        current = self._pool(f"{key}_level_{level}", level)
+        others = [self._pool(f"{key}_level_{i}", level) for i in range(1, level)]
+        others.append(self._pool(key, level))
+        others = [pool for pool in others if pool]
+        pools, weights = [], []
+        if current:
+            pools.append(current)
+            weights.append(CURRENT_LEVEL_WEIGHT)
+        for pool in others:
+            pools.append(pool)
+            weights.append((1 - CURRENT_LEVEL_WEIGHT) / len(others))
+        # 排除上次的句子后再选池，避免重抽导致 60/40 的池权重偏移。
+        last = self._last.get(key)
+        filtered = [[text for text in pool if text != last] for pool in pools]
+        candidates = [(pool, weight) for pool, weight in zip(filtered, weights) if pool]
+        if not candidates:
+            candidates = list(zip(pools, weights))  # 全部只有同一句时允许重复
+        if not candidates:
+            return None
+        chosen = self._rng.choices([p for p, _ in candidates],
+                                   weights=[w for _, w in candidates], k=1)[0]
+        text = self._rng.choice(chosen)
+        self._last[key] = text
+        return text
+
+    def pick(self, key: str, level: int | None = None) -> Optional[str]:
+        pool = self._pool(key, level)
         if not pool:
             return None
         if len(pool) > 1 and key in self._last:

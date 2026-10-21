@@ -153,6 +153,7 @@ def test_belly_first_two_clicks_are_silent_and_never_poke_or_show_double_status(
 
 @pytest.mark.parametrize("last,active", [(1.5, True), (1.501, False)])
 def test_belly_three_clicks_use_sliding_inclusive_1500ms_window(env, last, active):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     belly_click(env)
     env.advance(.7)
     belly_click(env)
@@ -226,6 +227,7 @@ def test_small_effective_motion_can_continue_an_already_active_tickle(env):
 
 
 def test_continued_tickle_repeats_laughter_without_restarting_frames(env):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     gp = press(env.win, .69)
     for dx in (12, -12, 12):
         move_global(env.win, gp + QPoint(dx, 0))
@@ -323,6 +325,7 @@ def test_rub_requires_two_real_reversals_within_window():
 
 
 def test_belly_double_click_is_consumed_without_status_query(env):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证原交互的台词/冷却
     pos = point(env.win, y=.69)
     belly_click(env)
     QTest.mouseDClick(env.win, Qt.LeftButton, Qt.NoModifier, pos)

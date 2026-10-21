@@ -172,12 +172,15 @@ def test_upgrade_remains_visible_when_nudge_is_due_on_same_tick(qapp, tmp_path):
 
 @pytest.mark.parametrize("key", ["pat", "neglect_return", "idle_talk"])
 @pytest.mark.parametrize("points,level", [(0, 1), (50, 2), (200, 3), (500, 4), (1000, 5)])
-def test_speech_uses_current_level_pool(qapp, tmp_path, points, level, key):
+def test_speech_uses_unlocked_mixed_pools(qapp, tmp_path, points, level, key):
     env = Env(tmp_path, SaveData(affection=points), affection=load_rules())
     try:
         env.state.affection = replace(env.state.affection, rare_chance=0)
         assert env.ctl.say_key(key)
-        assert env.said[-1] in text_pool(env, f"{key}_level_{level}")
+        allowed = text_pool(env, key)
+        for i in range(1, level + 1):
+            allowed |= text_pool(env, f"{key}_level_{i}")
+        assert env.said[-1] in allowed
         env.ctl.set_muted(True)
         assert not env.ctl.say_key(key)
     finally:
@@ -198,7 +201,10 @@ def test_rare_thanks_respects_max_level_chance_cooldown_and_speech_gate(qapp, tm
         env.mono[0] += 10
         env.ctl._speech.dismiss()
         env.ctl.say_key("idle_talk")
-        assert env.said[-1] in text_pool(env, "idle_talk_level_5")
+        allowed = text_pool(env, "idle_talk")
+        for i in range(1, 6):
+            allowed |= text_pool(env, f"idle_talk_level_{i}")
+        assert env.said[-1] in allowed
         env.mono[0] = first + env.state.affection.rare_cooldown
         env.ctl._speech.dismiss()
         env.ctl.say_key("idle_talk")

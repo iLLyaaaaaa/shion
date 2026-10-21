@@ -31,7 +31,39 @@ REMOTE_DEFAULTS = {"pause_timeout": 1800, "permission_timeout": 120}  # 秒
 MIN_HEIGHT, MAX_HEIGHT = 120, 600  # 存档里的显示高度范围（右键菜单只提供 160~320）
 SAVE_RETRY = timedelta(seconds=30)  # 写盘失败后多久再试
 
+# 本地时间，含起点、不含终点；跨午夜的时段以 start > end 表示。
+TIME_SPEECH_PERIODS = {
+    "time_morning": (time(5), time(10)),
+    "time_noon": (time(11, 30), time(13, 30)),
+    "time_evening": (time(17, 30), time(19, 30)),
+    "time_late": (time(23), time(2)),
+    "time_dawn": (time(2), time(5)),
+}
 DEFAULT_WINDOW = {"x": None, "y": None, "height": 200}  # x/y 为 None 表示用默认位置（右下角）
+
+
+def time_speech_period(now: datetime) -> Optional[str]:
+    t = now.time()
+    for key, (start, end) in TIME_SPEECH_PERIODS.items():
+        matches = start <= t < end if start < end else t >= start or t < end
+        if matches:
+            return key
+    return None
+
+
+def _time_speech_record(raw) -> dict:
+    empty = {"date": "", "spoken": []}
+    if not isinstance(raw, dict) or not isinstance(raw.get("date"), str):
+        return empty
+    try:
+        datetime.strptime(raw["date"], "%Y-%m-%d")
+    except ValueError:
+        return empty
+    spoken = raw.get("spoken")
+    if not isinstance(spoken, list):
+        return empty
+    return {"date": raw["date"], "spoken": sorted({s for s in spoken
+            if isinstance(s, str) and s in TIME_SPEECH_PERIODS})}
 
 
 @dataclass(frozen=True)
@@ -168,6 +200,7 @@ class SaveData:
     snacks: dict = field(default_factory=lambda: {"date": "", "count": 0})
     release_to_taskbar: bool = False
     always_on_top: bool = True
+    time_speech: dict = field(default_factory=lambda: {"date": "", "spoken": []})
 
     def to_dict(self) -> dict:
         return {
@@ -190,6 +223,7 @@ class SaveData:
             "snacks": dict(self.snacks),
             "release_to_taskbar": self.release_to_taskbar,
             "always_on_top": self.always_on_top,
+            "time_speech": {"date": self.time_speech["date"], "spoken": list(self.time_speech["spoken"])},
         }
 
     @classmethod
@@ -225,6 +259,7 @@ class SaveData:
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
         d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)
         d.always_on_top = _bool(raw.get("always_on_top"), True)
+        d.time_speech = _time_speech_record(raw.get("time_speech"))
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
         expr = raw.get("fixed_expression")
@@ -455,6 +490,26 @@ class PetState:
             and not (self._manual and now < self._manual[1])
             and not (self._temp and now < self._temp[1])
         )
+
+    def pending_time_speech(self, now: datetime) -> Optional[str]:
+        """仅查询，不消耗资格；用真实工作/睡眠状态，避免临时表情掩盖。"""
+        key = time_speech_period(now)
+        if (key is None or self.is_working(now) or self.save.bubble_muted
+                or self._is_asleep(now) or self.current(now) == "sleep" or self.paused):
+            return None
+        record = self.save.time_speech
+        if record["date"] == now.date().isoformat() and key in record["spoken"]:
+            return None
+        return key
+
+    def mark_time_speech_spoken(self, key: str, now: datetime) -> None:
+        """控制器实际显示成功后才调用。"""
+        if key != time_speech_period(now):
+            return
+        self._roll_stats(now)
+        if key not in self.save.time_speech["spoken"]:
+            self.save.time_speech["spoken"].append(key)
+            self._changed(now)
 
     def select_expression(self, name: str, now: datetime) -> None:
         if name not in EXPRESSIONS:
@@ -768,6 +823,9 @@ class PetState:
 
     def _roll_stats(self, now: datetime) -> None:
         today = now.date().isoformat()
+        if self.save.time_speech.get("date") != today:
+            self.save.time_speech = {"date": today, "spoken": []}
+            self._changed(now)
         if self.save.snacks.get("date") != today:
             self.save.snacks = {"date": today, "count": 0}
             self._changed(now)

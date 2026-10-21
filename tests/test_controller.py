@@ -123,7 +123,7 @@ def test_pat_occasionally_says_a_pat_line(env):
     assert len(env.said) < 5  # 不是每次都说
 
 
-@pytest.mark.parametrize("first,hook,key", [(True, False, "intro"), (False, False, "startup"), (True, True, "intro"), (False, True, None)])
+@pytest.mark.parametrize("first,hook,key", [(True, False, "intro"), (False, False, "startup"), (True, True, "intro"), (False, True, "time_noon")])
 def test_startup_source_and_first_launch(env, first, hook, key):
     env.ctl.greet_startup(first, from_hook=hook)
     assert len(env.said) == (1 if key else 0)
@@ -584,6 +584,8 @@ def test_switch_language_applies_immediately_and_saves(env):
     ]
     assert "Together for 0m" in env.ctl.status_text(T0)
     assert "Pats today: 0" in env.ctl.status_text(T0)
+    assert env.said[-1] in env.ctl.lines._lines["time_noon"]  # 切语言也是真实菜单操作
+    env.mono[0] += 10  # 让本次时段气泡自然结束，再验证普通台词语言
     env.ctl.say_key("poke")
     assert env.said[-1] in env.ctl.lines._lines["poke"]
     assert env.said[-1] not in Lines()._lines["poke"]  # 不是中文台词
@@ -652,10 +654,11 @@ def test_working_activity_obeys_low_category_cooldown(env):
 
 def test_working_without_detail_keeps_old_line(env):
     env.ctl.handle_event("working", None)
-    assert len(env.said) == 1 and env.said[0] in ("正在努力干活……", "嘘，别打扰它")
+    assert len(env.said) == 1 and env.said[0] in env.ctl.lines._lines["claude_working"]
 
 
 def test_privacy_mode_hides_target_and_summary(env):
+    env.state.mark_time_speech_spoken("time_noon", env.now)  # 单独验证隐私路径
     env.ctl.set_privacy(True)
     assert env.data.privacy_mode is True
     env.ctl.handle_event("working", work("read", "secret.py"))
