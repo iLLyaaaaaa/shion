@@ -158,7 +158,7 @@
     ],
     "pat_level_3": [
       {
-        "text": "A little slower, big brother… just like that.",
+        "text": "A little slower… just like that.",
         "min_level": 3
       },
       {
@@ -168,7 +168,7 @@
     ],
     "neglect_return_level_3": [
       {
-        "text": "You’re back, big brother… come sit for a while. I’ll stay with you.",
+        "text": "You’re back… come sit for a while. I’ll stay with you.",
         "min_level": 3
       },
       {
@@ -178,7 +178,7 @@
     ],
     "idle_talk_level_3": [
       {
-        "text": "Relax your shoulders, big brother… I saw that frown.",
+        "text": "Relax your shoulders… I saw that frown.",
         "min_level": 3
       },
       {
@@ -192,7 +192,7 @@
     ],
     "pat_level_4": [
       {
-        "text": "Your hand is the one that makes me feel this safe, big brother.",
+        "text": "Your hand is the one that makes me feel this safe.",
         "min_level": 4
       },
       {
@@ -206,13 +206,13 @@
         "min_level": 4
       },
       {
-        "text": "All done, big brother? You can tell me about your day, at your own pace.",
+        "text": "All done? You can tell me about your day, at your own pace.",
         "min_level": 4
       }
     ],
     "idle_talk_level_4": [
       {
-        "text": "You don’t always have to be strong, big brother. Lean on me when you’re tired.",
+        "text": "You don’t always have to be strong. Lean on me when you’re tired.",
         "min_level": 4
       },
       {
@@ -226,7 +226,7 @@
     ],
     "pat_level_5": [
       {
-        "text": "I haven’t had enough headpats for today, big brother… tomorrow too, okay?",
+        "text": "I haven’t had enough headpats for today… tomorrow too, okay?",
         "min_level": 5
       },
       {
@@ -236,7 +236,7 @@
     ],
     "neglect_return_level_5": [
       {
-        "text": "Welcome back, big brother. However long it’s been, I’m happy to see you again.",
+        "text": "Welcome back. However long it’s been, I’m happy to see you again.",
         "min_level": 5
       },
       {
@@ -246,7 +246,7 @@
     ],
     "idle_talk_level_5": [
       {
-        "text": "Let’s spend another ordinary day like this together tomorrow, big brother.",
+        "text": "Let’s spend another ordinary day like this together tomorrow.",
         "min_level": 5
       },
       {
@@ -254,7 +254,7 @@
         "min_level": 5
       },
       {
-        "text": "The place I feel safest… is beside you, big brother. That’s just between us.",
+        "text": "The place I feel safest… is beside you. That’s just between us.",
         "min_level": 5
       }
     ],

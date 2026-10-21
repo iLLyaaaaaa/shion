@@ -147,9 +147,9 @@
       "responses": [
         {
           "text": {
-            "zh": "嗯，哥哥说吧。诗音会认真听……就算是小事也想听。",
-            "en": "Mm, go ahead, big brother. I’m listening… even the little things matter to me.",
-            "ja": "うん、お兄ちゃん、話して。ちゃんと聞くよ……小さなことだって聞きたいの。"
+            "zh": "嗯，你说吧。诗音会认真听……就算是小事也想听。",
+            "en": "Mm, go ahead. I’m listening… even the little things matter to me.",
+            "ja": "うん、話して。ちゃんと聞くよ……小さなことだって聞きたいの。"
           },
           "expression": "happy"
         },
@@ -174,9 +174,9 @@
       "responses": [
         {
           "text": {
-            "zh": "嗯……诗音愿意。哥哥身边的位置，可要留给我哦。",
-            "en": "Mm… I’d like that. Keep that place beside you for me, big brother.",
-            "ja": "うん……詩音もそうしたい。お兄ちゃんの隣、空けておいてね。"
+            "zh": "嗯……诗音愿意。你身边的位置，可要留给我哦。",
+            "en": "Mm… I’d like that. Keep that place beside you for me.",
+            "ja": "うん……詩音もそうしたい。あなたの隣、空けておいてね。"
           },
           "expression": "happy"
         },

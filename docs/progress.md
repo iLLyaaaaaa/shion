@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-21 称呼中性化**：仅调整三语台词、对话/零食与好感配置中的用户称呼，共 49 处；独立呼语直接省略，其余按语境使用“你 / you / あなた”，保持原有语气和内容。spec 已明确诗音不使用性别化称呼。指定资源中的三种旧称呼均检索为 0；代码、测试、JSON 结构及数值未改。`PYTHONUTF8=1`、`QT_QPA_PLATFORM=offscreen`，`.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/neutral-address-full` → **1131 passed、3 skipped、2 warnings**（314.98 秒；跳过项和既有 Pillow 警告同上一轮），`git diff --check` 通过，日志在已忽略的 `.venv/preview-run/neutral-address-full.log`。此前动态验收清单继续保留。本轮按用户要求本地 commit，不 push。
 - **2026-10-21 v0.4.1 好感度系统已实现**：五级配置、统一每日额度、v5 存档迁移、升级高优先级气泡和独立爱心圈、状态进度/剩余额度、等级解锁和中英日分级台词。完整测试 **1131 passed、3 skipped**，原生 Windows 150% 专项 **102 passed**。用户本轮明确要求并确认方案后开始本步；之前保留的真机验收项不视为已通过。动态和桌面表现 **待用户验收**；用户已授权记录待验收后 commit，不 push。
 - **2026-10-21 悬停不再算交互**：移除 hovered → interact 及其唤醒路径；进入、无按键移动、离开仅处理光标和 Qt 提示，不改变状态、动作或交互计时。仅打开/浏览/取消右键菜单也不唤醒、不打断动作，实际手势和菜单动作沿用原优先级。完整测试 **974 passed、3 skipped**；原生 Windows 150% 专项 **53 passed**。桌面表现 **待用户验收**。用户明确要求补测试、更新记录后 commit，不等待本轮亲眼验收；不 push。
 - **2026-10-21 这一轮结束后的“继续”已实现**：立即中断 / 停太久结束这一轮后，工作遥控菜单多一项：终端版“继续（发送“继续”）”（子进程 AttachConsole + WriteConsoleInputW，先读屏，有草稿或确认框不发并说明原因），桌面端“继续”（复制到剪贴板）。桌面端立即中断本身不变。完整测试 **922 passed、2 skipped**；conhost 和 Windows Terminal 真机读屏/发送通过；完整链路 **待用户验收**，见本轮记录。不 push。

@@ -40,9 +40,9 @@
         "ja": "仲良し"
       },
       "upgrade": {
-        "zh": "哥哥，今天也坐近一点吧……诗音给你留了位置。",
-        "en": "Come sit a little closer today… I saved you a place, big brother.",
-        "ja": "お兄ちゃん、今日ももう少しそばに座って……詩音、場所を空けておいたから。"
+        "zh": "今天也坐近一点吧……诗音给你留了位置。",
+        "en": "Come sit a little closer today… I saved you a place.",
+        "ja": "今日ももう少しそばに座って……詩音、場所を空けておいたから。"
       },
       "poke_factor": 0.85
     },
@@ -55,9 +55,9 @@
         "ja": "信頼"
       },
       "upgrade": {
-        "zh": "有哥哥在，诗音就很安心……这句话只告诉你。",
-        "en": "I feel safe with you here, big brother… I’m only telling you that.",
-        "ja": "お兄ちゃんがいると、安心するの……こんなこと、あなただけに言うんだから。"
+        "zh": "有你在，诗音就很安心……这句话只告诉你。",
+        "en": "I feel safe with you here… I’m only telling you that.",
+        "ja": "あなたがいると、安心するの……こんなこと、あなただけに言うんだから。"
       },
       "poke_factor": 0.7
     },
