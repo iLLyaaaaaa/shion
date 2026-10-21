@@ -68,6 +68,7 @@ sleep 在 alpha 清理后仅保留面积最大的连通块；bed 先分帧，每
 
 - 无边框、背景透明、不在任务栏显示：`FramelessWindowHint | Tool | WindowDoesNotAcceptFocus`，加上 `WA_TranslucentBackground` 与 `WA_ShowWithoutActivating`。右键「置于最上层 / Always on top / 最前面に表示」默认开启，存档字段 `always_on_top` 缺失或类型错误时按开启处理（v5 兼容新增字段）。
 - 置顶开关立即同步诗音、气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停文字标签及调试 FPS；新建附属窗口也继承。关闭后可以被普通窗口盖住。Windows 切换 `WindowStaysOnTopHint` 后对原本可见的窗口重新 `show()`，保持几何位置、mask、其他 flags、点穿和不抢焦点属性，原本隐藏的窗口不因此出现。
+- Windows 原生平台关闭「置于最上层」时，用 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT)` 跟随前台：当前前台窗口所属可执行文件名为 `Claude.exe`（大小写无关、多窗口/多 PID 均可）时，仅把本体及可见气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停标签、FPS 按既有层级紧邻排到该窗口之上。查询其上方非本组的 Z 序邻居作为插入点；无普通邻居时使用 `HWND_TOP`，不借 topmost 邻居意外开启置顶。每次 `SetWindowPos` 带 `SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER`，不激活、不改变前台、不关联 Claude owner，Claude 最小化不连带隐藏诗音。回调只投递合并请求，延后查询 PID/程序名及重新确认当前前台；非 Claude、无效/不可见/最小化窗口和查询失败均跳过。启动/关闭置顶时检查一次，附属窗口显示或 HWND 重建时重查，不轮询。开启置顶、退出、应用关闭及 dispose 注销 hook；保留 ctypes 回调至注销成功。非 Windows/offscreen 跳过，API 失败记日志且不阻止运行。
 - 授权请求切换到新的队首、计划提醒、有效完成提醒，以及「停下」后首次真正到达检查点时，整个提示前移一次；静音不影响前移，被诗音结束的一轮随后发来的 Stop 不触发。Windows 使用 `SetWindowPos(HWND_TOP, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`，不激活、不改变前台窗口、不重开置顶开关；授权/反馈/对话/关于面板排在本体和特效前面。
 - 所有对话框（关于、反馈输入、对话选择、授权）始终独立置顶。按身体中心选择当前显示器，在可用区域内优先放右侧，放不下换左侧；两侧都不足时尝试上/下，并避免身体重叠。授权展开/折叠、对话换页后重新定位。用户主动打开的反馈输入与关于可以接收键盘；自动授权和对话选择原有不抢焦点规则不变。
 - 程序版本唯一声明为 `shion.__version__ = "0.4.1"`，关于内容与 QApplication 版本均从此读取；存档 schema 和内容 JSON schema 仍为各自协议版本。

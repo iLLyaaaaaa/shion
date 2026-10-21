@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-22 Claude 前台窗口层级跟随**：关闭「置于最上层」时，原生 Windows 用前台 hook 将诗音与可见附属窗口紧邻放到任一 Claude.exe 窗口之上；其他程序前台不调整。不激活、不移动缩放、不绑定 Claude owner；延迟创建/句柄重建补同步，开启置顶及退出注销。全量 **1473 passed、6 skipped、2 warnings**；最终专项与独立暂存副本均 **81 passed、2 skipped**，原生 hook 两轮注册/注销、真实受控窗口组 Z 序 **1 passed**。真实焦点、遮挡、最小化和高分屏 **待用户验收**。只提交本轮改动，不 push。
 - **2026-10-21 动态睡眠 Z、趴桌双眨与轻姿态**：用户确认方案后完成 sleep/bed 去除原图漂浮 Z、单独导出 fx_z、四档大小动态 Z、趴桌 1.5～3.5 秒眨眼与 20% 双眨、working 轻点头及 neglect2 慢摇。素材四张图已单独提交 `24d72cd`；其他 PNG（含 raw）哈希未变。专项 **224 passed、3 skipped**；原生 Windows 150% 新专项 **42 passed、1 skipped**（没有有效前台窗口，未证明焦点保持）。56 张 `--snapshot` 已自查；最终全量 **1340 passed、6 skipped、2 warnings（406.34 秒）**。动态观感、真实桌面点穿/焦点与高分屏表现 **待用户验收**。用户已授权素材与代码分两次本地 commit，不 push。
 - **2026-10-21 置顶开关、面板避让与版本统一**：用户确认方案后实现三语「置于最上层」（默认开、兼容存档、即时生效），附属气泡/特效/暂停标签同步；授权、计划、有效完成、首次到达暂停检查点前移一次，使用不激活 API。所有对话框独立置顶并放在身体旁；关于与 QApplication 从唯一 `__version__` 读取 **0.4.1**。原生 Windows 150% 专项 **48 passed**，面板相关回归 **281 passed、3 skipped**，最终全量 **1297 passed、4 skipped、2 warnings（402.39 秒）**；三语 `--snapshot` 已自查。当前取不到有效前台窗口，真实焦点未验证；真实桌面遮挡、焦点和多屏表现 **待用户验收**。用户已授权本地 commit，不 push。
 - **2026-10-21 抱胸待机与动作衔接**：用户换好的 idle / blink 与两张 raw 原图、忽略旧备份规则已单独提交 `348b498`，素材未改。确认方案后，新增 idle 与转身、侧身、跳跃、捏脸/挠痒动作层进出各 0.10 秒透明度混合，mask 取完整轮廓并集；表情、拖动和眨眼保持原行为。最终全量 **1250 passed、3 skipped、2 warnings（377.53 秒）**；原生 Windows 150% 最终专项 **16 passed**，`--snapshot` 已自查。动态观感、真实桌面点穿和高分屏表现 **待用户验收**；用户已授权测试与记录后独立本地 commit，不 push。完整验证见下方同名记录。
@@ -30,6 +31,27 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-22：Claude 前台窗口层级跟随（待用户验收）
+- **范围**：先读 AGENTS/CLAUDE 与相关规格，本机已确认桌面端映像为 `Claude.exe`；用户确认方案后实现。保留已有未提交的三语台词/时段问候改动，共享文件只暂存本轮片段；无依赖、素材、存档 schema、语言资源或 hooks 脚本改动，不 push。
+- **做了什么**：
+  - 新增独立 `ForegroundFollower` 与窄 Win32 接口，关闭置顶时注册 `EVENT_SYSTEM_FOREGROUND` / `WINEVENT_OUTOFCONTEXT`。Qt GUI 线程接收回调，只启动单次零延时合并请求；进程查询、Z 序调整均延后执行，不轮询。
+  - 现取当前前台 HWND → PID → 映像名，大小写无关匹配 Claude.exe，不固定标题、PID、版本目录；查询后和逐窗调整前重验前台，失效/隐藏/最小化/查询失败跳过。其他程序前台不调整窗口。
+  - 本体、气泡、爱心/升级圈、碎屑、Z、暂停标签及 FPS 用控制器现有窗口提供器获取，只处理可见窗口，不创建隐藏窗口 HWND、不主动显示。按既有前后层级插入 Claude 上方，跳过本组邻居，避免把 Claude HWND 直接用作 insert-after 而排到其后；无普通邻居用 HWND_TOP，避免继承 topmost。全部操作带 NOACTIVATE / NOMOVE / NOSIZE / NOOWNERZORDER，不改变前台，不设置 Claude owner。
+  - 启动/关闭置顶立即排队检查；Qt Show / WinIdChange 补齐后来创建或重建的窗口。开启置顶先停跟随，quit / dispose / aboutToQuit 清理；注销失败保留 ctypes 回调并允许下次清理重试。非 Windows/offscreen 不加载 Win32 接口，API 失败写日志且不阻止退出。
+- **测试与自查**：
+  - mock Win32/Z 序覆盖多 PID/大小写、前台换程序/过期事件/查询中切换、无效/隐藏/最小化/进程查询失败、准确相邻排序/跳过本组/无邻居/topmost 邻居、全部附属窗口/隐藏不出现/延迟显示/句柄重建、回调无查询/100 次事件合并、注册/注销失败、清理重试、开关/退出与跨平台。Qt Show 使用真实事件验证，ctypes 绑定校验 64 位 HWND 参数及精确 flags。
+  - 最终专项 `.venv\Scripts\python -m pytest -q tests/test_foreground.py tests/test_windowing.py --basetemp=.venv/preview-run/foreground/targeted-final-tmp` → **81 passed、2 skipped（9.88 秒）**；跳过既有 offscreen 原生焦点/层级及新增受控原生 Z 序测试。日志 `.venv/preview-run/foreground/targeted-final.log`。
+  - 原生 Windows 无窗口 smoke：两次真实注册、处理消息和注销通过，未移动窗口。原生受控测试只替换目标窗口和进程识别，真实 SetWindowPos / GetWindow 校验本体及全部六类附属窗口紧邻目标上方且无 TOPMOST → **1 passed（2.42 秒）**，日志 `native.log`。环境没有有效前台 HWND，不能证明真实焦点保持；Claude 多窗口切换仍待用户验收。
+  - 从暂存索引导出独立副本（排除原有台词/时段改动），相同专项 **81 passed、2 skipped（9.22 秒）**，日志 `staged.log`；确认本次提交不依赖未提交功能。
+  - 全量 `.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/foreground/full-tmp` → **1473 passed、6 skipped、2 warnings（413.52 秒）**，日志 `full.log`；警告为既有 Pillow getdata 弃用。原生受控用例在全量收集后追加，已独立在原生平台通过、最终离屏专项跳过；其他代码未再修改。`git diff --check` 通过。
+- **踩过的坑**：`SetWindowPos` 的 insert-after 指定的是待调整窗口前面的窗口，直接传 Claude 会排到其后；用 topmost 窗口作邻居还可能让普通窗口继承置顶。必须跳过本组邻居并对 topmost 边界使用 HWND_TOP。ctypes 回调必须保留到注销成功，不能在失败时清空引用。
+- **待用户验收**（重启加载新代码）：
+  - [ ] 关闭置顶，切换 Claude 的多个窗口，诗音及可见气泡/爱心/Z/暂停标签均位于对应窗口上方，键盘焦点仍在 Claude
+  - [ ] 切到其他程序后正常遮挡诗音；Claude 最小化后诗音不跟随隐藏
+  - [ ] 保持 Claude 前台时，后来出现的附属窗口仍排在上方；开关置顶反复切换正常
+  - [ ] 高分屏/多屏下位置、尺寸、点穿与焦点保持正常，退出无残留窗口
+- **下一步**：用户验收本轮与此前保留清单；本轮仅本地 commit，不 push。
 
 ## 2026-10-21：动态睡眠 Z、趴桌双眨与轻姿态（待用户验收）
 - **范围与素材提交**：开始时完整读取 AGENTS/CLAUDE、核对 Git 干净；用户先确认方案再实现本步。按白名单仅提交 `assets/sprites/sleep.png`、`bed_1.png`、`bed_2.png`、新增 `fx_z.png`，提交 `24d72cd`（`assets: separate sleep Z from character sprites`）。raw、reference 未修改；所有其余 PNG 逐个 SHA-256 核对未变。无新依赖、无 hooks/台词/存档变更、不 push。

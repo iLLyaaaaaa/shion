@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
 from shion import __version__
 from shion.windowing import position_dialog, raise_without_activation, set_topmost
+from shion.foreground import ForegroundFollower
 
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
@@ -143,6 +144,7 @@ class PetController(QObject):
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(TICK_MS)
         self._timer.timeout.connect(self.tick)
+        self._foreground = ForegroundFollower(self._pet_windows, parent=self)
         self._apply_topmost()
         self.sync()
         if autostart:
@@ -489,6 +491,8 @@ class PetController(QObject):
         return (self._dialogue, self._input_panel, self._perm_panel, self._about)
 
     def _apply_topmost(self) -> None:
+        if self.state.save.always_on_top:
+            self._foreground.stop()
         for window in self._pet_windows():
             if window is not None:
                 set_topmost(window, self.state.save.always_on_top)
@@ -496,6 +500,7 @@ class PetController(QObject):
         for window in self._dialog_windows():
             if window is not None:
                 raise_without_activation(window)
+        self._foreground.set_enabled(not self.state.save.always_on_top)
 
     def set_always_on_top(self, on: bool) -> None:
         self.state.save.always_on_top = on
@@ -883,6 +888,7 @@ class PetController(QObject):
 
     def dispose(self) -> None:
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
+        self._foreground.stop()
         self.state.cancel_snack()
         for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs):
             if panel is not None:
@@ -894,6 +900,7 @@ class PetController(QObject):
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:
+        self._foreground.stop()
         self.window.stop_motion()
         self.state.cancel_snack()
         for panel in (self._dialogue, self._crumbs):
