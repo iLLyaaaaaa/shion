@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 import time
+import math
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -76,6 +77,27 @@ class Particles:
         return out
 
 
+class Celebration:
+    """升级的一圈爱心，独立于摸头粒子的频率和数量限制。"""
+
+    COUNT = 12
+
+    def __init__(self):
+        self.born = -float("inf")
+
+    def start(self, now: float) -> None:
+        self.born = now
+
+    def items(self, now: float) -> list[tuple[float, float, float, float]]:
+        t = (now - self.born) / LIFETIME
+        if not 0 <= t < 1:
+            return []
+        radius = 27 + 18 * ease_out(t)
+        return [(radius * math.cos(i * math.tau / self.COUNT),
+                 -60 + radius * math.sin(i * math.tau / self.COUNT), 0.7, 1 - t * t)
+                for i in range(self.COUNT)]
+
+
 def heart_path(size: float) -> QPainterPath:
     """以 (0,0) 为中心、宽约 size 的爱心。"""
     s = size / 2
@@ -102,6 +124,7 @@ class HeartOverlay(QWidget):
         self.setFixedSize(self.SIZE, self.SIZE)
         self._clock = clock
         self._particles = Particles()
+        self.celebration = Celebration()
         self._anchor = QPoint(0, 0)  # 出生点（全局坐标）
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.PreciseTimer)
@@ -127,10 +150,18 @@ class HeartOverlay(QWidget):
         self._anchor = anchor
         self.move(anchor.x() - self.SIZE // 2, anchor.y() - self.SIZE + 20)
 
+    def celebrate(self, anchor: QPoint) -> None:
+        self.follow(anchor)
+        self.celebration.start(self._clock())
+        self.show()
+        if self._autostart and not self._timer.isActive():
+            self._timer.start()
+        self.update()
+
     def tick(self) -> None:
         now = self._clock()
         self._particles.update(now)
-        if not self._particles.active:
+        if not self._particles.active and not self.celebration.items(now):
             self._timer.stop()
             self.hide()
         self.update()
@@ -139,7 +170,7 @@ class HeartOverlay(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         now = self._clock()
-        for x, y, scale, alpha in self._particles.items(now):
+        for x, y, scale, alpha in self._particles.items(now) + self.celebration.items(now):
             p.save()
             p.translate(QPointF(self.SIZE / 2 + x, self.SIZE - 20 + y))
             c = QColor(ORANGE)

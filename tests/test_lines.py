@@ -59,7 +59,9 @@ def test_every_shipped_language_is_complete(code):
     assert NEEDED <= set(raw["lines"])
     assert set(raw["ui"]) == set(zh["ui"])
     assert raw["meta"]["name"] and isinstance(raw["meta"]["font_fallback"], list)
-    assert all(isinstance(s, str) and s for pool in raw["lines"].values() for s in pool)
+    assert all((isinstance(s, str) and s) or (isinstance(s, dict) and s.get("text")
+               and type(s.get("min_level")) is int and 1 <= s["min_level"] <= 5)
+               for pool in raw["lines"].values() for s in pool)
 
 
 @pytest.mark.parametrize("code", ["zh", "en", "ja"])
@@ -68,7 +70,8 @@ def test_ready_reminders_are_native_and_interface_has_no_claude(code):
     for key in ("plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end", "claude_done"):
         assert raw["lines"][key]  # 必须原生提供，不能依赖中文回退
         assert Lines(code).pick(key) in raw["lines"][key]
-    visible = list(raw["ui"].values()) + [s for pool in raw["lines"].values() for s in pool]
+    visible = list(raw["ui"].values()) + [s if isinstance(s, str) else s["text"]
+                                          for pool in raw["lines"].values() for s in pool]
     assert all("claude" not in text.casefold() for text in visible)
     assert "done_summary" not in raw["ui"]
 

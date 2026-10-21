@@ -34,6 +34,7 @@ class MenuItem:
     name: dict[str, str]
     responses: tuple[Response, ...]
     action: str | None = None
+    min_level: int = 1
 
 
 class MenuContent:
@@ -82,7 +83,10 @@ class MenuContent:
                     responses.append(Response(text, expr))
                 if not responses:
                     raise ValueError("没有回应")
-                out.append(MenuItem(ident, name, tuple(responses), action))
+                min_level = item.get("min_level", 1)
+                if type(min_level) is not int or not 1 <= min_level <= 5:
+                    raise ValueError("min_level 必须为 1～5 的整数")
+                out.append(MenuItem(ident, name, tuple(responses), action, min_level))
                 seen.add(ident)
             except (ValueError, TypeError) as exc:
                 log.warning("跳过菜单条目 %s：%s", path, exc)
@@ -90,6 +94,11 @@ class MenuContent:
 
     def find(self, kind: str, ident: str) -> MenuItem | None:
         return next((i for i in (self.snacks if kind == "snacks" else self.talks) if i.id == ident), None)
+
+    def visible(self, kind: str, level: int | None) -> tuple[MenuItem, ...]:
+        items = self.snacks if kind == "snacks" else self.talks
+        # 等级配置失效时不过滤，回到旧菜单行为。
+        return tuple(i for i in items if level is None or i.min_level <= level)
 
     def pick(self, kind: str, item: MenuItem, lang: str) -> Response:
         key = kind, item.id, lang

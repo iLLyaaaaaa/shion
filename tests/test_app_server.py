@@ -78,6 +78,12 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
         introductions = [line for lang in ("zh", "en", "ja") for line in Lines(lang)._lines["intro"]]
         assert wait_for(lambda: any(line in log_text(log1) for line in introductions)), log_text(log1)
 
+        # 正式启动路径确实加载等级配置并发放每天一次的打开奖励。
+        state_path = log1.with_name("state.json")
+        assert wait_for(lambda: state_path.exists() and json.loads(state_path.read_text(encoding="utf-8")).get("affection") == 2)
+        saved = json.loads(state_path.read_text(encoding="utf-8"))
+        assert saved["affection_level"] == 1 and saved["affection_daily"]["open"] == 1
+
         assert http(port, "POST", "/event", {"type": "working"}) == {"ok": True}
         assert wait_for(lambda: "→ working" in log_text(log1)), log_text(log1)
         http(port, "POST", "/event", {"type": "stop"})

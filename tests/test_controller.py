@@ -28,14 +28,14 @@ def qapp():
 class Env:
     """一套完整的假环境：窗口、状态机、存档、控制器、说话记录。"""
 
-    def __init__(self, tmp_path, save=None):
+    def __init__(self, tmp_path, save=None, *, affection=None):
         self.now = T0
         self.mono = [100.0]
         self.said = []
         self.path = tmp_path / "state.json"
         self.data = save if save is not None else S.load(self.path)
         self.scheduler = S.SaveScheduler(self.path, self.data)
-        self.state = S.PetState(self.data, self.now, on_change=self.scheduler.mark_dirty)
+        self.state = S.PetState(self.data, self.now, on_change=self.scheduler.mark_dirty, affection=affection)
         self.win = PetWindow(
             height=self.data.window.get("height", 200), clock=lambda: self.mono[0], autostart=False
         )

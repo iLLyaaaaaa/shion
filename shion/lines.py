@@ -69,7 +69,7 @@ class Lines:
         self._dir = Path(directory)
         self._last: dict[str, str] = {}
         self.lang = FALLBACK_LANG
-        self._lines: dict[str, list[str]] = {}
+        self._lines: dict[str, list] = {}
         self._ui: dict[str, str] = {}
         self._meta: dict = {}
         self.set_language(lang)
@@ -91,7 +91,9 @@ class Lines:
 
         def pools(raw):
             return {
-                k: [s for s in v if isinstance(s, str)]
+                k: [s for s in v if isinstance(s, str) or (
+                    isinstance(s, dict) and isinstance(s.get("text"), str) and s["text"].strip()
+                    and type(s.get("min_level", 1)) is int and 1 <= s.get("min_level", 1) <= 5)]
                 for k, v in _sub(raw, "lines").items()
                 if isinstance(v, list)
             }
@@ -119,12 +121,13 @@ class Lines:
         except (KeyError, IndexError, ValueError):
             return text
 
-    def pick(self, key: str) -> Optional[str]:
-        pool = self._lines.get(key)
+    def pick(self, key: str, level: int | None = None) -> Optional[str]:
+        pool = [s if isinstance(s, str) else s["text"] for s in self._lines.get(key, [])
+                if isinstance(s, str) or level is None or s.get("min_level", 1) <= level]
         if not pool:
             return None
         if len(pool) > 1 and key in self._last:
-            pool = [s for s in pool if s != self._last[key]]
+            pool = [s for s in pool if s != self._last[key]] or pool
         choice = self._rng.choice(pool)
         self._last[key] = choice
         return choice

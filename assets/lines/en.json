@@ -87,6 +87,182 @@
       "The results are waiting for you~",
       "It finished a while ago!",
       "Come take a look~"
+    ],
+    "pat_level_1": [
+      {
+        "text": "You’ll mess up my hair… just for a moment, okay?",
+        "min_level": 1
+      },
+      {
+        "text": "I-I’m not that happy… you don’t have to move your hand away so fast.",
+        "min_level": 1
+      }
+    ],
+    "neglect_return_level_1": [
+      {
+        "text": "You’re back? I just happened to be here.",
+        "min_level": 1
+      },
+      {
+        "text": "Take a break when you’re done… just a passing reminder.",
+        "min_level": 1
+      }
+    ],
+    "idle_talk_level_1": [
+      {
+        "text": "It’s rather quiet here… I’ll sit for a while.",
+        "min_level": 1
+      },
+      {
+        "text": "Go ahead with your work. You don’t have to fuss over me.",
+        "min_level": 1
+      },
+      {
+        "text": "I like my tea a little sweet… I’m just telling you.",
+        "min_level": 1
+      }
+    ],
+    "pat_level_2": [
+      {
+        "text": "Headpats again… mm, today is fine too.",
+        "min_level": 2
+      },
+      {
+        "text": "I’ve got used to your hand… no laughing.",
+        "min_level": 2
+      }
+    ],
+    "neglect_return_level_2": [
+      {
+        "text": "There you are at last… busy today?",
+        "min_level": 2
+      },
+      {
+        "text": "I saved you a place. I wasn’t waiting the whole time.",
+        "min_level": 2
+      }
+    ],
+    "idle_talk_level_2": [
+      {
+        "text": "In the same place today too… that’s nice.",
+        "min_level": 2
+      },
+      {
+        "text": "I’ve started to remember a few of your little habits.",
+        "min_level": 2
+      },
+      {
+        "text": "Shall we take a break together later? I just happen to want one too.",
+        "min_level": 2
+      }
+    ],
+    "pat_level_3": [
+      {
+        "text": "A little slower, big brother… just like that.",
+        "min_level": 3
+      },
+      {
+        "text": "I’ve been good today too, haven’t I… one more pat?",
+        "min_level": 3
+      }
+    ],
+    "neglect_return_level_3": [
+      {
+        "text": "You’re back, big brother… come sit for a while. I’ll stay with you.",
+        "min_level": 3
+      },
+      {
+        "text": "I missed you a little… just a little, okay?",
+        "min_level": 3
+      }
+    ],
+    "idle_talk_level_3": [
+      {
+        "text": "Relax your shoulders, big brother… I saw that frown.",
+        "min_level": 3
+      },
+      {
+        "text": "Come a little closer. It’s not as if I’d mind sharing the space.",
+        "min_level": 3
+      },
+      {
+        "text": "You can tell me about the little things from today too.",
+        "min_level": 3
+      }
+    ],
+    "pat_level_4": [
+      {
+        "text": "Your hand is the one that makes me feel this safe, big brother.",
+        "min_level": 4
+      },
+      {
+        "text": "Stay a little longer… I want to remember this warmth a little more.",
+        "min_level": 4
+      }
+    ],
+    "neglect_return_level_4": [
+      {
+        "text": "I’m glad you’re back. You don’t have to hide being tired. I’m here.",
+        "min_level": 4
+      },
+      {
+        "text": "All done, big brother? You can tell me about your day, at your own pace.",
+        "min_level": 4
+      }
+    ],
+    "idle_talk_level_4": [
+      {
+        "text": "You don’t always have to be strong, big brother. Lean on me when you’re tired.",
+        "min_level": 4
+      },
+      {
+        "text": "The way you focus on things… I like it. Never mind if you didn’t hear.",
+        "min_level": 4
+      },
+      {
+        "text": "We don’t need a topic. Just being quiet with you feels nice too.",
+        "min_level": 4
+      }
+    ],
+    "pat_level_5": [
+      {
+        "text": "I haven’t had enough headpats for today, big brother… tomorrow too, okay?",
+        "min_level": 5
+      },
+      {
+        "text": "Mm… I love it when you stay with me like this. Don’t tease me about what I just said.",
+        "min_level": 5
+      }
+    ],
+    "neglect_return_level_5": [
+      {
+        "text": "Welcome back, big brother. However long it’s been, I’m happy to see you again.",
+        "min_level": 5
+      },
+      {
+        "text": "Let me keep you company while you rest this time. Here, there’s always a place beside me.",
+        "min_level": 5
+      }
+    ],
+    "idle_talk_level_5": [
+      {
+        "text": "Let’s spend another ordinary day like this together tomorrow, big brother.",
+        "min_level": 5
+      },
+      {
+        "text": "On days with you here, even doing nothing makes me happy.",
+        "min_level": 5
+      },
+      {
+        "text": "The place I feel safest… is beside you, big brother. That’s just between us.",
+        "min_level": 5
+      }
+    ],
+    "idle_thanks": [
+      {
+        "text": "Thank you for always keeping me company… with you here, even ordinary days feel precious.",
+        "min_level": 5
+      }
     ]
   },
   "ui": {
@@ -185,6 +361,9 @@
     "dialogue_close": "Close",
     "dialogue_hint": "Click this window to use number keys; Esc closes",
     "dialogue_unavailable": "Content unavailable",
-    "dialogue_eating": "Enjoying a snack…"
+    "dialogue_eating": "Enjoying a snack…",
+    "affection_status": "{name} · Lv.{level} · {progress}\nAffection still available today: {remaining}",
+    "affection_progress": "Next level: {current}/{target}",
+    "affection_max": "Max level"
   }
 }

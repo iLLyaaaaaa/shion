@@ -88,6 +88,182 @@
       "结果还在等你看呢～",
       "它做完好一会儿啦～",
       "回来看看它嘛"
+    ],
+    "pat_level_1": [
+      {
+        "text": "头发会乱的……只准摸一小会儿。",
+        "min_level": 1
+      },
+      {
+        "text": "才、才没有很开心……手别那么快拿走。",
+        "min_level": 1
+      }
+    ],
+    "neglect_return_level_1": [
+      {
+        "text": "回来了？诗音只是刚好在这儿。",
+        "min_level": 1
+      },
+      {
+        "text": "忙完就休息一下吧……随口提醒而已。",
+        "min_level": 1
+      }
+    ],
+    "idle_talk_level_1": [
+      {
+        "text": "这里还挺安静的……诗音坐一会儿。",
+        "min_level": 1
+      },
+      {
+        "text": "你忙你的，不用特意照顾诗音。",
+        "min_level": 1
+      },
+      {
+        "text": "诗音喜欢甜一点的茶……只是告诉你而已。",
+        "min_level": 1
+      }
+    ],
+    "pat_level_2": [
+      {
+        "text": "又来摸头呀……嗯，今天也可以。",
+        "min_level": 2
+      },
+      {
+        "text": "已经习惯你的手了……不许笑。",
+        "min_level": 2
+      }
+    ],
+    "neglect_return_level_2": [
+      {
+        "text": "总算看见你啦……今天很忙吗？",
+        "min_level": 2
+      },
+      {
+        "text": "给你留了个位置。才不是一直在等。",
+        "min_level": 2
+      }
+    ],
+    "idle_talk_level_2": [
+      {
+        "text": "今天也在这个位置呀……挺好的。",
+        "min_level": 2
+      },
+      {
+        "text": "你的习惯，诗音稍微记住一些了。",
+        "min_level": 2
+      },
+      {
+        "text": "等会儿一起休息？只是刚好诗音也想歇会儿。",
+        "min_level": 2
+      }
+    ],
+    "pat_level_3": [
+      {
+        "text": "哥哥，慢一点……这样就很好。",
+        "min_level": 3
+      },
+      {
+        "text": "诗音今天也很乖吧……再摸一下嘛。",
+        "min_level": 3
+      }
+    ],
+    "neglect_return_level_3": [
+      {
+        "text": "哥哥回来了……过来坐一会儿，诗音陪你。",
+        "min_level": 3
+      },
+      {
+        "text": "有一点想你……就一点点哦。",
+        "min_level": 3
+      }
+    ],
+    "idle_talk_level_3": [
+      {
+        "text": "哥哥，肩膀放松一点……诗音看见你皱眉啦。",
+        "min_level": 3
+      },
+      {
+        "text": "坐近一点嘛。又不是会嫌你挤。",
+        "min_level": 3
+      },
+      {
+        "text": "今天的小事，也可以讲给诗音听哦。",
+        "min_level": 3
+      }
+    ],
+    "pat_level_4": [
+      {
+        "text": "只有哥哥的手，才让诗音这么安心。",
+        "min_level": 4
+      },
+      {
+        "text": "再待一会儿……诗音想多记住一点这样的温度。",
+        "min_level": 4
+      }
+    ],
+    "neglect_return_level_4": [
+      {
+        "text": "回来就好。累了也不用逞强，诗音在呢。",
+        "min_level": 4
+      },
+      {
+        "text": "哥哥忙完啦？今天的事，可以慢慢讲给我听。",
+        "min_level": 4
+      }
+    ],
+    "idle_talk_level_4": [
+      {
+        "text": "哥哥不用一直很厉害，累的时候就靠着诗音吧。",
+        "min_level": 4
+      },
+      {
+        "text": "你认真做事的样子……诗音很喜欢。没听见就算啦。",
+        "min_level": 4
+      },
+      {
+        "text": "不用找话题。和哥哥一起安静待着，也很舒服。",
+        "min_level": 4
+      }
+    ],
+    "pat_level_5": [
+      {
+        "text": "哥哥，今天的份还没摸够呢……明天也要。",
+        "min_level": 5
+      },
+      {
+        "text": "嗯……最喜欢你这样陪着诗音了。刚才的话，不许逗我。",
+        "min_level": 5
+      }
+    ],
+    "neglect_return_level_5": [
+      {
+        "text": "欢迎回来，哥哥。隔多久都没关系，诗音很高兴又见到你。",
+        "min_level": 5
+      },
+      {
+        "text": "这次换诗音陪你休息。来，身边的位置一直都在。",
+        "min_level": 5
+      }
+    ],
+    "idle_talk_level_5": [
+      {
+        "text": "哥哥，明天也一起过这样普通的一天吧。",
+        "min_level": 5
+      },
+      {
+        "text": "有你在的日子，连发呆都让诗音觉得很开心。",
+        "min_level": 5
+      },
+      {
+        "text": "最安心的位置……就是哥哥旁边。只准你知道哦。",
+        "min_level": 5
+      }
+    ],
+    "idle_thanks": [
+      {
+        "text": "谢谢你一直陪着诗音……有哥哥在，平常的日子也很珍贵。",
+        "min_level": 5
+      }
     ]
   },
   "ui": {
@@ -186,6 +362,9 @@
     "dialogue_close": "关闭",
     "dialogue_hint": "点击此窗口后可用数字键选择；Esc 关闭",
     "dialogue_unavailable": "内容暂不可用",
-    "dialogue_eating": "正在吃零食……"
+    "dialogue_eating": "正在吃零食……",
+    "affection_status": "{name} · Lv.{level} · {progress}\n今天还能获得 {remaining} 好感",
+    "affection_progress": "升级进度 {current}/{target}",
+    "affection_max": "已满级"
   }
 }

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "levels": [
+    {
+      "level": 1,
+      "threshold": 0,
+      "name": {
+        "zh": "初识",
+        "en": "Acquainted",
+        "ja": "初対面"
+      },
+      "upgrade": {
+        "zh": "诗音会在这里陪你……先慢慢认识吧。",
+        "en": "I’ll keep you company here… let’s get to know each other slowly.",
+        "ja": "詩音はここにいるから……少しずつ仲良くなろうね。"
+      },
+      "poke_factor": 1.2
+    },
+    {
+      "level": 2,
+      "threshold": 50,
+      "name": {
+        "zh": "熟悉",
+        "en": "Familiar",
+        "ja": "顔なじみ"
+      },
+      "upgrade": {
+        "zh": "已经认得你的脚步声了……只是碰巧记住的。",
+        "en": "I know your footsteps now… I just happened to remember them.",
+        "ja": "足音でわかるようになっちゃった……たまたま覚えただけだから。"
+      },
+      "poke_factor": 1.0
+    },
+    {
+      "level": 3,
+      "threshold": 200,
+      "name": {
+        "zh": "亲近",
+        "en": "Close",
+        "ja": "仲良し"
+      },
+      "upgrade": {
+        "zh": "哥哥，今天也坐近一点吧……诗音给你留了位置。",
+        "en": "Come sit a little closer today… I saved you a place, big brother.",
+        "ja": "お兄ちゃん、今日ももう少しそばに座って……詩音、場所を空けておいたから。"
+      },
+      "poke_factor": 0.85
+    },
+    {
+      "level": 4,
+      "threshold": 500,
+      "name": {
+        "zh": "信赖",
+        "en": "Trusted",
+        "ja": "信頼"
+      },
+      "upgrade": {
+        "zh": "有哥哥在，诗音就很安心……这句话只告诉你。",
+        "en": "I feel safe with you here, big brother… I’m only telling you that.",
+        "ja": "お兄ちゃんがいると、安心するの……こんなこと、あなただけに言うんだから。"
+      },
+      "poke_factor": 0.7
+    },
+    {
+      "level": 5,
+      "threshold": 1000,
+      "name": {
+        "zh": "知音",
+        "en": "Kindred spirit",
+        "ja": "知音"
+      },
+      "upgrade": {
+        "zh": "谢谢你一直陪着诗音。以后也……把身边的位置留给我，好吗？",
+        "en": "Thank you for always staying with me. Will you keep a place beside you for me… from now on too?",
+        "ja": "ずっとそばにいてくれて、ありがとう。これからも……隣の場所、詩音にくれる？"
+      },
+      "poke_factor": 0.6
+    }
+  ],
+  "daily": {
+    "pat": {
+      "amount": 1,
+      "limit": 20
+    },
+    "snack": {
+      "amount": 2,
+      "limit": 5
+    },
+    "talk": {
+      "amount": 1,
+      "limit": 1
+    },
+    "open": {
+      "amount": 2,
+      "limit": 1
+    }
+  },
+  "rare_idle": {
+    "chance": 0.05,
+    "cooldown_seconds": 1800
+  }
+}

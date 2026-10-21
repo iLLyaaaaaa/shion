@@ -15,13 +15,15 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
+from shion.affection import AffectionRules
+
 log = logging.getLogger("shion.state")
 
 # 有持续时间的临时状态（同时也是 react 事件允许的表情名）
 TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
 EXPRESSIONS = ("happy", "proud", "stop", "dizzy", "working", "done", "sleep", "idle", "neglect2")
 ACTIVITY_LEVELS = ("quiet", "normal", "lively")
-SAVE_VERSION = 4  # v4 增加独立的每日喂食统计；保留 v1/v2 的反馈迁移
+SAVE_VERSION = 5  # v5 增加等级和每日好感记录；保留旧存档迁移
 FEEDBACK_MAX = 5  # 反馈队列最多几条，满了丢最早的
 FEEDBACK_TEXT_MAX = 200
 REMOTE_DEFAULTS = {"pause_timeout": 1800, "permission_timeout": 120}  # 秒
@@ -150,6 +152,8 @@ class SaveData:
     schema_version: int = SAVE_VERSION
     first_run: Optional[datetime] = None
     affection: int = 0
+    affection_level: Optional[int] = None
+    affection_daily: dict = field(default_factory=dict)
     last_attended: Optional[datetime] = None
     feedback_queue: list = field(default_factory=list)  # [{"kind": "good"|"bad", "text": str}]
     remote: dict = field(default_factory=lambda: dict(REMOTE_DEFAULTS))
@@ -169,6 +173,8 @@ class SaveData:
             "schema_version": self.schema_version,
             "first_run": self.first_run.isoformat(timespec="seconds") if self.first_run else None,
             "affection": self.affection,
+            "affection_level": self.affection_level,
+            "affection_daily": {**self.affection_daily, "talks": list(self.affection_daily.get("talks", []))},
             "last_attended": self.last_attended.isoformat(timespec="seconds") if self.last_attended else None,
             "feedback_queue": [dict(i) for i in self.feedback_queue],
             "remote": dict(self.remote),
@@ -194,6 +200,16 @@ class SaveData:
         d.first_run = _parse_dt(raw.get("first_run"))
         d.last_attended = _parse_dt(raw.get("last_attended"))
         d.affection = _int(raw.get("affection"), 0)
+        level = raw.get("affection_level")
+        d.affection_level = level if type(level) is int and 1 <= level <= 5 else None
+        daily = raw.get("affection_daily")
+        if isinstance(daily, dict) and isinstance(daily.get("date"), str):
+            talks = daily.get("talks")
+            d.affection_daily = {
+                "date": daily["date"], "pat": _int(daily.get("pat"), 0),
+                "snack": _int(daily.get("snack"), 0), "open": min(_int(daily.get("open"), 0), 1),
+                "talks": sorted({s for s in talks if isinstance(s, str) and s}) if isinstance(talks, list) else [],
+            }
         d.feedback_queue = _feedback_items(raw.get("feedback_queue"))
         if d.schema_version == 2 and not d.feedback_queue:
             old = _int(raw.get("pending_praise"), 0)  # v2 的待表扬都来自菜单“做得好”
@@ -216,7 +232,7 @@ class SaveData:
         if isinstance(snacks, dict):
             date = snacks.get("date")
             d.snacks = {"date": date if isinstance(date, str) else "",
-                        "count": min(_int(snacks.get("count"), 0), 5)}
+                        "count": _int(snacks.get("count"), 0)}
 
         stats = raw.get("stats")
         if isinstance(stats, dict):
@@ -336,8 +352,10 @@ class PetState:
         config: Optional[Config] = None,
         on_change: Optional[Callable[[datetime], None]] = None,
         rng: Optional[random.Random] = None,
+        affection: Optional[AffectionRules] = None,
     ):
         self.config = config or Config()
+        self.affection = affection
         self.save = data
         self._on_change = on_change
         self._rng = rng or random.Random()
@@ -370,6 +388,18 @@ class PetState:
             self.save.last_attended = now
             self._changed(now)
         self._roll_stats(now)
+        if self.affection is not None:
+            # 配置暂时失效时旧逻辑仍记摸头/零食；恢复后也不能重新领取这些额度。
+            daily = self.save.affection_daily
+            for source, observed in (("pat", self.save.stats["pats"]), ("snack", self.save.snacks["count"])):
+                if observed > daily[source]:
+                    daily[source] = observed
+                    self._changed(now)
+            # 初始化/恢复配置时只建立基线，不发升级事件。
+            level = self.affection.level(self.save.affection)
+            if self.save.affection_level != level:
+                self.save.affection_level = level
+                self._changed(now)
 
     # ------------------------------------------------------------ 查询
 
@@ -455,19 +485,19 @@ class PetState:
     def tick(self, now: datetime) -> list[Reaction]:
         """定时调用：清理到期的临时状态和 working，日期翻天时清零统计；返回“催你回来”等主动反应。"""
         self._roll_stats(now)
+        reactions: list[Reaction] = []
         if self._resting_auto and self._neglect_level(now) != 1:
             self._resting = self._resting_auto = False
         if self._eating_until is not None and now >= self._eating_until:
             self._eating_until = None
-            if self.save.snacks["count"] < self.config.snack_limit:
+            if self.save.snacks["count"] < self.snack_limit:
                 self.save.snacks["count"] += 1
-                self.save.affection += self.config.snack_affection
+                reactions.extend(self.gain_affection("snack", now))
                 self._changed(now)
         if self._temp and now >= self._temp[1]:
             self._temp = None
         for key in [k for k, sess in self._sessions.items() if not sess.active(now, self.config)]:
             del self._sessions[key]
-        reactions: list[Reaction] = []
         cfg = self.config
         if (
             self._stopped_at is not None
@@ -494,7 +524,7 @@ class PetState:
 
     def start_snack(self, now: datetime) -> bool:
         self._roll_stats(now)
-        if self.eating or self.save.snacks["count"] >= self.config.snack_limit:
+        if self.eating or self.save.snacks["count"] >= self.snack_limit:
             return False
         self._touch(now, attend=True)  # 回应由菜单提供，不另说唤醒台词
         self._eating_until = now + self.config.eating_for
@@ -545,7 +575,7 @@ class PetState:
     def pat(self, now: datetime) -> list[Reaction]:
         """摸头一次（界面层累计移动 40px 算一次）。"""
         reactions = self._touch(now, attend=True)
-        self.save.affection += self.config.pat_affection
+        reactions.extend(self.gain_affection("pat", now))
         self.save.stats["pats"] += 1
         self._set_temp("happy", now)
 
@@ -566,6 +596,8 @@ class PetState:
             late = self._poke_count >= cfg.poke_late
             stop = cfg.poke_late_stop if late else cfg.poke_early_stop
             dizzy = cfg.poke_late_dizzy if late else cfg.poke_early_dizzy
+            if self.affection is not None:
+                stop, dizzy = self.affection.probabilities(self.affection_level, stop, dizzy)
             roll = self._rng.random()
             if roll < stop:
                 result = "stop"
@@ -592,7 +624,8 @@ class PetState:
     def feedback_good(self, now: datetime) -> list[Reaction]:
         """右键菜单“做得好”：加入反馈队列，等下次送达 Claude。"""
         reactions = self._touch(now, attend=False)
-        self.save.affection += self.config.praise_affection
+        if self.affection is None:
+            self.save.affection += self.config.praise_affection
         self._enqueue({"kind": "good", "text": ""})
         self._set_temp("proud", now)
         self._changed(now)
@@ -735,6 +768,59 @@ class PetState:
         if self.save.stats.get("date") != today:
             self.save.stats = {"date": today, "pats": 0, "claude_tasks": 0}
             self._changed(now)
+        if self.affection is not None:
+            daily = self.save.affection_daily
+            if daily.get("date") != today:
+                # 旧存档已有当天摸头/喂食记录，不重复发放额度。
+                migrating = not daily
+                self.save.affection_daily = {
+                    "date": today, "pat": self.save.stats["pats"] if migrating else 0,
+                    "snack": self.save.snacks["count"], "open": 0, "talks": [],
+                }
+                self._changed(now)
+
+    @property
+    def affection_level(self) -> int | None:
+        return self.affection.level(self.save.affection) if self.affection is not None else None
+
+    @property
+    def snack_limit(self) -> int:
+        return self.affection.daily["snack"]["limit"] if self.affection else self.config.snack_limit
+
+    def gain_affection(self, source: str, now: datetime, ident: str = "") -> list[Reaction]:
+        """成功完成的获取入口；返回至多一次升级事件，不从查询中发奖励。"""
+        self._roll_stats(now)
+        if self.affection is None:
+            amount = {"pat": self.config.pat_affection, "snack": self.config.snack_affection}.get(source, 0)
+        else:
+            rule = self.affection.daily[source]
+            daily = self.save.affection_daily
+            if source == "talk":
+                if not ident or ident in daily["talks"]:
+                    return []
+                daily["talks"].append(ident)
+            else:
+                if daily[source] >= rule["limit"]:
+                    return []
+                daily[source] += 1
+            amount = rule["amount"]
+        previous = self.affection_level
+        self.save.affection += amount
+        self._changed(now)
+        if self.affection is not None:
+            self.save.affection_level = self.affection_level
+            if self.affection_level > previous:
+                return [Reaction("level_up", str(self.affection_level))]
+        return []
+
+    def affection_remaining(self, now: datetime, talk_ids) -> int:
+        self._roll_stats(now)
+        if self.affection is None:
+            return 0
+        daily, rules = self.save.affection_daily, self.affection.daily
+        total = sum(max(0, rules[s]["limit"] - daily[s]) * rules[s]["amount"]
+                    for s in ("pat", "snack", "open"))
+        return total + len(set(talk_ids) - set(daily["talks"])) * rules["talk"]["amount"]
 
     def _changed(self, now: datetime) -> None:
         if self._on_change:

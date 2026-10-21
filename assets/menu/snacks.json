@@ -124,6 +124,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "shared_chocolate",
+      "name": {
+        "zh": "分享巧克力",
+        "en": "Chocolate to share",
+        "ja": "分けっこのチョコ"
+      },
+      "min_level": 4,
+      "responses": [
+        {
+          "text": {
+            "zh": "一半给哥哥，一半给诗音……一起吃好像更甜了。",
+            "en": "Half for you, half for me… sharing it seems to make it sweeter.",
+            "ja": "半分はお兄ちゃん、半分は詩音……一緒だと、もっと甘い気がする。"
+          }
+        },
+        {
+          "text": {
+            "zh": "这块是特意给你留的。嗯，这次不说是顺便了。",
+            "en": "I saved this piece especially for you. Mm, this time I won’t pretend it was by chance.",
+            "ja": "これは、あなたのために取っておいたの。うん、今回はついでなんて言わない。"
+          }
+        }
+      ]
     }
   ],
   "full_response": {

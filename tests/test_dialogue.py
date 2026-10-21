@@ -10,16 +10,17 @@ from PySide6.QtWidgets import QLabel, QPushButton, QLineEdit
 
 from shion.effects import Crumbs
 from shion.menu_content import MenuContent, localized
-from shion.state import PetState, SaveData, load, save
+from shion.state import PetState, SaveData, load, save, SAVE_VERSION
 from shion.speech import Priority
 from tests.test_controller import Env, env, find_action, qapp, T0
 
 
-def test_builtin_content_has_four_items_and_complete_three_language_responses():
+def test_builtin_content_has_complete_three_language_responses():
     content = MenuContent()
     for kind in ("snacks", "talks"):
         items = getattr(content, kind)
-        assert len(items) == 4 and len({i.id for i in items}) == 4
+        expected = 5 if kind == "snacks" else 6
+        assert len(items) == expected and len({i.id for i in items}) == expected
         for item in items:
             assert set(item.name) == {"zh", "en", "ja"}
             assert 2 <= len(item.responses) <= 3
@@ -123,7 +124,7 @@ def test_v3_migration_and_snack_validation(tmp_path):
            "feedback_queue": [{"kind": "good", "text": ""}]}
     data = SaveData.from_dict(raw)
     state = PetState(data, T0)
-    assert data.schema_version == 4 and data.affection == 19 and data.stats["pats"] == 8
+    assert data.schema_version == SAVE_VERSION and data.affection == 19 and data.stats["pats"] == 8
     assert data.feedback_queue and data.snacks["count"] == 0
     state.start_snack(T0)
     state.tick(T0 + timedelta(seconds=2))

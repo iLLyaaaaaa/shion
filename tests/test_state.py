@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from shion.state import Config, PetState, SaveData
+from shion.state import Config, PetState, SaveData, SAVE_VERSION
 
 T0 = datetime(2026, 10, 19, 12, 0, 0)  # 白天
 
@@ -485,7 +485,7 @@ def test_legacy_praise_migrates_once_without_resetting_other_data():
     dirty = []
     p = PetState(data, T0, on_change=dirty.append)
     assert dirty and data.feedback_queue == [] and data.affection == 50
-    assert data.schema_version == 4
+    assert data.schema_version == SAVE_VERSION
     p.feedback_good(T0)
     q = PetState(SaveData.from_dict(data.to_dict()), T0)
     assert q.save.feedback_queue == [{"kind": "good", "text": ""}]
@@ -495,7 +495,7 @@ def test_v2_pending_praise_migrates_to_good_feedback():
     data = SaveData.from_dict({"schema_version": 2, "affection": 9, "pending_praise": 3})
     assert data.feedback_queue == [{"kind": "good", "text": ""}] * 3
     PetState(data, T0)
-    assert data.schema_version == 4 and data.affection == 9
+    assert data.schema_version == SAVE_VERSION and data.affection == 9
     again = SaveData.from_dict(data.to_dict())  # 已经是 v3：不会再迁移一遍
     assert again.feedback_queue == data.feedback_queue
     assert "pending_praise" not in data.to_dict()

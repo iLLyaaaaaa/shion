@@ -18,6 +18,7 @@ class DialoguePanel(QWidget):
         self.page = "talks"
         self.keyboard_ready = False
         self.busy = False
+        self.level = None
         self._body = (0, 0, 100, 100)
         self._choices = {}
         self._focus_check = QTimer(self)
@@ -75,11 +76,11 @@ class DialoguePanel(QWidget):
 
         label("> " + ui("dialogue_snacks" if self.page == "snacks" else "menu_talk"))
         if self.page == "talks":
-            button(1, ui("dialogue_snacks"), "page", "snacks", bool(self.content.snacks) and not self.busy)
-            entries, start = self.content.talks, 2
+            button(1, ui("dialogue_snacks"), "page", "snacks", bool(self.content.visible("snacks", self.level)) and not self.busy)
+            entries, start = self.content.visible("talks", self.level), 2
         else:
-            entries, start = self.content.snacks, 1
-        if not entries or self.page == "talks" and not self.content.snacks:
+            entries, start = self.content.visible("snacks", self.level), 1
+        if not entries or self.page == "talks" and not self.content.visible("snacks", self.level):
             label(ui("dialogue_unavailable"))
         for number, entry in enumerate(entries, start):
             button(number, localized(entry.name, lang), self.page, entry.id,

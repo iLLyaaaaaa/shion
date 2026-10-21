@@ -101,7 +101,8 @@ def run() -> int:
     data = state_mod.load(save_path)
     scheduler = state_mod.SaveScheduler(save_path, data)
     config = state_mod.Config.debug() if debug else state_mod.Config()
-    pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty)
+    from shion.affection import load_rules
+    pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty, affection=load_rules())
 
     win = PetWindow(height=data.window.get("height", 200), debug=debug)
     overlay = HeartOverlay()

@@ -133,6 +133,61 @@
           },
           "expression": "happy"
         }
+      ],
+      "min_level": 2
+    },
+    {
+      "id": "listen_to_me",
+      "name": {
+        "zh": "听我说说",
+        "en": "Hear me out",
+        "ja": "話を聞いて"
+      },
+      "min_level": 3,
+      "responses": [
+        {
+          "text": {
+            "zh": "嗯，哥哥说吧。诗音会认真听……就算是小事也想听。",
+            "en": "Mm, go ahead, big brother. I’m listening… even the little things matter to me.",
+            "ja": "うん、お兄ちゃん、話して。ちゃんと聞くよ……小さなことだって聞きたいの。"
+          },
+          "expression": "happy"
+        },
+        {
+          "text": {
+            "zh": "先坐好，不用急着整理语言。诗音又不会跑掉。",
+            "en": "Sit down first. Take your time finding the words. I’m not going anywhere.",
+            "ja": "まず座って。言葉はゆっくりでいいよ。詩音、どこにも行かないから。"
+          },
+          "expression": "happy"
+        }
+      ]
+    },
+    {
+      "id": "stay_together",
+      "name": {
+        "zh": "以后也陪着我",
+        "en": "Stay with me from now on",
+        "ja": "これからもそばにいて"
+      },
+      "min_level": 5,
+      "responses": [
+        {
+          "text": {
+            "zh": "嗯……诗音愿意。哥哥身边的位置，可要留给我哦。",
+            "en": "Mm… I’d like that. Keep that place beside you for me, big brother.",
+            "ja": "うん……詩音もそうしたい。お兄ちゃんの隣、空けておいてね。"
+          },
+          "expression": "happy"
+        },
+        {
+          "text": {
+            "zh": "都一起走到这里了……以后的普通日子，也想和你慢慢过。",
+            "en": "We’ve come this far together… I’d like to share the ordinary days ahead with you too.",
+            "ja": "ここまで一緒に来たんだもの……これからの何でもない日も、あなたとゆっくり過ごしたい。"
+          },
+          "expression": "happy"
+        }
       ]
     }
   ]

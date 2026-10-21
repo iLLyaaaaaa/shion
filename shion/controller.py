@@ -109,6 +109,7 @@ class PetController(QObject):
         self._idle = IdleBehavior()
         self._menu_open = False
         self._neglect_checked = False
+        self._last_rare_idle = -float("inf")
         window.release_to_taskbar = state.save.release_to_taskbar
         self.activity = ActivityLog()
         self._last_activity_say: Optional[tuple[str, datetime]] = None
@@ -202,14 +203,22 @@ class PetController(QObject):
         self.scheduler.poll(now)
         if self._crumbs is not None and self._crumbs.isVisible():
             self._crumbs.follow(self._mouth_anchor())
-        if self._dialogue is not None and self._dialogue.isVisible() and self._dialogue.busy != self.state.eating:
+        if self._dialogue is not None and self._dialogue.isVisible() and (
+                self._dialogue.busy != self.state.eating or self._dialogue.level != self.state.affection_level):
             self._dialogue.busy = self.state.eating
+            self._dialogue.level = self.state.affection_level
             self._dialogue.refresh()
 
     def react(self, reactions: list[Reaction], *, category: str | None = None) -> None:
-        for r in reactions:
+        # 同一个 tick 也可能有催回提醒；升级放在本批最后，避免刚说出口就被盖掉。
+        for r in sorted(reactions, key=lambda item: item.kind == "level_up"):
             if r.kind == "say":
                 self.say_key(r.key, category=category)
+            elif r.kind == "level_up" and self.state.affection is not None:
+                item = self.state.affection.levels[int(r.key) - 1]
+                self.say_text(localized(item.upgrade, self.lines.lang), priority=Priority.HIGH, category="level_up")
+                if self.overlay is not None:
+                    self.overlay.celebrate(self.window.head_anchor())
             elif r.kind == "nudge":
                 if (not self.state.save.fixed_expression and not self.state.is_working(self._now())
                         and self.state.current(self._now()) != "sleep"
@@ -223,13 +232,31 @@ class PetController(QObject):
         category = category if priority == Priority.LOW and category else default_category
         if not self._speech.allows(self.window.monotonic_time(), priority, category):
             return False
-        text = self.lines.pick(key)
+        level, rules = self.state.affection_level, self.state.affection
+        pool_key = key
+        rare = False
+        if level is not None and key in ("pat", "neglect_return", "idle_talk"):
+            pool_key = f"{key}_level_{level}"
+            if key == "idle_talk" and level == len(rules.levels):
+                now = self.window.monotonic_time()
+                rare = now - self._last_rare_idle >= rules.rare_cooldown and self._rng.random() < rules.rare_chance
+                if rare:
+                    pool_key = "idle_thanks"
+        if level is None:
+            text = self.lines.pick(key)
+        else:
+            text = self.lines.pick(pool_key, level=level)
+            if not text and pool_key != key:
+                text = self.lines.pick(key, level=level)
+        if rare and text:
+            self._last_rare_idle = self.window.monotonic_time()
         return self.say(text, priority=priority, category=category) if text else False
 
     def greet_startup(self, first_start: bool, from_hook: bool = False) -> None:
         """首次介绍自己；普通重启用 startup，hook 拉起留给 session_start 问候。"""
         if first_start or not from_hook:
             self.say_key("intro" if first_start else "startup")
+        self.react(self.state.gain_affection("open", self._now()))
 
     def say_text(self, text: str, *, priority: Priority = Priority.LOW,
                  category: str = "claude_working") -> bool:
@@ -826,6 +853,7 @@ class PetController(QObject):
     # ------------------------------------------------------------ 双击状态
     def status_text(self, now: Optional[datetime] = None) -> str:
         now = now or self._now()
+        self.state._roll_stats(now)
         save = self.state.save
         together = now - (save.first_run or now)
         days, hours = together.days, together.seconds // 3600
@@ -840,6 +868,15 @@ class PetController(QObject):
             "status", span=span, pats=save.stats["pats"],
             tasks=save.stats["claude_tasks"], affection=save.affection,
         )
+        level, rules = self.state.affection_level, self.state.affection
+        if rules is not None:
+            item = rules.levels[level - 1]
+            progress = ui("affection_max") if level == len(rules.levels) else ui(
+                "affection_progress", current=save.affection - item.threshold,
+                target=rules.levels[level].threshold - item.threshold)
+            remaining = self.state.affection_remaining(now, (i.id for i in self.menu_content.visible("talks", level)))
+            text += "\n" + ui("affection_status", level=level, name=localized(item.name, self.lines.lang),
+                               progress=progress, remaining=remaining)
         if save.fixed_expression:
             text += "\n" + ui("expression_fixed")
         return text
@@ -865,13 +902,14 @@ class PetController(QObject):
             family = self.bubble.font_family if self.bubble is not None else "Consolas"
             self._dialogue = DialoguePanel(self.menu_content, self.lines, family)
             self._dialogue.chosen.connect(self.choose_dialogue)
+        self._dialogue.level = self.state.affection_level
         self._dialogue.open(self.window.body_rect(), busy=self.state.eating)
 
     def choose_dialogue(self, kind: str, ident: str) -> None:
         if kind not in ("snacks", "talks"):
             return
         item = self.menu_content.find(kind, ident)
-        if item is None:
+        if item is None or item not in self.menu_content.visible(kind, self.state.affection_level):
             return
         now = self._now()
         if kind == "snacks":
@@ -895,6 +933,7 @@ class PetController(QObject):
             self.say_text(localized(response.text, self.lines.lang), priority=Priority.MEDIUM, category="dialogue")
         if kind == "talks":
             self.state.menu_talk(now, response.expression, sleep=item.action == "sleep")
+            self.react(self.state.gain_affection("talk", now, item.id))
         self.sync()
 
     def build_menu(self) -> QMenu:
