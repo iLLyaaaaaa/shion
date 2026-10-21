@@ -1,9 +1,10 @@
 """主动点击后才接收按键的终端对话窗口。"""
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, Signal
-from PySide6.QtGui import QFont, QGuiApplication
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
-from shion.bubble import FONT_PX, place_bubble
+from shion.bubble import FONT_PX
+from shion.windowing import position_dialog, raise_without_activation
 from shion.menu_content import localized
 from shion.panel import STYLE
 
@@ -40,6 +41,7 @@ class DialoguePanel(QWidget):
         self._body = body
         self.refresh()
         self.show()  # WA_ShowWithoutActivating；禁止 activateWindow / setFocus
+        raise_without_activation(self)
 
     def refresh(self):
         while self._layout.count():
@@ -97,9 +99,7 @@ class DialoguePanel(QWidget):
 
     def follow(self, body):
         self._body = body
-        screen = QGuiApplication.screenAt(QPoint(body[0] + body[2] // 2, body[1] + body[3] // 2)) or QGuiApplication.primaryScreen()
-        g = screen.availableGeometry()
-        self.move(*place_bubble(body, (self.width(), self.height()), (g.x(), g.y(), g.width(), g.height())))
+        position_dialog(self, body)
 
     def _arm(self):
         self.keyboard_ready = True

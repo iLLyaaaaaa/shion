@@ -196,7 +196,7 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "松手后落到任务栏", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
+    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "松手后落到任务栏", "置于最上层", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
     assert not find_action(menu, "开机自启（v1.0）").isEnabled()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
@@ -333,6 +333,9 @@ class FakeBubble:
     def __init__(self):
         self.calls = []
         self.visible = False
+
+    def windowFlags(self):
+        return Qt.WindowStaysOnTopHint
 
     def isVisible(self):
         return self.visible

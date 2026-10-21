@@ -8,12 +8,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QStandardPaths
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QStandardPaths, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from shion import state as state_mod
+from shion import __version__
 from shion.bridge import ServerBridge
 from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController
@@ -84,6 +85,7 @@ def setup_logging(directory: Path, debug: bool) -> None:
 def run() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Shion")
+    app.setApplicationVersion(__version__)
     app.setQuitOnLastWindowClosed(False)
 
     guard = SingleInstance(os.environ.get("SHION_INSTANCE_NAME") or INSTANCE_NAME, parent=app)
@@ -255,7 +257,7 @@ def snapshot(
 
 
 def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
-                   more: int = 0, expand: bool = False) -> int:
+                   more: int = 0, expand: bool = False, with_pet: bool = False) -> int:
     """离屏渲染遥控面板存成 PNG（自查画面用）。同意/否决面板的按钮在 0.6 秒内是灰的，截图时按“已生效”画。"""
     from shion.panel import ARM_DELAY, InputPanel, PermissionPanel
 
@@ -266,6 +268,11 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
     font_bubble.set_font_fallback(lines.font_fallback)
     family = font_bubble.font_family
     body = (400, 400, 100, 100)
+    scene_pet = None
+    if with_pet and kind != "eating":
+        scene_pet = PetWindow(autostart=False, debug=False)
+        scene_pet.move(body[0] - MARGIN_X, body[1] - MARGIN_TOP)
+        body = scene_pet.body_rect()
     if kind == "eating":
         from shion.effects import CrumbOverlay, MOUTH_FRACTION
         win = PetWindow(autostart=False, debug=False)
@@ -293,6 +300,18 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
         if kind == "snacks":
             panel._choose("page", "snacks")
         img = panel.grab().toImage()
+    elif kind == "about":
+        from PySide6.QtWidgets import QMessageBox
+        from shion.windowing import position_dialog
+        panel = QMessageBox()
+        panel.setWindowTitle(ui("about_title"))
+        panel.setText(ui("about_body", version=__version__))
+        panel.setStandardButtons(QMessageBox.Ok)
+        panel.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        panel.setAttribute(Qt.WA_ShowWithoutActivating)
+        panel.show()
+        position_dialog(panel, body)
+        img = panel.grab().toImage()
     elif kind == "input":
         panel = InputPanel(family)
         panel.open(ui("panel_bad_title"), ui("panel_send"), ui("panel_cancel"), body)
@@ -312,6 +331,17 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
         t[0] += ARM_DELAY + 0.1
         panel.refresh_enabled()
         img = panel.grab().toImage()
+    if scene_pet is not None:
+        # 使用真实定位结果合成，能同时检查对话框与身体是否重叠。
+        bounds = scene_pet.geometry().united(panel.geometry())
+        canvas = QImage(bounds.size(), QImage.Format_ARGB32_Premultiplied)
+        canvas.fill(0)
+        painter = QPainter(canvas)
+        painter.drawImage(scene_pet.pos() - bounds.topLeft(), scene_pet.render_frame())
+        painter.drawImage(panel.pos() - bounds.topLeft(), img)
+        painter.end()
+        img = canvas
+        scene_pet.close()
     font_bubble.close()
     panel.hide()
     panel.setParent(None)

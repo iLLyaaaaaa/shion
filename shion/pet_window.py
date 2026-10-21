@@ -102,9 +102,10 @@ class PetWindow(QWidget):
     ):
         super().__init__()
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle("Shion")
         self.setMouseTracking(True)
 

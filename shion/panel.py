@@ -8,13 +8,14 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPoint, QTimer, Qt, Signal
-from PySide6.QtGui import QGuiApplication, QTextCursor
+from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
-from shion.bubble import BG, BORDER, FG, FONT_PX, place_bubble
+from shion.bubble import BG, BORDER, FG, FONT_PX
+from shion.windowing import position_dialog
 
 PANEL_WIDTH = 300
 STYLE = f"""
@@ -64,17 +65,13 @@ class InputPanel(QWidget):
 
     def open(self, title: str, ok_text: str, cancel_text: str,
              body: tuple[int, int, int, int]) -> None:
-        """显示在 body（精灵本体矩形）头顶；清空上次输入。"""
+        """显示在 body（精灵本体矩形）旁；清空上次输入。"""
         self._title.setText(title)
         self._ok.setText(ok_text)
         self._cancel.setText(cancel_text)
         self._edit.clear()
         self.adjustSize()
-        screen = QGuiApplication.screenAt(QPoint(body[0] + body[2] // 2, body[1] + body[3] // 2)) \
-            or QGuiApplication.primaryScreen()
-        g = screen.availableGeometry()
-        x, y = place_bubble(body, (self.width(), self.height()), (g.x(), g.y(), g.width(), g.height()))
-        self.move(x, y)
+        position_dialog(self, body)
         self.show()
         self.raise_()
         self.activateWindow()
@@ -147,6 +144,7 @@ class PermissionPanel(QWidget):
         self._rid: Optional[str] = None
         self._armed_at = 0.0
         self._expanded = False
+        self._body = (0, 0, 100, 100)
         self._texts: dict[str, str] = {}
         self._more = 0
 
@@ -225,11 +223,8 @@ class PermissionPanel(QWidget):
         self._more_label.setText(self._texts["more"].format(n=n) if n > 0 else "")
 
     def follow(self, body: tuple[int, int, int, int]) -> None:
-        screen = QGuiApplication.screenAt(QPoint(body[0] + body[2] // 2, body[1] + body[3] // 2)) \
-            or QGuiApplication.primaryScreen()
-        g = screen.availableGeometry()
-        x, y = place_bubble(body, (self.width(), self.height()), (g.x(), g.y(), g.width(), g.height()))
-        self.move(x, y)
+        self._body = body
+        position_dialog(self, body)
 
     def hide_request(self) -> None:
         self._rid = None
@@ -250,6 +245,7 @@ class PermissionPanel(QWidget):
     def _toggle_expanded(self) -> None:
         self._expanded = not self._expanded
         self._apply_height()
+        self.follow(self._body)
 
     def _click(self, allow: bool) -> None:
         # 防误点：刚出现/刚换成下一条的 ARM_DELAY 内，即使按钮事件进来了也不算

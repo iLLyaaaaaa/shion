@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QWidget
 
 from shion.bubble import BG, BORDER, FG, FONT_PX, PAD_X, PAD_Y, pick_font_family
 from shion.panel import ARM_DELAY
+from shion.windowing import set_topmost
 
 BADGE_X = 0.76
 BADGE_Y = 0.05
@@ -69,6 +70,7 @@ class PauseBadge(QWidget):
                          | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        set_topmost(self, bool(pet.windowFlags() & Qt.WindowStaysOnTopHint))
         self.setFocusPolicy(Qt.NoFocus)
         self.setContextMenuPolicy(Qt.PreventContextMenu)
         self.setCursor(Qt.PointingHandCursor)

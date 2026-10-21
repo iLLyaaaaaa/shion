@@ -275,6 +275,7 @@
     "action_bed": "Go to bed",
     "action_desk": "Rest at the desk",
     "menu_release_to_taskbar": "Fall to the taskbar on release",
+    "menu_always_on_top": "Always on top",
     "action_face": "Face the mouse",
     "hook_deny": "The user denied this action through Shion.",
     "permission_title": "Approve this?",

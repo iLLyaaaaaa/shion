@@ -16,6 +16,9 @@ from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QProcess, 
 from PySide6.QtGui import QActionGroup, QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
+from shion import __version__
+from shion.windowing import position_dialog, raise_without_activation, set_topmost
+
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
 from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior, NEGLECT_DESK_CHANCE
@@ -52,7 +55,6 @@ def pick_screen_rect(rects, x, y, w, h):
         if rx <= cx < rx + rw:
             return r
     return None
-VERSION = "0.1"
 TICK_MS = 100
 ACTIVITY_REPEAT = timedelta(seconds=3)  # 同一句“在干什么”这么久内不重复弹
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,6 +102,7 @@ class PetController(QObject):
         self._perm_panel: Optional[PermissionPanel] = None
         self._dialogue: Optional[DialoguePanel] = None
         self._crumbs: Optional[CrumbOverlay] = None
+        self._about: Optional[QMessageBox] = None
         self.menu_content = MenuContent()
         self._autostart = autostart
         self._now_fn = now_fn
@@ -140,6 +143,7 @@ class PetController(QObject):
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(TICK_MS)
         self._timer.timeout.connect(self.tick)
+        self._apply_topmost()
         self.sync()
         if autostart:
             self._timer.start()
@@ -477,6 +481,32 @@ class PetController(QObject):
         self.window.release_to_taskbar = on
         self.scheduler.mark_dirty(self._now())
 
+    def _pet_windows(self):
+        return (self.window, self.bubble, self.overlay, self._crumbs,
+                self.window._pause_badge, self.window._fps_overlay)
+
+    def _dialog_windows(self):
+        return (self._dialogue, self._input_panel, self._perm_panel, self._about)
+
+    def _apply_topmost(self) -> None:
+        for window in self._pet_windows():
+            if window is not None:
+                set_topmost(window, self.state.save.always_on_top)
+        # Qt 重建诗音窗口后，确保已经打开的置顶对话框仍排在她前面。
+        for window in self._dialog_windows():
+            if window is not None:
+                raise_without_activation(window)
+
+    def set_always_on_top(self, on: bool) -> None:
+        self.state.save.always_on_top = on
+        self._apply_topmost()
+        self.scheduler.mark_dirty(self._now())
+
+    def _bring_forward(self) -> None:
+        for window in (*self._pet_windows(), *self._dialog_windows()):
+            if window is not None:
+                raise_without_activation(window)
+
     # ------------------------------------------------------------ 来自 Claude 的事件
     def handle_event(self, etype: str, detail: Optional[str] = None, meta: Optional[dict] = None) -> None:
         """处理本地 HTTP 服务转来的事件（必须在 GUI 线程调用，见 bridge.py）。
@@ -549,6 +579,8 @@ class PetController(QObject):
         if etype == "plan_ready":
             self.window.jump()
         self.sync()
+        if etype in ("stop", "plan_ready"):
+            self._bring_forward()
 
     def _say_activity(self, text: str, now: datetime) -> None:
         last = self._last_activity_say
@@ -614,13 +646,17 @@ class PetController(QObject):
         hook 第一次真的在检查点等着时说一次“已经停下啦～”。"""
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
-        if self.state.paused and not self._held_seen and self.hub.is_holding:
+        first_hold = self.state.paused and not self._held_seen and self.hub.is_holding
+        if first_hold:
             self._held_seen = True  # 暂停标签和静音无关；sync() 里显示
         if self.state.paused and not self._held_said and self.hub.is_holding:
             self._held_said = True
             if not self.state.save.bubble_muted:
                 self._speech.dismiss()  # 换掉“好，马上停～”
                 self.say(self.lines.ui("work_held"), priority=Priority.MEDIUM, category="stop_requested")
+        if first_hold:
+            self.sync()  # 先创建/显示暂停标签，再将整个提示前移一次
+            self._bring_forward()
 
     def _on_pause_timeout(self) -> None:
         """hook 停满上限后已返回 continue: false：放掉其他并行等待的 hook，提醒一次。只在停下等待中有效。"""
@@ -797,6 +833,7 @@ class PetController(QObject):
             )
             if first:
                 self.say_key("permission_request")
+            self._bring_forward()
         else:
             panel.set_more(len(pending) - 1)
 
@@ -945,6 +982,7 @@ class PetController(QObject):
             self.window.stop_motion()
             if self._crumbs is None:
                 self._crumbs = CrumbOverlay(clock=self.window.monotonic_time, autostart=self._autostart)
+                set_topmost(self._crumbs, self.state.save.always_on_top)
             self._crumbs.start(self._mouth_anchor(), self.state.save.window["height"],
                                self.state.config.eating_for.total_seconds())
         response = item.responses[0]
@@ -1024,6 +1062,11 @@ class PetController(QObject):
         release.setChecked(self.state.save.release_to_taskbar)
         release.triggered.connect(self.set_release_to_taskbar)
 
+        topmost = menu.addAction(ui("menu_always_on_top"))
+        topmost.setCheckable(True)
+        topmost.setChecked(self.state.save.always_on_top)
+        topmost.triggered.connect(self.set_always_on_top)
+
         mute = menu.addAction(ui("menu_mute"))
         mute.setCheckable(True)
         mute.setChecked(self.state.save.bubble_muted)
@@ -1064,8 +1107,16 @@ class PetController(QObject):
             menu.deleteLater()
 
     def show_about(self) -> None:
-        QMessageBox.about(
-            self.window,
-            self.lines.ui("about_title"),
-            self.lines.ui("about_body", version=VERSION),
-        )
+        box = self._about = QMessageBox(self.window)
+        box.setWindowTitle(self.lines.ui("about_title"))
+        box.setText(self.lines.ui("about_body", version=__version__))
+        box.setTextFormat(Qt.PlainText)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        # exec 内布局完成后再按实际原生边框定位，避免系统默认居中盖住诗音。
+        QTimer.singleShot(0, lambda: position_dialog(box, self.window.body_rect()))
+        try:
+            box.exec()
+        finally:
+            self._about = None
+            box.deleteLater()

@@ -276,6 +276,7 @@
     "action_bed": "去睡觉",
     "action_desk": "趴一会儿",
     "menu_release_to_taskbar": "松手后落到任务栏",
+    "menu_always_on_top": "置于最上层",
     "action_face": "朝向鼠标",
     "hook_deny": "用户通过诗音否决了这个操作",
     "permission_title": "要不要同意？",

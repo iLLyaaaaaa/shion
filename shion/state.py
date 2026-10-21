@@ -167,6 +167,7 @@ class SaveData:
     activity_level: str = "normal"
     snacks: dict = field(default_factory=lambda: {"date": "", "count": 0})
     release_to_taskbar: bool = False
+    always_on_top: bool = True
 
     def to_dict(self) -> dict:
         return {
@@ -188,6 +189,7 @@ class SaveData:
             "activity_level": self.activity_level,
             "snacks": dict(self.snacks),
             "release_to_taskbar": self.release_to_taskbar,
+            "always_on_top": self.always_on_top,
         }
 
     @classmethod
@@ -222,6 +224,7 @@ class SaveData:
         d.inject_praise = _bool(raw.get("inject_praise"), True)
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
         d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)
+        d.always_on_top = _bool(raw.get("always_on_top"), True)
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
         expr = raw.get("fixed_expression")

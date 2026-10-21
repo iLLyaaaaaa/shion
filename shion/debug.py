@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QLabel
+from shion.windowing import set_topmost
 
 FPS_INTERVAL = 0.5
 
@@ -34,6 +35,7 @@ class FpsOverlay(QLabel):
                          | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        set_topmost(self, bool(pet.windowFlags() & Qt.WindowStaysOnTopHint))
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setFocusPolicy(Qt.NoFocus)
         self.setFixedSize(88, 24)
