@@ -550,3 +550,85 @@ def test_tool_failure_after_interrupt_is_not_reported_as_error(pet2):
     pet2.ctl.handle_event("tool_error", "Bash", {"session": "s1", "tool_id": "t2"})
     assert pet2.win.sprite_name == "dizzy"
 
+
+
+# ---------------------------------------------------------------- 诗音结束的这一轮：紧接着的 Stop 不算完成
+def _done_lines(env):
+    return [t for t in env.said if t in env.ctl.lines._lines["claude_done"]]
+
+
+def _assert_stop_not_counted(env, session="s1"):
+    assert env.state.save.stats["claude_tasks"] == 0
+    assert env.win.sprite_name != "done"
+    assert _done_lines(env) == []
+    assert env.state._stopped_at is None  # 不会再催“结果还在等你看呢”
+    assert [e.kind for e in env.ctl.activity.recent(20)].count("stop") == 0
+    assert env.ctl._ended is not None and env.ctl._ended[0] == session  # 仍提供“继续”
+
+
+def test_stop_right_after_interrupt_is_not_a_finished_task(pet2):
+    work(pet2)
+    pet2.ctl.interrupt_work()
+    pet2.said.clear()
+    pet2.ctl.handle_event("stop", None, {"session": "s1"})  # 中断后 CC 写完一句话照常 Stop
+    _assert_stop_not_counted(pet2)
+    for _ in range(12):
+        pet2.advance(60)  # 过了催促时间也不催
+    assert not any(t in pet2.ctl.lines._lines["nudge"] for t in pet2.said)
+
+
+@pytest.mark.parametrize("etype", ["work_stopped", "pause_timeout"])
+def test_stop_after_shion_ended_the_turn_is_not_counted(pet2, etype):
+    work(pet2)
+    if etype == "pause_timeout":
+        pet2.ctl.stop_work()
+    pet2.ctl.handle_event(etype, None, {"session": "s1"})
+    pet2.said.clear()
+    pet2.ctl.handle_event("stop", None, {"session": "s1"})
+    _assert_stop_not_counted(pet2)
+
+
+def test_only_the_next_stop_is_swallowed(pet2):
+    work(pet2)
+    pet2.ctl.interrupt_work()
+    pet2.ctl.handle_event("stop", None, {"session": "s1"})
+    pet2.ctl.handle_event("stop", None, {"session": "s1"})  # 第二次 Stop 照常算
+    assert pet2.state.save.stats["claude_tasks"] == 1
+
+
+def test_new_prompt_clears_the_mark(pet2):
+    work(pet2)
+    pet2.ctl.handle_event("work_stopped", None, {"session": "s1"})  # CC 没发 Stop
+    pet2.ctl.handle_event("prompt", None, {"session": "s1"})  # 用户在 CC 里接着说
+    work(pet2)
+    pet2.said.clear()
+    pet2.ctl.handle_event("stop", None, {"session": "s1"})
+    assert pet2.state.save.stats["claude_tasks"] == 1 and _done_lines(pet2)
+
+
+def test_other_sessions_stop_still_counts(pet2):
+    work(pet2, "a", "t1")
+    pet2.ctl.handle_event("work_stopped", None, {"session": "a"})
+    work(pet2, "b", "t2")
+    pet2.ctl.handle_event("stop", None, {"session": "b"})
+    assert pet2.state.save.stats["claude_tasks"] == 1
+
+
+# ---------------------------------------------------------------- idle_prompt：CC 在等输入，清掉工作中
+def test_idle_prompt_clears_tool_in_flight(pet2):
+    work(pet2, "a", "t1")  # 例如 AskUserQuestion 上按 Esc：没有 PostToolUse / Stop
+    work(pet2, "b", "t2")
+    pet2.ctl.handle_event("notification", "idle_prompt", {"session": "a"})
+    assert pet2.state.working_sessions(pet2.now) == ["b"]
+    assert "a" not in pet2.ctl._tool_wall and "b" in pet2.ctl._tool_wall
+    pet2.ctl.handle_event("notification", "idle_prompt", {"session": "b"})
+    assert not pet2.state.is_working(pet2.now)
+    pet2.advance(4)
+    assert pet2.win.sprite_name != "working"
+
+
+def test_other_notification_types_keep_working(pet2):
+    work(pet2)
+    for kind in ("permission_prompt", None):
+        pet2.ctl.handle_event("notification", kind, {"session": "s1"})
+    assert pet2.state.working_sessions(pet2.now) == ["s1"]

@@ -89,6 +89,7 @@ class PetController(QObject):
         self._procs: dict[str, interrupt.CCProcess] = {}  # 会话 → hook 报来的 CC 进程（立即中断用）
         self._tool_wall: dict[str, dict[str, float]] = {}  # 会话 → {tool_use_id: 开始的 Unix 秒}
         self._interrupted: set[str] = set()  # 被立即中断、还没重新开始的会话
+        self._end_pending: set[str] = set()  # 这一轮被诗音结束了（中断 / 停下拿到 stop / 停太久）：紧接着的 Stop 不算完成
         # 最近一个被诗音结束了这一轮（立即中断 / 停太久）的会话：(会话, CC 进程或 None)，菜单上可以“继续”
         self._ended: Optional[tuple[str, Optional[interrupt.CCProcess]]] = None
         self._continue_sending = False
@@ -489,6 +490,7 @@ class PetController(QObject):
         log.info("收到事件：%s %r %s", etype, None if private else detail, session or "")
         now = self._now()
         if etype == "pause_timeout":
+            self._mark_end_pending(session)
             self._remember_ended(session)
             self.state.end_session(session)  # 这个会话的这一轮已经被 hook 结束了
             self._forget_session(session)
@@ -497,6 +499,7 @@ class PetController(QObject):
             return
         if etype == "work_stopped":
             # hook 在检查点拿到了 stop（等满上限或立即中断）：这个会话的这一轮结束了，不算完成任务
+            self._mark_end_pending(session)
             self._remember_ended(session)
             self.state.end_session(session)
             self._forget_session(session)
@@ -504,8 +507,18 @@ class PetController(QObject):
             return
         if etype == "tool_error" and session in self._interrupted:
             etype, detail = "tool_done", None  # 被“立即中断”结束的工具：本来就会失败，不说“出错了”
-        if etype == "stop" and session in self._interrupted:
-            self._remember_ended(session)  # 中断时正在写字、没碰到检查点：这一轮自己结束了
+        if etype == "stop" and session and session in self._end_pending:
+            # 诗音结束的这一轮（CC 随后照常发 Stop）：和 work_stopped 一样，不加任务数、不 done、不说完成、不催
+            self._end_pending.discard(session)
+            self._interrupted.discard(session)
+            self._remember_ended(session)
+            self.state.end_session(session)
+            self._forget_session(session)
+            self._sync_pause()
+            self.sync()
+            return
+        if etype == "prompt" and session:
+            self._end_pending.discard(session)  # 用户开始新的一轮
         if etype in ("prompt", "working") and self._ended and self._ended[0] == session:
             self._ended = None  # 用户自己在 CC 里接着说了
         if etype in ("prompt", "stop", "plan_ready"):
@@ -513,6 +526,8 @@ class PetController(QObject):
         self._track_session(etype, session, tool_id, meta.get("proc"))
         if etype in ("prompt", "stop"):
             self._sync_pause()  # 服务线程可能已经在 hub 里解除了暂停
+        if etype == "notification" and detail == "idle_prompt" and session:
+            self._tool_wall.pop(session, None)  # CC 在等输入：没有工具在跑（state 里同时清掉工作中）
         if etype == "tool_done":
             self.state.claude_event(etype, detail, now, session, tool_id)
             self.sync()
@@ -659,6 +674,7 @@ class PetController(QObject):
             return
         self.hub.request_interrupt(done)
         self._interrupted.update(done)
+        self._end_pending.update(done)
         for session in done:
             self.state.end_session(session)
             self._tool_wall.pop(session, None)
@@ -671,6 +687,10 @@ class PetController(QObject):
         self.sync()
 
     # ------------------------------------------------------------ 遥控：这一轮结束后的继续
+    def _mark_end_pending(self, session: Optional[str]) -> None:
+        if session:
+            self._end_pending.add(session)
+
     def _remember_ended(self, session: Optional[str]) -> None:
         if session:
             self._ended = (session, self._procs.get(session))

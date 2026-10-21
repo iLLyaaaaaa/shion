@@ -9,9 +9,11 @@
 会话：每个事件都带 stdin 里的 session_id；prompt / PreToolUse 另带启动本 hook 的 CC 进程（按实际父进程链确认）。
 同意/否决：PermissionRequest 把要执行的内容交给诗音，等用户在诗音上点按钮；只有收到明确的 allow 才输出 allow，
 其余一切情况（诗音没开、超时、出错、返回内容不对）都不输出任何决定，交回 CC 自己的授权框。
+用户在 CC 里自己答了授权：同一会话的 PostToolUse / PostToolUseFailure（按工具名 + 参数配对）让诗音马上收起面板。
 ExitPlanMode 仅发送 plan_ready 提醒，不登记授权请求，计划确认始终由 CC 自己处理。
 反馈队列：PostToolUse（工作中）和 UserPromptSubmit（空闲时）把诗音里攒的反馈作为附加上下文送出。
 """
+import hashlib
 import json
 import os
 import subprocess
@@ -209,6 +211,24 @@ def deny_message() -> str:
     return ui_text("hook_deny", "用户通过诗音否决了这个操作")
 
 
+def permission_key(tool_name, tool_input) -> str:
+    """工具名 + 参数的指纹。PermissionRequest 没有 tool_use_id，靠它和随后的 PostToolUse 配对。"""
+    raw = json.dumps([tool_name, tool_input], sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _session_field(data: dict) -> dict:
+    sid = data.get("session_id")
+    return {"session": sid} if isinstance(sid, str) and 0 < len(sid) <= 128 else {}
+
+
+def settle_permission(data: dict) -> None:
+    """工具已经跑过（PostToolUse / PostToolUseFailure）：它的授权在 CC 里答过了，让诗音收起还挂着的面板。"""
+    session = _session_field(data)
+    if session:
+        request("/permission/settle", {**session, "key": permission_key(data.get("tool_name"), data.get("tool_input"))})
+
+
 def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL):
     """返回 {"behavior": "allow"} / {"behavior": "deny", "message": …}，或 None（不给决定）。
 
@@ -225,7 +245,10 @@ def permission_decision(data: dict, limit: float, poll: float = PERMISSION_POLL)
         return None  # 内容长到面板放不下：用户看不全就不能替他决定，交回 CC 自己的授权框
     detail = describe_permission(tool, data.get("tool_input"))
     opened = request(
-        "/permission/open", {"tool": tool, "detail": detail}, timeout=2.0
+        "/permission/open",
+        {"tool": tool, "detail": detail, **_session_field(data),
+         "key": permission_key(tool, data.get("tool_input"))},
+        timeout=2.0,
     )
     rid = opened.get("id") if isinstance(opened, dict) else None
     if not isinstance(rid, str) or not rid:
@@ -338,6 +361,9 @@ def build_detail(name: str, data: dict):
         return json.dumps(describe_tool(data.get("tool_name"), data.get("tool_input")), ensure_ascii=False)
     if name == "PostToolUseFailure":
         return _short(data.get("tool_name") or "", 40) or None
+    if name == "Notification":
+        kind = data.get("notification_type")  # 官方字段：permission_prompt / idle_prompt / …
+        return _short(kind, 40) if isinstance(kind, str) and kind else None
     return None
 
 
@@ -366,6 +392,8 @@ def main() -> None:
     etype = EVENTS[name]
     meta = session_meta(name, data)
     session = meta.get("session")
+    if name in ("PostToolUse", "PostToolUseFailure"):
+        settle_permission(data)  # 先做：PostToolUse 之后可能在检查点等很久
     if name == "PostToolUseFailure":
         # 不是检查点：实测（2.1.289）CC 不理会 PostToolUseFailure 返回的 continue=false，中断标记留给下一个检查点
         if data.get("is_interrupt"):

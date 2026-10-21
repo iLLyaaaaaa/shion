@@ -331,3 +331,12 @@ def test_hanging_server_returns_quickly(tmp_path):
 def test_describe_tool_caps_target_length():
     h = load_hook()
     assert len(h.describe_tool("Read", {"file_path": "a/" + "x" * 500})["target"]) == 60
+
+
+@pytest.mark.parametrize("kind", ["idle_prompt", "permission_prompt"])
+def test_notification_forwards_its_type(env, kind):
+    srv, events, _, tmp = env
+    r = run_hook("Notification", srv.port, tmp,
+                 json.dumps({"notification_type": kind, "message": "私密内容不转发"}).encode())
+    assert r.returncode == 0 and r.stdout == b""
+    assert events == [("notification", kind)]

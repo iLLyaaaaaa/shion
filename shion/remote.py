@@ -125,13 +125,15 @@ class PermissionRequest:
     last_seen: float
     status: str = "pending"  # pending | allow | deny
     decided_at: float = field(default=0.0)
+    session: str = ""  # 来自哪个 CC 会话（旧 hook 没有）
+    key: str = ""  # 工具名 + 参数的指纹，和 PostToolUse 配对
 
 
 class PermissionQueue:
     """同意/否决请求的排队。
 
     安全约定：**只有 `decide()` 能产生 allow/deny，它只被诗音界面上的按钮回调调用**；
-    HTTP 服务只有 open / wait / withdraw 三个入口，没有任何一个能写入决定。
+    HTTP 服务只有 open / wait / withdraw / settle 四个入口，没有任何一个能写入决定。
     其他所有结局（超时、撤回、过期、未知 id）一律是 "gone"，hook 对 "gone" 不给决定。
     """
 
@@ -140,7 +142,8 @@ class PermissionQueue:
         self._items: dict[str, PermissionRequest] = {}
 
     # ---- 给 HTTP 服务线程 ----
-    def open(self, tool: str, detail: str, now: Optional[float] = None) -> Optional[str]:
+    def open(self, tool: str, detail: str, now: Optional[float] = None,
+             session: str = "", key: str = "") -> Optional[str]:
         """登记一个请求，返回 id；排队已满返回 None。"""
         now = time.monotonic() if now is None else now
         with self._cond:
@@ -149,7 +152,8 @@ class PermissionQueue:
                 return None
             rid = secrets.token_hex(16)
             self._items[rid] = PermissionRequest(
-                rid, str(tool)[:TOOL_MAX], str(detail)[:DETAIL_MAX], now, now
+                rid, str(tool)[:TOOL_MAX], str(detail)[:DETAIL_MAX], now, now,
+                session=session, key=key,
             )
             self._cond.notify_all()
             return rid
@@ -178,6 +182,22 @@ class PermissionQueue:
         with self._cond:
             self._items.pop(rid, None)
             self._cond.notify_all()
+
+    def settle(self, session: str, key: Optional[str] = None) -> int:
+        """这个会话的授权已经在 CC 里答过了（工具跑完 / 这一轮结束 / 用户又说话）：撤掉它还在等的请求。
+        给了 key 就只撤指纹相同的。只会删除，不产生任何决定；hook 再来轮询得到 gone。返回撤掉几个。"""
+        if not session:
+            return 0
+        with self._cond:
+            dead = [
+                r.id for r in self._items.values()
+                if r.status == "pending" and r.session == session and (key is None or r.key == key)
+            ]
+            for rid in dead:
+                del self._items[rid]
+            if dead:
+                self._cond.notify_all()
+            return len(dead)
 
     # ---- 给 GUI 线程 ----
     def decide(self, rid: str, allow: bool) -> bool:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
@@ -26,6 +27,25 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 INTERNAL_STOPPED = "work_stopped"  # 只由服务线程在 hook 取走“停下”时发给界面，外部不能伪造
 ID_MAX = 128  # session_id / tool_use_id 的长度上限
 PROC_NAMES = ("claude.exe", "node.exe", "bun.exe")  # hook 报来的工作进程只认这些名字
+PERM_KEY_RE = re.compile(r"[0-9a-f]{1,64}")  # 授权请求的指纹：工具名 + 参数的哈希（十六进制）
+IDLE_PROMPT = "idle_prompt"  # Notification 的 notification_type：CC 回复完约 60 秒用户没输入
+
+
+def _opt_id(value) -> tuple[bool, str]:
+    """可选的 session 字段：(合法, 值)。没有就是 (True, "")。"""
+    if value is None:
+        return True, ""
+    if not isinstance(value, str) or not value or len(value) > ID_MAX:
+        return False, ""
+    return True, value
+
+
+def _opt_key(value) -> tuple[bool, Optional[str]]:
+    if value is None:
+        return True, None
+    if not isinstance(value, str) or not PERM_KEY_RE.fullmatch(value):
+        return False, None
+    return True, value
 
 
 def parse_meta(data: dict) -> Optional[dict]:
@@ -138,6 +158,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._post_permission_wait()
         elif self.path == "/permission/withdraw":
             self._post_permission_withdraw()
+        elif self.path == "/permission/settle":
+            self._post_permission_settle()
         else:
             self._send(404, {"error": "not found"})
 
@@ -165,6 +187,9 @@ class _Handler(BaseHTTPRequestHandler):
         hub = self.server.hub
         if etype in ("prompt", "stop") and "session" in meta:
             hub.clear_interrupt(meta["session"])  # 这一轮已经结束或重新开始：没用上的中断作废
+        if "session" in meta and (etype in ("prompt", "stop") or (etype == "notification" and detail == IDLE_PROMPT)):
+            # 这一轮结束了 / 用户又说话了 / 空闲等输入：这个会话还挂着的授权一定已经在 CC 里答过了
+            hub.permissions.settle(meta["session"])
         if etype == "prompt":
             # 用户在 CC 里说话就解除暂停；在服务线程里直接做，紧接着的工具调用不会再被误挡
             hub.resume()
@@ -214,7 +239,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
     # ---- 同意 / 否决 ----
-    # 安全：这里只有“登记请求 / 等结果 / 撤回”。没有任何接口、任何字段能写入 allow 或 deny，
+    # 安全：这里只有“登记请求 / 等结果 / 撤回 / 已在 CC 里答过就撤掉”。没有任何接口、任何字段能写入 allow 或 deny，
     # 决定只由诗音界面上的按钮产生（写入口在 controller 的按钮回调里，本文件不碰它）。
     def _post_permission_open(self):
         data = self._read_json(MAX_PERMISSION_BODY)
@@ -224,7 +249,12 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(tool, str) or not tool or not isinstance(detail, str):
             self._send(400, {"error": "tool 和 detail 必须是字符串"})
             return
-        rid = self.server.hub.permissions.open(tool, detail)
+        ok_s, session = _opt_id(data.get("session"))
+        ok_k, key = _opt_key(data.get("key"))
+        if not ok_s or not ok_k:
+            self._send(400, {"error": "session / key 字段不合法"})
+            return
+        rid = self.server.hub.permissions.open(tool, detail, session=session, key=key or "")
         if rid is None:
             self._send(503, {"error": "too many pending requests"})
             return
@@ -253,6 +283,22 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self.server.hub.permissions.withdraw(rid)
         self._send(200, {"ok": True})
+
+    def _post_permission_settle(self):
+        """PostToolUse / PostToolUseFailure：这个工具已经跑过了，说明它的授权在 CC 里答过了，撤掉还在等的请求。
+        只能撤掉，不能写入决定（hook 之后拿到 gone，不给决定）。"""
+        data = self._read_json()
+        if data is None:
+            return
+        if not isinstance(data, dict):
+            self._send(400, {"error": "请求体必须是 JSON 对象"})
+            return
+        ok_s, session = _opt_id(data.get("session"))
+        ok_k, key = _opt_key(data.get("key"))
+        if not ok_s or not session or not ok_k:
+            self._send(400, {"error": "session / key 字段不合法"})
+            return
+        self._send(200, {"settled": self.server.hub.permissions.settle(session, key)})
 
 
 class _Server(ThreadingHTTPServer):

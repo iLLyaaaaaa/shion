@@ -153,6 +153,7 @@ def test_no_http_route_can_set_a_decision(server, extra):
     rid = post(srv, "/permission/open", {"tool": "Bash", "detail": "x", **extra})[1]["id"]
     post(srv, "/permission/wait", {"id": rid, "wait": 0, **extra})
     post(srv, "/permission/withdraw", {"id": "other", **extra})
+    post(srv, "/permission/settle", {"session": "other", **extra})
     post(srv, "/pause/wait", {"wait": 0, **extra})
     post(srv, "/feedback/take", dict(extra))
     for etype in ("permission_allow", "allow", "approve", "permission", "decision", "react", "plan_ready"):
@@ -635,3 +636,126 @@ def test_settings_timeouts_outlast_hook_limits():
     assert h.FEEDBACK_TIMEOUT > 1.5  # 大于 bridge 等 GUI 线程的时间
     from shion.bridge import TAKE_TIMEOUT
     assert TAKE_TIMEOUT < h.FEEDBACK_TIMEOUT
+
+
+# ---------------------------------------------------------------- 用户在 CC 里自己答了：面板马上收起
+def test_queue_settle_removes_only_that_sessions_pending_requests():
+    q = PermissionQueue()
+    a1 = q.open("Bash", "ls", session="a", key="k1")
+    a2 = q.open("Bash", "pwd", session="a", key="k2")
+    b = q.open("Bash", "ls", session="b", key="k1")
+    old = q.open("Bash", "ls")  # 旧 hook：没有会话信息，永远不会被 settle 撤掉
+    assert q.settle("a", "k1") == 1
+    assert [r.id for r in q.pending()] == [a2, b, old]
+    assert q.settle("a") == 1 and [r.id for r in q.pending()] == [b, old]
+    assert q.settle("") == 0 and q.settle("zzz") == 0
+    assert q.wait(a1, 0) == "gone" and q.wait(a2, 0) == "gone"  # 不是决定：hook 不会输出任何东西
+
+
+def test_queue_settle_never_touches_decided_requests():
+    q = PermissionQueue()
+    rid = q.open("Bash", "ls", session="a", key="k")
+    q.decide(rid, True)
+    assert q.settle("a") == 0
+    assert q.wait(rid, 0) == "allow"
+
+
+def test_http_open_records_session_and_key(server):
+    srv, _, hub = server
+    assert post(srv, "/permission/open", {"tool": "Bash", "detail": "x", "session": "s1", "key": "ab12"})[0] == 200
+    req = hub.permissions.pending()[0]
+    assert (req.session, req.key) == ("s1", "ab12")
+
+
+@pytest.mark.parametrize("bad", [{"session": ""}, {"session": 5}, {"session": "x" * 129},
+                                 {"key": "XYZ"}, {"key": "a" * 65}, {"key": 3}])
+def test_http_open_and_settle_validate_fields(server, bad):
+    srv, _, hub = server
+    assert post(srv, "/permission/open", {"tool": "Bash", "detail": "x", **bad})[0] == 400
+    assert post(srv, "/permission/settle", {"session": "s1", **bad})[0] == 400
+    assert hub.permissions.pending() == []
+
+
+def test_http_settle_requires_a_session(server):
+    srv, _, _ = server
+    assert post(srv, "/permission/settle", {})[0] == 400
+    assert post(srv, "/permission/settle", {"key": "ab"})[0] == 400
+
+
+def test_http_settle_by_key(server):
+    srv, _, hub = server
+    keep = hub.permissions.open("Bash", "other", session="s1", key="bb")
+    gone = hub.permissions.open("Bash", "ls", session="s1", key="aa")
+    assert post(srv, "/permission/settle", {"session": "s1", "key": "aa"}) == (200, {"settled": 1})
+    assert [r.id for r in hub.permissions.pending()] == [keep]
+    assert post(srv, "/permission/wait", {"id": gone, "wait": 0})[1]["status"] == "gone"
+
+
+@pytest.mark.parametrize("event", [{"type": "prompt"}, {"type": "stop"},
+                                   {"type": "notification", "detail": "idle_prompt"}])
+def test_turn_events_settle_that_sessions_requests(server, event):
+    srv, _, hub = server
+    hub.permissions.open("Bash", "ls", session="s1", key="aa")
+    other = hub.permissions.open("Bash", "ls", session="s2", key="aa")
+    post(srv, "/event", {**event, "session": "s1"})  # 这里的回调只收两个参数（500），撤请求在回调之前
+    assert [r.id for r in hub.permissions.pending()] == [other]
+
+
+@pytest.mark.parametrize("event", [{"type": "working"}, {"type": "tool_done"},
+                                   {"type": "notification", "detail": "permission_prompt"},
+                                   {"type": "notification"}])
+def test_other_events_keep_requests(server, event):
+    srv, _, hub = server
+    hub.permissions.open("Bash", "ls", session="s1", key="aa")
+    post(srv, "/event", {**event, "session": "s1"})
+    assert len(hub.permissions.pending()) == 1
+
+
+def test_permission_key_matches_between_request_and_post_tool_use():
+    hook = load_hook()
+    a = hook.permission_key("Bash", {"command": "ls", "description": "列目录"})
+    b = hook.permission_key("Bash", {"description": "列目录", "command": "ls"})  # 键顺序无关
+    assert a == b and re.fullmatch(r"[0-9a-f]{32}", a)
+    assert hook.permission_key("Bash", {"command": "pwd"}) != a
+    assert hook.permission_key("PowerShell", {"command": "ls"}) != a
+
+
+def test_hook_registers_session_and_key(hook_env):
+    srv, hub, tmp = hook_env
+    stdin = json.dumps({"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "npm test"}}).encode()
+    proc = start_hook(srv, tmp, stdin)
+    req = wait_pending(hub)[0]
+    assert req.session == "s1" and req.key == load_hook().permission_key("Bash", {"command": "npm test"})
+    hub.permissions.withdraw(req.id)
+    proc.communicate(timeout=15)
+
+
+@pytest.mark.parametrize("name, extra", [("PostToolUse", {}), ("PostToolUseFailure", {}),
+                                         ("PostToolUseFailure", {"is_interrupt": True})])
+def test_answering_in_cc_makes_the_waiting_hook_give_no_decision(hook_env, name, extra):
+    """CC 里自己答了 → 工具跑完 → 同会话、同工具同参数的 PostToolUse(Failure) 撤掉请求；
+    还在等的 PermissionRequest hook 拿到 gone，不输出任何决定。"""
+    srv, hub, tmp = hook_env
+    ti = {"command": "npm test"}
+    perm = start_hook(srv, tmp, json.dumps({"session_id": "s1", "tool_name": "Bash", "tool_input": ti}).encode())
+    wait_pending(hub)
+    other = hub.permissions.open("Bash", "x", session="s1", key=load_hook().permission_key("Bash", {"command": "x"}))
+    post_hook = start_hook(srv, tmp, json.dumps({"session_id": "s1", "tool_name": "Bash", "tool_input": ti,
+                                                 "tool_use_id": "t1", **extra}).encode(), name=name)
+    post_hook.communicate(timeout=15)
+    assert [r.id for r in hub.permissions.pending()] == [other]  # 别的请求还在
+    out, err = perm.communicate(timeout=20)
+    assert perm.returncode == 0 and out == b"" and err == b""
+
+
+def test_settled_request_closes_the_panel_and_shows_the_next(env):
+    first = env.ctl.hub.permissions.open("Bash", "ls", session="s1", key="aa")
+    env.advance(0.1)
+    assert env.ctl._perm_panel.request_id == first
+    nxt = env.ctl.hub.permissions.open("Bash", "pwd", session="s2", key="bb")
+    env.ctl.hub.permissions.settle("s1", "aa")
+    env.advance(0.15)
+    assert env.ctl._perm_panel.isVisible() and env.ctl._perm_panel.request_id == nxt
+    env.ctl.hub.permissions.settle("s2")
+    env.advance(0.15)
+    assert not env.ctl._perm_panel.isVisible()

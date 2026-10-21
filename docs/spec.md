@@ -121,7 +121,7 @@ claude pet/
 1. **drag**：正在被拖动
 2. **固定表情 / 手动表情**：固定无期限；未固定的手动表情 5 秒
 3. **临时反应**（有持续时间）：happy、stop、dizzy、done（3 秒）、proud（3 秒）
-4. **working**：按会话（session_id）计算，任意一个会话在工作就显示。会话从 UserPromptSubmit / PreToolUse 开始算工作中；PreToolUse 之后、对应的 PostToolUse / PostToolUseFailure（按 tool_use_id 配对）之前一直保持（单个工具最长 30 分钟）；没有在执行的工具时，距最近事件 5 分钟（调试模式 60 秒）才退出。这个会话 Stop / plan_ready / 被中断或停太久结束时立刻退出；别的会话还在工作时，done 3 秒之后回到 working。plan_ready 只提醒看计划，不计为完成任务、不触发 done 或完成后的定时催促
+4. **working**：按会话（session_id）计算，任意一个会话在工作就显示。会话从 UserPromptSubmit / PreToolUse 开始算工作中；PreToolUse 之后、对应的 PostToolUse / PostToolUseFailure（按 tool_use_id 配对）之前一直保持（单个工具最长 30 分钟）；没有在执行的工具时，距最近事件 5 分钟（调试模式 60 秒）才退出。这个会话 Stop / plan_ready / 被中断或停太久结束 / Notification `idle_prompt` 时立刻退出；别的会话还在工作时，done 3 秒之后回到 working。plan_ready 只提醒看计划，不计为完成任务、不触发 done 或完成后的定时催促
 5. **sleep**：本地时间 0:30～6:30，或者 15 分钟没有实际鼠标操作、也没有 Claude 事件。实际交互按原规则唤醒，唤醒时说一句起床台词；悬停与浏览/取消右键菜单不唤醒、不延后入睡
 6. **待机短暂表情**：happy / idle 2 秒
 7. **底层状态**：根据冷落值决定
@@ -217,15 +217,15 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 | `prompt` | UserPromptSubmit hook | 刷新“被理会”时间 |
 | `working` | PreToolUse hook | 进入 working（已经在 working 时不重复说话），记下在执行的工具 |
 | `tool_done` | PostToolUse hook（放行后）；PostToolUseFailure 的 Esc 中断 | 工具执行完，不说话 |
-| `stop` | Stop hook | 退出 working → 播放 done 3 秒 + claude_done 台词，claude_tasks +1 |
+| `stop` | Stop hook | 退出 working → 播放 done 3 秒 + claude_done 台词，claude_tasks +1。**例外**：这个会话的这一轮刚被诗音结束（立即中断、检查点拿到 stop 即 `work_stopped`、`pause_timeout`）时，紧接着的那次 Stop 按 work_stopped 处理：不加 claude_tasks、不显示 done、不说完成台词、不催、最近活动不记“做完了”，菜单仍提供“继续”；该会话再来 `prompt` 时这个标记作废 |
 | `plan_ready` | ExitPlanMode 的 PermissionRequest hook | 高优先级气泡“计划写好啦，去看看吧～”并跳一下；退出 working，不弹授权面板、不计完成任务 |
-| `notification` | Notification hook | 气泡提示“有事情等你确认哦”（只有终端版会触发） |
+| `notification` | Notification hook | 气泡提示“有事情等你确认哦”（只有终端版会触发）。`detail` 是官方字段 `notification_type`；为 `idle_prompt`（CC 回复完约 60 秒用户没输入）时，清掉这个会话的“工具在执行中”和 working（在提问框上按 Esc 等情况 CC 不发 PostToolUse / Stop），并收起这个会话还挂着的授权面板 |
 | `react` | 预留（目前没有调用方） | `detail` 是表情名，临时切换到该表情 3 秒 |
 
 - `POST /feedback/take` → 返回 `{"text": "…"}`：取走并清空反馈队列，按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
 - 会话字段（`/event` 可选，`server.parse_meta` 校验，不对就 400）：`session`（stdin 的 session_id）、`tool_id`（tool_use_id），以及 prompt / PreToolUse 附带的 `proc`：`{"pid", "created"(FILETIME), "name"(只认 claude.exe/node.exe/bun.exe), "entry"(CLAUDE_CODE_ENTRYPOINT), "hooks"(hook 自己到 CC 之间的 pid，最多 8 个)}`。带会话字段时回调为 `on_event(type, detail, meta)`，否则仍是两参数
 - `POST /pause/wait {"wait": 秒, "session": 可选}` → `{"paused": true|false, "stop": true|false}`：检查点长轮询。没在停下就立即返回；停下等待中最多等 `wait` 秒（上限 30），用户点“继续”立即返回 `paused: false`；等满上限（`pause_timeout`）时**此刻正在等的所有请求**都返回 `stop: true`（之后到达的请求不受影响，不留残余状态）；这个 `session` 被“立即中断”过时立即返回 `stop: true`（只生效一次，正在等的也会被唤醒）。拿到 stop 时服务线程向界面发内部事件 `work_stopped`（带 session）。hub 记录正在等的请求数，两段长轮询之间 2 秒内仍算“在等”。**没有任何接口能让 HTTP 调用方开始停下、结束这一轮或请求中断**，`/event` 里的 `work_stopped` 一律 400；`prompt` 事件到达时服务线程直接解除等待；`stop` 事件在没有 hook 正在等时作废没用上的停下；`prompt` / `stop` 带 session 时作废该会话没用上的中断标记
-- `POST /permission/open {"tool", "detail"}` → `{"id"}`（请求体上限放宽到 64 KB；排队上限 20，满了返回 503）；`POST /permission/wait {"id", "wait"}` → `{"id", "status"}`，`status` 是 `pending`/`allow`/`deny`/`gone`，`allow`/`deny` 只能取一次；`POST /permission/withdraw {"id"}` 撤回。**没有任何接口、任何字段能写入 allow/deny**，决定只来自诗音界面上的按钮（有测试往所有接口和事件类型里塞各种“同意”字段，请求始终保持 pending；另有源码级测试保证只有 controller 的按钮回调会写入决定）
+- `POST /permission/open {"tool", "detail", "session"?, "key"?}` → `{"id"}`（请求体上限放宽到 64 KB；排队上限 20，满了返回 503；`session` ≤128 字，`key` 为 ≤64 位小写十六进制，不对就 400）；`POST /permission/settle {"session", "key"?}` → `{"settled": N}`：撤掉这个会话（给了 key 就只撤指纹相同的）还在等的请求，hook 之后拿到 `gone`、不给决定；`/event` 的 `prompt` / `stop` / `notification`（`idle_prompt`）带 session 时同样撤掉该会话全部未决请求；`POST /permission/wait {"id", "wait"}` → `{"id", "status"}`，`status` 是 `pending`/`allow`/`deny`/`gone`，`allow`/`deny` 只能取一次；`POST /permission/withdraw {"id"}` 撤回。**没有任何接口、任何字段能写入 allow/deny**，决定只来自诗音界面上的按钮（有测试往所有接口和事件类型里塞各种“同意”字段，请求始终保持 pending；另有源码级测试保证只有 controller 的按钮回调会写入决定）
 - `type = pause_timeout`（hook 等满上限后发来）：只在停下等待中有效，界面放掉其他并行等待的 hook（也返回 stop），提醒一次“停太久了，这一轮先结束啦，在 CC 里说一声就能接着做”（不常驻）
 - `GET /health` → `{"ok": true}`
 - 安全：带 `Origin` 头的请求（来自网页）和 `Host` 不是 `127.0.0.1` / `localhost` 的请求一律返回 403，不触发任何回调；读请求体有 5 秒超时。hook 脚本是普通 HTTP 客户端，不受影响。
@@ -238,15 +238,18 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 - 从 stdin 读取 hook 输入的 JSON（可以不用，但必须读完）。
 - `UserPromptSubmit`：先发送 `prompt` 事件，再调用 `/feedback/take`；返回的文字非空就原样打印到 stdout（`[诗音] 用户觉得你刚才做得很好。` 等，按存档语言使用中/英/日；多次“做得好”合成一句，不写次数；摸头不产生反馈）
 - 所有事件都带 `session`（和 `tool_id`）；UserPromptSubmit / PreToolUse 另带 `proc`：用 Toolhelp 快照从 hook 自己沿父进程链往上找，有 `CLAUDE_PID` 环境变量时必须在链上找到它（否则不带），没有时取最近的 claude/node/bun 祖先；进程表工具在 `shion/winproc.py`（只用标准库）
+- `PostToolUse` / `PostToolUseFailure` 一进来（检查点等待之前）先调 `/permission/settle`，带 session 和 `key = sha256(json.dumps([tool_name, tool_input], sort_keys=True))` 前 32 位：工具已经跑过，说明它的授权在 CC 里答过了
+- `PermissionRequest`：`/permission/open` 带 session 和同样算法的 key（官方：PermissionRequest 没有 tool_use_id，只能按工具名 + 参数配对）
+- `Notification`：detail 发 `notification_type`（截短 40 字），不转发 message
 - `PostToolUseFailure`：发 `tool_error`；`is_interrupt`（用户在 CC 里按 Esc）时改发 `tool_done`。**不是检查点**：实测（2.1.289）CC 不理会它返回的 `continue: false`
 - `PostToolUse`：**检查点**（同 PreToolUse 的 `/pause/wait` 逻辑）。放行后先发 `tool_done`，再调用 `/feedback/take`，非空则输出 `hookSpecificOutput.additionalContext`（Claude 工作中即可收到反馈）。被立即中断或等满上限时输出 `{"continue": false, "stopReason": …}`，不取反馈（留给下一次 UserPromptSubmit）
 - `PreToolUse`：**检查点**。先问 `/pause/wait`；停下等待中就按 25 秒一段一直等，直到“继续”或 `prompt` 解除；诗音没开、连不上、返回内容不对一律放行（`stop`/`paused` 必须恰好是 `true` 才算数）。被立即中断或等满上限时输出 `{"continue": false, "stopReason": …}` 并附带 `permissionDecision: deny`（保证这次工具不执行），不发 `working`；等满上限（`remote.pause_timeout`，默认 30 分钟）同样处理并发 `pause_timeout`
 - `stopReason` 按存档语言取 `ui.hook_stop`（默认“用户通过诗音让这一轮工作停下，请等待用户指示”）；等满上限取 `ui.hook_stop_timeout`（默认“用户很久没有回应，这一轮先结束，请等待用户指示”）。官方文档：`continue: false` 让 Claude 在 hook 运行后完全停止处理，优先于任何事件专属的决定字段；`stopReason` 显示给用户并留在对话里；对 PreToolUse 和 PostToolUse 都有效
 - `SessionStart`：如果 `/health` 不通，就启动桌宠（`.venv\Scripts\pythonw.exe -m shion`，脱离父进程，不弹出控制台窗口），然后发送 `session_start` 事件。
 - `Stop`：只发送 `{"type":"stop"}`，不读取/转发 `last_assistant_message`，不打开 `transcript_path`。只说当前语言的完成提醒。
-- 其他事件（`PreToolUse` 发 `working`、`Notification`）只负责转发。
+- 其他事件（`PreToolUse` 发 `working`）只负责转发。
 - 配置写进**用户级** `~/.claude/settings.json` 的 `hooks` 字段，这样终端和桌面端的 Code 标签页都会加载。写之前先备份原文件，**合并而不是覆盖**用户已有的配置。另外写一个 `tools/install_hooks.py`（安装）和 `tools/uninstall_hooks.py`（卸载）。
-- **转圈文字**：PreToolUse / PostToolUse 两个检查点条目带官方通用字段 `statusMessage`（“hook 运行时显示的自定义转圈文字”），取 `ui.hook_status_waiting`：中“诗音在看着～（一直停在这里就是暂停了，右键诗音点继续）”/ 英 / 日，写成平时一闪而过不奇怪、停下时一直显示也看得懂。其他事件不加。文字在**安装时**按诗音存档语言写入（`--lang zh|en|ja` 可指定）；在诗音里换语言后要重跑一次 `install_hooks.py` 才会跟着变
+- **转圈文字**：PreToolUse / PostToolUse 两个检查点条目带官方通用字段 `statusMessage`（“hook 运行时显示的自定义转圈文字”），取 `ui.hook_status_waiting`：中“诗音在看着～（一直停在这里就是暂停了，右键诗音点继续）”/ 英 / 日，写成平时一闪而过不奇怪、停下时一直显示也看得懂。其他事件不加。文字在**安装时**按诗音存档语言写入（`--lang zh|en|ja` 可指定）；在诗音里换语言后要重跑一次 `install_hooks.py` 才会跟着变。**转圈文字只在终端版显示**，桌面端 Code 标签页不显示 hook 的 statusMessage（已知限制，用户验收 2026-10-21，不修），桌面端靠暂停标签
 
 ## 状态感知（v0.2.1）
 
@@ -277,6 +280,7 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
 **同意 / 否决的安全规则**
 - 决定**只能由用户在诗音界面上亲手点击产生**。本地 HTTP 服务**不提供**任何“设置决定”的接口，hook 只能“等待结果”
 - 默认等待 **120 秒**（可配置）。超时后 hook 不给决定，CC 照常弹出自己的授权框。**任何情况下都不能默认同意**
+- **CC 自己的授权框会同时显示**（实测 2.1.289：hook 等待期间 CC 就显示自己的框，不能关掉），两边哪边先答都可以；在 CC 里答了以后诗音面板会自动收起（见下面「排队」）
 - 诗音没在运行、连不上服务器时，hook 立刻退出、不给决定，交回 CC 自己处理
 - ExitPlanMode 无论有无计划、计划多长，一律不登记请求、不给决定；只尝试发送 `plan_ready`，发送失败也静默退出
 - 同一时间可能有多个授权请求（例如子代理并行）：按顺序排队，一次只显示一个，显示“还有 N 个”
@@ -290,13 +294,14 @@ v4 新增独立 `snacks` 统计：本地日期和当天成功吃完的次数（0
   - Claude 正在工作：下一次 **PostToolUse** 的 `additionalContext`（官方说明：放在工具结果旁边，Claude 下一轮会读到，不作为聊天消息显示）
   - Claude 空闲：下一次 **UserPromptSubmit** 时附加
 - 多条合并成一次送达；队列最多 5 条；送达后诗音说一句“已经转告啦”
+- 点的时候诗音说的话：工作中说“收到！马上转告～”/“收到！这就去转告～”（`praise_menu_working` / `feedback_bad_working`，三语）；空闲时保持“收到！下次干活时我就转告～”/“收到，我会转告的”
 - 右键原有的“夸夸”菜单项并入“工作遥控 → 做得好”；原来的 `pending_praise` / `/praise/take` 已由反馈队列和 `/feedback/take` 取代（存档迁移见「持久化」）
 
 **同意 / 否决的实现要点（v0.3 第二部分）**
 - hook（PermissionRequest）：`AskUserQuestion` 不处理（那是提问不是授权）；`ExitPlanMode` 只向 `/event` 发 `{"type":"plan_ready"}`，不进入授权流程；其余工具先 `/permission/open`，再按 10 秒一段 `/permission/wait`。**只有响应是对象、`id` 对得上、`status` 恰好等于 `"allow"` 才输出 allow**；`"deny"` 输出 deny + 存档语言的理由（`ui.hook_deny`，默认“用户通过诗音否决了这个操作”）；其余一切（连不上、超时、`gone`、字段不对）都不输出任何决定。超时（存档 `remote.permission_timeout`，默认 120 秒）先撤回请求再退出。
 - 显示的内容：Bash/PowerShell 显示命令（有描述则附 `# 描述`）；Edit/Write/NotebookEdit 显示文件完整路径；WebFetch 显示网址；WebSearch 显示搜索词；其他显示参数 JSON（不含已排除的 ExitPlanMode / AskUserQuestion）。最多 12000 字。**隐私模式不影响授权面板**（要决定就必须看到内容）。
 - 面板（`panel.py:PermissionPanel`）：终端配色；内容区只读、约 6 行高，过长出现“展开/收起”；“还有 N 个”；“否决”“同意”两个大按钮。**不抢焦点、不响应键盘**（`WindowDoesNotAcceptFocus`，按钮子类忽略所有按键），按钮在每条请求出现后 0.6 秒内不可点。静音不影响面板，只影响那一句提示语。
-- 排队：诗音每 100 毫秒从 hub 取最早的未决请求显示；hook 超过 25 秒没来轮询的请求视为已被 CC 取消（用户在 CC 里自己答了），面板自动消失。
+- 排队：诗音每 100 毫秒从 hub 取最早的未决请求显示。用户在 CC 里自己答了以后**马上收起**：同一会话的 PostToolUse / PostToolUseFailure（同意后工具跑完，按工具名 + 参数配对）、Stop、UserPromptSubmit、Notification `idle_prompt`（否决后 CC 等输入）都会撤掉对应请求，面板收起或换下一条。兜底：hook 超过 25 秒没来轮询的请求视为已被 CC 取消。官方的 `PermissionDenied` 只在 auto 模式触发，手动否决授权框时不触发，所以不接。
 - 服务端 `request_queue_size` 调到 64，并行子代理的 hook 同时连进来不会被重置。
 
 **停下规则**（不弹面板）

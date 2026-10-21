@@ -526,3 +526,21 @@ def test_idle_eligibility_uses_real_state_even_when_expression_is_different(pet,
     else:
         pet.pat(T0)
     assert not pet.can_idle(T0)
+
+
+def test_idle_prompt_ends_only_that_sessions_work(pet):
+    pet.claude_event("working", None, T0, "a", "t1")  # 工具一直没 PostToolUse（例如提问框上按 Esc）
+    pet.claude_event("working", None, T0, "b", "t2")
+    pet.claude_event("notification", "permission_prompt", T0 + sec(1), "a")
+    assert pet.working_sessions(T0 + sec(1)) == ["a", "b"]
+    r = pet.claude_event("notification", "idle_prompt", T0 + sec(60), "a")
+    assert pet.working_sessions(T0 + sec(60)) == ["b"]
+    assert "claude_done" not in keys(r) and pet.save.stats["claude_tasks"] == 0
+
+
+def test_feedback_line_depends_on_working(pet):
+    assert keys(pet.feedback_good(T0)) == ["praise_menu"]
+    assert keys(pet.feedback_bad("", T0)) == ["feedback_bad"]
+    pet.claude_event("working", None, T0, "s", "t")
+    assert keys(pet.feedback_good(T0 + sec(1))) == ["praise_menu_working"]
+    assert keys(pet.feedback_bad("x", T0 + sec(1))) == ["feedback_bad_working"]

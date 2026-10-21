@@ -629,7 +629,7 @@ class PetState:
         self._enqueue({"kind": "good", "text": ""})
         self._set_temp("proud", now)
         self._changed(now)
-        reactions.append(_say("praise_menu"))
+        reactions.append(_say("praise_menu_working" if self.is_working(now) else "praise_menu"))
         self._log_state(now)
         return reactions
 
@@ -638,7 +638,7 @@ class PetState:
         reactions = self._touch(now, attend=False)
         self._enqueue({"kind": "bad", "text": " ".join((text or "").split())[:FEEDBACK_TEXT_MAX]})
         self._changed(now)
-        reactions.append(_say("feedback_bad"))
+        reactions.append(_say("feedback_bad_working" if self.is_working(now) else "feedback_bad"))
         return reactions
 
     def _enqueue(self, item: dict) -> None:
@@ -700,6 +700,9 @@ class PetState:
             self._temp = ("dizzy", now + self.config.tool_error_for)
             reactions.append(_say("tool_error"))
         elif etype == "notification":
+            if detail == "idle_prompt":
+                # CC 回复完一直在等输入：这个会话肯定不在干活（例如在提问框上按 Esc，CC 不发 PostToolUse / Stop）
+                self._sessions.pop(key, None)
             reactions.append(_say("claude_waiting"))
         elif etype == "react":
             if detail in ("stop", "dizzy"):

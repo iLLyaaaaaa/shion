@@ -155,7 +155,7 @@ def test_new_ui_text_never_mentions_claude():
         raw = _json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))
         for k in keys:
             assert raw["ui"][k] and "claude" not in raw["ui"][k].lower()
-        for k in ("feedback_sent", "feedback_bad", "resumed"):
+        for k in ("feedback_sent", "feedback_bad", "feedback_bad_working", "praise_menu_working", "resumed"):
             assert raw["lines"][k] and all("claude" not in x.lower() for x in raw["lines"][k])
 
 
@@ -219,3 +219,28 @@ def test_panel_text_is_localized(pet):
     assert panel._ok.text() == "Send" and panel._cancel.text() == "Cancel"
     assert panel._title.text() == "What's wrong? (optional)"
     panel.close()
+
+
+# ---------------------------------------------------------------- 反馈台词：工作中“马上转告”，空闲时“下次转告”
+@pytest.mark.parametrize("lang, good, bad", [
+    ("zh", "收到！马上转告～", "收到！这就去转告～"),
+    ("en", "Got it! Passing it on right away~", "Got it! Passing that on right now~"),
+    ("ja", "了解！すぐ伝えるね～", "わかった！すぐ伝えてくるね～"),
+])
+def test_feedback_lines_while_working(pet, lang, good, bad):
+    pet.ctl.set_language(lang)
+    pet.ctl.handle_event("working", None, {"session": "s1", "tool_id": "t1"})
+    pet.ctl._speech.dismiss()
+    pet.ctl.feedback_good()
+    assert pet.said[-1] == good
+    pet.ctl._speech.dismiss()
+    pet.ctl.feedback_bad("不对")
+    assert pet.said[-1] == bad
+
+
+def test_feedback_lines_when_idle_are_unchanged(pet):
+    pet.ctl.feedback_good()
+    assert pet.said[-1] == "收到！下次干活时我就转告～"
+    pet.ctl._speech.dismiss()
+    pet.ctl.feedback_bad("")
+    assert pet.said[-1] == "收到，我会转告的"

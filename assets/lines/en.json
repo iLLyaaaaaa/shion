@@ -17,6 +17,7 @@
     "plan_ready": ["The plan's ready! Take a look~"],
     "feedback_sent": ["Passed it on!"],
     "feedback_bad": ["Got it, I'll pass that on."],
+    "feedback_bad_working": ["Got it! Passing that on right now~"],
     "resumed": ["Back to work!"],
     "startup": ["I'm back to keep you company~", "Shion's here. Let's have a good day!", "Hello again! My little spot on your desktop is still here."],
     "idle_talk": ["Remember to take a break today.", "I'll keep you company~", "Hmm... something sweet would be nice.", "I'm not waiting for head pats!"],
@@ -43,6 +44,9 @@
     ],
     "praise_menu": [
       "Got it! I'll pass that on when work resumes~"
+    ],
+    "praise_menu_working": [
+      "Got it! Passing it on right away~"
     ],
     "claude_working": [
       "Working hard...",

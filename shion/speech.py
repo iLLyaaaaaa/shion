@@ -18,8 +18,8 @@ class Priority(IntEnum):
 
 HIGH_KEYS = {"claude_done", "tool_error", "nudge", "claude_waiting", "permission_request", "plan_ready"}
 MEDIUM_KEYS = {
-    "intro", "startup", "greeting", "wake", "neglect_return", "praise_menu",
-    "feedback_sent", "feedback_bad", "resumed",
+    "intro", "startup", "greeting", "wake", "neglect_return", "praise_menu", "praise_menu_working",
+    "feedback_sent", "feedback_bad", "feedback_bad_working", "resumed",
     "cheek_release", "tickle_end",
     "bedtime", "desk_rest",
 }
