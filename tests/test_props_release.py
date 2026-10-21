@@ -299,7 +299,12 @@ def test_other_action_sequences_can_also_have_wider_canvas(qapp, tmp_path, monke
         w.move(200, 100)
         center = w.x() + w.width() / 2
         w.jump()
-        assert w.sprite_size[0] == round(700 * 200 / 512)
-        assert w.x() + w.width() / 2 == pytest.approx(center, abs=.5)
+        for elapsed in (0, .05, .1, b.JUMP_DURATION, b.JUMP_DURATION + .05):
+            w.advance_to(100 + elapsed)
+            assert w.sprite_size[0] == round(700 * 200 / 512)
+            assert w.x() + w.width() / 2 == pytest.approx(center, abs=.5)
+        w.advance_to(100 + b.JUMP_DURATION + module.ACTION_FADE_SECONDS)
+        assert w.sprite_size[0] == w.normal_width
+        assert w.x() + w.width() / 2 == pytest.approx(center, abs=1)
     finally:
         w.close()

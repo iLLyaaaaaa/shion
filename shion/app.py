@@ -191,6 +191,7 @@ def snapshot(
         win.face(1 if face == "right" else -1)
     elif cheek:
         from shion.behavior import CHEEK_RELEASE_SECONDS
+        win._begin_action_fade(t[0])
         win._pose = win._gesture_sprite("cheek", {"right": 1, "left": 2, "release": 3}[cheek], "stop")
         win._cheek_pulling = cheek != "release"
         win._pose_until = t[0] + CHEEK_RELEASE_SECONDS

@@ -165,7 +165,7 @@ def test_mouse_press_interrupts_jump_without_a_delayed_landing(env):
 def test_snapshot_cli_exposes_turn_and_jump_sequence_stages(qapp, tmp_path):
     from shion.__main__ import main
     frames = []
-    for motion, elapsed in (("--turn", "0"), ("--turn", "0.09"), ("--jump", "0"), ("--jump", "0.35"),
+    for motion, elapsed in (("--turn", "0.04"), ("--turn", "0.14"), ("--jump", "0.10"), ("--jump", "0.35"),
                             ("--drag", "0"), ("--drag", "0.11")):
         out = tmp_path / f"{motion[2:]}-{elapsed}.png"
         assert main(["--snapshot", str(out), motion, "--at", elapsed]) == 0

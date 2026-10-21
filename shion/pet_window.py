@@ -62,6 +62,7 @@ PAT_DISTANCE = 40  # px，摸头累计移动多少算一次
 DRAG_THRESHOLD = 6  # px，超过才算拖动
 GRAVITY = 2400.0  # px/s²
 FRAME_MS = 16
+ACTION_FADE_SECONDS = 0.100  # 仅 idle（含 blink）与独立动作帧的进出边界
 
 
 def landing_geometry(
@@ -120,6 +121,7 @@ class PetWindow(QWidget):
 
         self._animator = Animator()
         self._frame = Frame("idle")
+        self._action_fade: tuple[float, tuple[tuple[str, float], ...]] | None = None
         self._mask_cache: OrderedDict[tuple, QRegion] = OrderedDict()
         self._mask_key: tuple | None = None
 
@@ -458,28 +460,11 @@ class PetWindow(QWidget):
                 return "neglect1"
             return name
         f = replace(f, sprite=available(f.sprite), layers=tuple((available(n), w) for n, w in f.layers))
-        if self._jump_start is not None and self._jump_framed:
-            elapsed = max(0.0, now - self._jump_start)
-            _, progress, sy = jump_sample(elapsed)
-            names = self._sequences["jump"]
-            index = min(len(names) - 1, int(progress * len(names) + 1e-9))
-            f = Frame(names[index], sx=1 / math.sqrt(sy), sy=sy)
-        elif self._drag_playback is not None and "drag" in self._sequences:
-            names = self._sequences["drag"]
-            name = names[int(self._drag_playback.phase + 1e-9) % len(names)]
-            # 保留拖动倾斜，但不对序列帧做底层表情交叉淡化。
-            f = replace(f, sprite=name, layers=())
-        elif self._tickle_start is not None:
-            elapsed = max(0.0, now - self._tickle_start)
-            name = (self._sequence_sprite("tickle", elapsed, TICKLE_FRAME_SECONDS)
-                    if "tickle" in self._sequences else "happy")
-            f = Frame(name, angle=TICKLE_TWIST_DEGREES * math.sin(2 * math.pi * elapsed / TICKLE_TWIST_PERIOD))
-        elif self._pose is not None:
-            f = Frame(self._pose)
-        elif self._turn_start is not None:
-            f = Frame(self._sequence_sprite("turn", now - self._turn_start, TURN_FRAME_SECONDS))
+        f = self._action_frame(now, f)
+        f = self._blend_action(now, f)
         # 淡化的所有图按各自原宽绘制；切换画布只移动左边缘，脚底中心不动。
-        names = [name for name, _ in f.layers] or [f.sprite]
+        # 目标层在 alpha=0 的起点也提前占位，避免下一帧才撑开宽画布。
+        names = [f.sprite] + [name for name, _ in f.layers]
         if self.sprite_name in self._pixmaps:
             names.append(self.sprite_name)
         if self.sprite_name in PROP_STATES and self.sprite_name in self._sequences:
@@ -514,6 +499,62 @@ class PetWindow(QWidget):
         if self._pause_badge is not None:
             self._pause_badge.follow()
 
+    def _action_frame(self, now: float, f: Frame) -> Frame:
+        """只取动作帧；不推进时间线，供结束时采样预定的最后一帧。"""
+        if self._jump_start is not None and self._jump_framed:
+            elapsed = max(0.0, now - self._jump_start)
+            _, progress, sy = jump_sample(elapsed)
+            names = self._sequences["jump"]
+            index = min(len(names) - 1, int(progress * len(names) + 1e-9))
+            f = Frame(names[index], sx=1 / math.sqrt(sy), sy=sy)
+        elif self._drag_playback is not None and "drag" in self._sequences:
+            names = self._sequences["drag"]
+            name = names[int(self._drag_playback.phase + 1e-9) % len(names)]
+            # 保留拖动倾斜，但不对序列帧做底层表情交叉淡化。
+            f = replace(f, sprite=name, layers=())
+        elif self._tickle_start is not None:
+            elapsed = max(0.0, now - self._tickle_start)
+            name = (self._sequence_sprite("tickle", elapsed, TICKLE_FRAME_SECONDS)
+                    if "tickle" in self._sequences else "happy")
+            f = Frame(name, angle=TICKLE_TWIST_DEGREES * math.sin(2 * math.pi * elapsed / TICKLE_TWIST_PERIOD))
+        elif self._pose is not None:
+            f = Frame(self._pose)
+        elif self._turn_start is not None:
+            names = self._sequences["turn"]
+            index = min(len(names) - 1, int(max(0.0, now - self._turn_start) / TURN_FRAME_SECONDS + 1e-9))
+            f = Frame(names[index])
+        return f
+
+    def _blend_action(self, now: float, f: Frame) -> Frame:
+        """动作边界的透明度混合；沿用目标帧的动作姿态，不增加压扁。"""
+        if self.sprite_name != "idle" or self._dragging or self._falling or self._drag_playback is not None:
+            self._action_fade = None
+        if self._action_fade is None:
+            return f
+        start, source = self._action_fade
+        alpha = max(0.0, min(1.0, (now - start) / ACTION_FADE_SECONDS))
+        if alpha >= 1.0 - 1e-9:
+            self._action_fade = None
+            return f
+        weights: dict[str, float] = {}
+        for layers, factor in ((source, 1 - alpha), (f.layers or ((f.sprite, 1.0),), alpha)):
+            for name, weight in layers:
+                weights[name] = weights.get(name, 0.0) + weight * factor
+        return replace(f, layers=tuple((name, weight) for name, weight in weights.items() if weight > 0))
+
+    def _begin_action_fade(self, now: float, source: Frame | None = None) -> None:
+        """从当前混合接续；自然结束传预定时刻的末帧，避免依赖上一绘制帧。"""
+        if self.sprite_name != "idle" or self._dragging or self._falling or self._drag_playback is not None:
+            self._action_fade = None
+            return
+        if source is None:
+            source = self._blend_action(now, self._action_frame(now, self._animator.frame(now)))
+        self._action_fade = (now, source.layers or ((source.sprite, 1.0),))
+
+    def _finish_action_fade(self, at: float) -> None:
+        source = self._blend_action(at, self._action_frame(at, self._animator.frame(at)))
+        self._begin_action_fade(at, source)
+
     def _sequence_sprite(self, group: str, elapsed: float, frame_seconds: float) -> str:
         frames = self._sequences[group]
         index = int(max(0.0, elapsed) / frame_seconds + 1e-9) % len(frames)
@@ -545,12 +586,14 @@ class PetWindow(QWidget):
         dt = max(0.0, now - self._last_tick)
         self._last_tick = now
         if self._turn_start is not None and now + 1e-9 >= self._turn_start + len(self._sequences["turn"]) * TURN_FRAME_SECONDS:
+            self._finish_action_fade(self._turn_start + len(self._sequences["turn"]) * TURN_FRAME_SECONDS)
             self._turn_start = None
         if self._pose is not None and not self._cheek_pulling and now + 1e-9 >= self._pose_until:
+            self._finish_action_fade(self._pose_until)
             self._pose = None
         if self._tickle_start is not None:
             if now - self._tickle_last + 1e-9 >= TICKLE_STOP_SECONDS:
-                self._end_tickle(speak=True)
+                self._end_tickle(speak=True, at=self._tickle_last + TICKLE_STOP_SECONDS)
             elif now - self._tickle_said >= TICKLE_SPEECH_SECONDS:
                 self._tickle_said = now
                 self.gesture.emit("tickle")
@@ -564,6 +607,7 @@ class PetWindow(QWidget):
                 self._jump_offset = LEGACY_JUMP_HEIGHT * math.sin(math.pi * p)
             if elapsed + 1e-9 >= duration:
                 if self._jump_framed:
+                    self._finish_action_fade(self._jump_start + duration)
                     self._animator.squash(self._jump_start + duration, "jump_land")
                 self._jump_start = None
                 self._jump_offset = 0.0
@@ -653,6 +697,8 @@ class PetWindow(QWidget):
             if distance <= CHEEK_LIFT_DISTANCE:
                 if abs(d.x()) > DRAG_THRESHOLD:
                     first = not self._cheek_pulling
+                    if first:
+                        self._begin_action_fade(self._clock())
                     self._cheek_pulling = True
                     self._pose = self._gesture_sprite("cheek", 1 if d.x() > 0 else 2, "stop")
                     if first:
@@ -697,13 +743,16 @@ class PetWindow(QWidget):
     def _feed_tickle(self, now: float) -> None:
         self._tickle_last = now
         if self._tickle_start is None:
+            self._begin_action_fade(now)
             self._pose = None
             self._tickle_start = self._tickle_said = now
             self.gesture.emit("tickle")
         self._refresh(now)
 
-    def _end_tickle(self, *, speak: bool = False) -> None:
+    def _end_tickle(self, *, speak: bool = False, at: float | None = None) -> None:
         active = self._tickle_start is not None
+        if active:
+            self._finish_action_fade(self._clock() if at is None else at)
         self._tickle_start = None
         if active:
             self._tickle.clicks.clear()
@@ -780,6 +829,7 @@ class PetWindow(QWidget):
             return
         self.stop_motion()
         self._end_tickle()
+        self._begin_action_fade(self._clock())
         self._automatic_pose = automatic
         self._pose = self._gesture_sprite("turn", 2 if direction >= 0 else 8, "idle")
         self._pose_until = self._clock() + FACE_SECONDS
@@ -790,6 +840,7 @@ class PetWindow(QWidget):
             return
         self.stop_motion()
         self._end_tickle()
+        self._begin_action_fade(self._clock())
         self._automatic_pose = automatic
         self._turn_start = self._clock()
         self._refresh(self._clock())
@@ -815,6 +866,9 @@ class PetWindow(QWidget):
         return self._press_global is not None
 
     def stop_motion(self) -> None:
+        if (self._turn_start is not None or (self._pose is not None and not self._cheek_pulling)
+                or (self._jump_start is not None and self._jump_framed)):
+            self._finish_action_fade(self._clock())
         self._turn_start = None
         if not self._cheek_pulling:
             self._pose = None
@@ -830,6 +884,8 @@ class PetWindow(QWidget):
         self._end_tickle()
         self._automatic_jump = automatic
         self._jump_framed = "jump" in self._sequences
+        if self._jump_framed:
+            self._begin_action_fade(self._clock())
         self._jump_start = self._clock()
         self.advance_to(self._jump_start)
 

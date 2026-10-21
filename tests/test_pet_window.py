@@ -163,7 +163,9 @@ def test_transparent_corners_are_masked_out(win):
     assert not m.contains(QPoint(0, 0))
     assert not m.contains(QPoint(win.width() - 1, 0))
     assert not m.contains(QPoint(5, win.height() // 2))  # 留边区域
-    assert m.contains(BODY)
+    # 抱胸新图的左腿外侧已透明；验证躯干中心仍能接收点击。
+    sw, sh = win.sprite_size
+    assert m.contains(QPoint(MARGIN_X + sw // 2, MARGIN_TOP + round(sh * .65)))
 
 
 def test_default_position_is_bottom_right_feet_on_floor(win):
