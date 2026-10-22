@@ -3,11 +3,21 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from shion.pet_window import STATES, PROP_STATES
+# 注册表没有工作目录；源码入口也支持 pythonw.exe <绝对路径>/shion/__main__.py。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--hook"]:
+        from hooks.shion_hook import run_hook
+        return run_hook(argv[1:])
+
+    from shion.pet_window import STATES, PROP_STATES
+
     p = argparse.ArgumentParser(prog="shion", description="Shion 桌宠")
     p.add_argument("--snapshot", metavar="OUT.png", help="离屏渲染一帧存成 PNG 后退出")
     p.add_argument("--state", default="idle", choices=STATES + list(PROP_STATES), help="截图用的精灵（默认 idle）")
@@ -19,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--badge", action="store_true", help="截图用：画出暂停文字标签")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
-    p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating", "about"], default=None,
+    p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating", "about", "connection"], default=None,
                    help="截图用：授权、检查点停下、反馈、对话首页、零食列表或吃零食效果")
     p.add_argument("--with-pet", action="store_true", help="面板截图同时绘制诗音，检查相邻位置")
     p.add_argument("--panel-text", default="git status", help="截图用：同意/否决面板里显示的内容")

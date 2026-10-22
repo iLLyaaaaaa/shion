@@ -283,7 +283,7 @@ def snapshot(
 def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
                    more: int = 0, expand: bool = False, with_pet: bool = False) -> int:
     """离屏渲染遥控面板存成 PNG（自查画面用）。同意/否决面板的按钮在 0.6 秒内是灰的，截图时按“已生效”画。"""
-    from shion.panel import ARM_DELAY, InputPanel, PermissionPanel
+    from shion.panel import ARM_DELAY, ConnectionPanel, InputPanel, PermissionPanel
 
     app = QApplication.instance() or QApplication(sys.argv)
     lines = Lines(lang)
@@ -323,6 +323,13 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
         panel.open(body)
         if kind == "snacks":
             panel._choose("page", "snacks")
+        img = panel.grab().toImage()
+    elif kind == "connection":
+        from tools.hooks_config import user_settings_path
+        panel = ConnectionPanel(family)
+        path = str(user_settings_path()).replace("\\", "\\\u200b").replace("/", "/\u200b")
+        panel.open({"title": ui("connection_title"), "body": ui("connection_explain", path=path),
+                    "connect": ui("connection_accept"), "later": ui("connection_later")}, body)
         img = panel.grab().toImage()
     elif kind == "about":
         from PySide6.QtWidgets import QMessageBox

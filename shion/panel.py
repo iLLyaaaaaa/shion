@@ -111,6 +111,69 @@ class MouseOnlyButton(QPushButton):
         event.ignore()
 
 
+class ConnectionPanel(QWidget):
+    """首次引导/连接确认共用的鼠标面板，不接收键盘焦点。"""
+    selected = Signal(bool)
+
+    def __init__(self, font_family: str = "Consolas"):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+                            | Qt.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setObjectName("panel")
+        self.setFixedWidth(420)
+        self.setStyleSheet(STYLE + f"* {{ font-family: '{font_family}'; }}")
+        self._title, self._detail = QLabel(), QLabel()
+        for label in (self._title, self._detail):
+            label.setWordWrap(True)
+            label.setTextFormat(Qt.PlainText)
+            label.setFocusPolicy(Qt.NoFocus)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._connect, self._later = MouseOnlyButton(), MouseOnlyButton()
+        for button in (self._connect, self._later):
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setMinimumHeight(32)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self._later)
+        row.addWidget(self._connect)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.addWidget(self._title)
+        layout.addWidget(self._detail)
+        layout.addLayout(row)
+        self._connect.clicked.connect(lambda: self._choose(True))
+        self._later.clicked.connect(lambda: self._choose(False))
+
+    def open(self, texts: dict[str, str], body) -> None:
+        self.refresh(texts)
+        self.follow(body)
+        self.show()
+
+    def refresh(self, texts: dict[str, str]) -> None:
+        self.setWindowTitle(texts["title"])
+        self._title.setText(texts["title"])
+        self._detail.setText(texts["body"])
+        self._connect.setText(texts["connect"])
+        self._later.setText(texts["later"])
+        # 首次显示前 Qt 的 word-wrap sizeHint 会低估长正文高度；按实际宽度定高。
+        self.ensurePolished()
+        for label in (self._title, self._detail):
+            label.ensurePolished()
+            label.setFixedWidth(self.width() - 24)
+            label.setFixedHeight(label.heightForWidth(label.width()))
+        self.layout().activate()
+        self.setFixedHeight(self.layout().sizeHint().height())
+
+    def follow(self, body) -> None:
+        position_dialog(self, body)
+
+    def _choose(self, connect: bool) -> None:
+        self.hide()
+        self.selected.emit(connect)
+
+
 class PermissionPanel(QWidget):
     """同意/否决面板：显示要执行的命令或要改的文件，两个大按钮，一次只显示一条。
 

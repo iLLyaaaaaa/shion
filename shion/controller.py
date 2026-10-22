@@ -28,7 +28,9 @@ from shion.dialogue import DialoguePanel
 from shion.menu_content import MenuContent, localized
 from shion.lines import Lines
 from shion import interrupt
-from shion.panel import InputPanel, PermissionPanel
+from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
+from shion.startup import Startup
+from tools.hooks_config import HookConnection
 from shion.remote import RemoteHub
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
@@ -104,6 +106,11 @@ class PetController(QObject):
         self._dialogue: Optional[DialoguePanel] = None
         self._crumbs: Optional[CrumbOverlay] = None
         self._about: Optional[QMessageBox] = None
+        self.connection = HookConnection()
+        self.startup = Startup()
+        self._connection_panel: Optional[ConnectionPanel] = None
+        self._connection_onboarding = False
+        self._connection_waiting = False
         self.menu_content = MenuContent()
         self._autostart = autostart
         self._now_fn = now_fn
@@ -187,11 +194,14 @@ class PetController(QObject):
         self._sync_permission()
         self.react(self.state.tick(now))
         self.sync()
+        self._sync_connection_prompt()
         action = self._idle.step(
             self.window.monotonic_time(), self.state.can_idle(now)
             and not self.window.motion_active and not self.window.is_falling
             and not self.window.is_pressed and not self._menu_open
-            and not (self._dialogue is not None and self._dialogue.isVisible()),
+            and not (self._dialogue is not None and self._dialogue.isVisible())
+            and not (self._connection_panel is not None and self._connection_panel.isVisible()),
+            # 引导/确认期间不做自动动作，仍继续处理工作和授权事件。
             self.state.save.activity_level,
         )
         if action == "turn":
@@ -270,6 +280,10 @@ class PetController(QObject):
             self.say_key("intro" if first_start else "startup")
         self.react(self.state.gain_affection("open", self._now()))
         self._try_time_speech()
+        if self.state.save.connection_prompt is None:
+            self.state.save.connection_prompt = "pending" if first_start else "skipped"
+            self.scheduler.mark_dirty(self._now())
+            self.scheduler.flush()
 
     def say_text(self, text: str, *, priority: Priority = Priority.LOW,
                  category: str = "claude_working") -> bool:
@@ -307,6 +321,8 @@ class PetController(QObject):
             self._dialogue.follow(self.window.body_rect())
         if self._crumbs is not None and self._crumbs.isVisible():
             self._crumbs.follow(self._mouth_anchor())
+        if self._connection_panel is not None and self._connection_panel.isVisible():
+            self._connection_panel.follow(self.window.body_rect())
 
     # ------------------------------------------------------------ 手势
     def _on_pressed(self) -> None:
@@ -437,6 +453,9 @@ class PetController(QObject):
             self.bubble.dismiss()
         if self._dialogue is not None and self._dialogue.isVisible():
             self._dialogue.refresh()
+        if self._connection_panel is not None and self._connection_panel.isVisible():
+            self._connection_panel.refresh(self._connection_texts())
+            self._connection_panel.follow(self.window.body_rect())
         self.scheduler.mark_dirty(self._now())
         self.sync()
         self._try_time_speech()
@@ -507,7 +526,7 @@ class PetController(QObject):
                 self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z)
 
     def _dialog_windows(self):
-        return (self._dialogue, self._input_panel, self._perm_panel, self._about)
+        return (self._dialogue, self._input_panel, self._perm_panel, self._about, self._connection_panel)
 
     def _apply_topmost(self) -> None:
         if self.state.save.always_on_top:
@@ -845,6 +864,8 @@ class PetController(QObject):
             return
         if self._dialogue is not None:
             self._dialogue.hide()
+        if self._connection_panel is not None:
+            self._connection_panel.hide()
         if panel is None:
             family = self.bubble.font_family if self.bubble is not None else "Consolas"
             panel = self._perm_panel = PermissionPanel(family, clock=self.window.monotonic_time)
@@ -913,20 +934,21 @@ class PetController(QObject):
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
         self._foreground.stop()
         self.state.cancel_snack()
-        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs):
+        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel):
             if panel is not None:
                 panel.hide()
                 panel.setParent(None)
                 panel.deleteLater()
         self._perm_panel = self._input_panel = None
         self._dialogue = self._crumbs = None
+        self._connection_panel = None
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:
         self._foreground.stop()
         self.window.stop_motion()
         self.state.cancel_snack()
-        for panel in (self._dialogue, self._crumbs):
+        for panel in (self._dialogue, self._crumbs, self._connection_panel):
             if panel is not None:
                 panel.hide()
         if self._perm_panel is not None:
@@ -967,6 +989,7 @@ class PetController(QObject):
                                progress=progress, remaining=remaining)
         if save.fixed_expression:
             text += "\n" + ui("expression_fixed")
+        text += "\n" + self.connection_status_text()
         return text
 
     def _show_status(self) -> None:
@@ -976,6 +999,74 @@ class PetController(QObject):
             text += "\n" + self.lines.ui("recent_header") + "\n" + "\n".join(recent)
         self.say(text)
         self._try_time_speech()
+
+    # ------------------------------------------------------------ 连接与自启
+    def connection_status_text(self) -> str:
+        result = self.connection.inspect()
+        text = self.lines.ui("connection_status", state=self.lines.ui("connection_" + result.state))
+        if result.detail:
+            text += "\n" + result.detail
+        return text
+
+    def _connection_texts(self) -> dict[str, str]:
+        ui = self.lines.ui
+        # 在路径分隔符后允许换行，窄屏上长路径不会把面板撑出屏幕。
+        path = str(self.connection.user).replace("\\", "\\\u200b").replace("/", "/\u200b")
+        return {"title": ui("connection_title"), "body": ui("connection_explain", path=path),
+                "connect": ui("connection_accept"),
+                "later": ui("connection_later" if self._connection_onboarding else "panel_cancel")}
+
+    def open_connection(self, *, onboarding: bool = False) -> None:
+        self._connection_onboarding = onboarding or self.state.save.connection_prompt == "pending"
+        self._connection_waiting = True
+        if self._connection_panel is None:
+            family = self.bubble.font_family if self.bubble is not None else "Consolas"
+            self._connection_panel = ConnectionPanel(family)
+            self._connection_panel.selected.connect(self._connection_selected)
+        if not self.hub.permissions.pending():
+            self._connection_panel.open(self._connection_texts(), self.window.body_rect())
+
+    def _sync_connection_prompt(self) -> None:
+        panel = self._connection_panel
+        if self.hub.permissions.pending() or self._menu_open:
+            return
+        if self._speech.until > self.window.monotonic_time():
+            return
+        if any(p is not None and p.isVisible() for p in (self._dialogue, self._input_panel, self._about)):
+            return
+        if ((self.state.save.connection_prompt == "pending" or self._connection_waiting)
+                and (panel is None or not panel.isVisible())):
+            self.open_connection(onboarding=self._connection_onboarding)
+
+    def _connection_selected(self, connect: bool) -> None:
+        if self._connection_onboarding:
+            self.state.save.connection_prompt = "connect" if connect else "later"
+            self.scheduler.mark_dirty(self._now())
+            self.scheduler.flush()
+        self._connection_onboarding = False
+        self._connection_waiting = False
+        if connect:
+            try:
+                result = self.connection.connect(self.lines.lang)
+                message = self.lines.ui("connection_success")
+                if result.backups:
+                    message += "\n" + self.lines.ui("connection_backups", paths="\n".join(map(str, result.backups)))
+                self.say(message, priority=Priority.HIGH, category="connection")
+            except (ValueError, OSError) as exc:
+                self.say(self.lines.ui("connection_failed", error=str(exc)), priority=Priority.HIGH, category="connection")
+
+    def disconnect(self) -> None:
+        try:
+            self.connection.disconnect()
+            self.say(self.lines.ui("connection_removed"), priority=Priority.HIGH, category="connection")
+        except (ValueError, OSError) as exc:
+            self.say(self.lines.ui("connection_failed", error=str(exc)), priority=Priority.HIGH, category="connection")
+
+    def set_startup(self, enabled: bool) -> None:
+        try:
+            self.startup.set_enabled(enabled)
+        except (ValueError, OSError) as exc:
+            self.say(self.lines.ui("startup_failed", error=str(exc)), priority=Priority.HIGH, category="startup")
 
     # ------------------------------------------------------------ 菜单
     def _mouth_anchor(self) -> QPoint:
@@ -1119,8 +1210,28 @@ class PetController(QObject):
             lang_group.addAction(act)
             act.triggered.connect(lambda _=False, c=code: self.set_language(c))
 
+        menu.addSeparator()
+        connection = self.connection.inspect()
+        menu.addAction(ui("connection_status", state=ui("connection_" + connection.state))).setEnabled(False)
+        if connection.state != "connected":
+            label = "menu_reconnect" if connection.state == "stale" else "menu_connect"
+            menu.addAction(ui(label)).triggered.connect(lambda: self.open_connection())
+        if connection.state in ("connected", "stale", "error"):
+            menu.addAction(ui("menu_disconnect")).triggered.connect(self.disconnect)
+        if connection.detail:
+            menu.actions()[-1].setToolTip(connection.detail)
+
         auto = menu.addAction(ui("menu_autostart"))
-        auto.setEnabled(False)
+        auto.setCheckable(True)
+        try:
+            startup = self.startup.inspect()
+            auto.setChecked(startup == "enabled")
+            if startup == "stale":
+                auto.setText(ui("menu_autostart_stale"))
+        except OSError as exc:
+            auto.setEnabled(False)
+            auto.setToolTip(ui("startup_failed", error=str(exc)))
+        auto.triggered.connect(self.set_startup)
 
         menu.addSeparator()
         menu.addAction(ui("menu_about")).triggered.connect(self.show_about)

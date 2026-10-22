@@ -201,6 +201,7 @@ class SaveData:
     release_to_taskbar: bool = False
     always_on_top: bool = True
     time_speech: dict = field(default_factory=lambda: {"date": "", "spoken": []})
+    connection_prompt: Optional[str] = None  # pending / connect / later / skipped；旧档启动时标 skipped
 
     def to_dict(self) -> dict:
         return {
@@ -224,6 +225,7 @@ class SaveData:
             "release_to_taskbar": self.release_to_taskbar,
             "always_on_top": self.always_on_top,
             "time_speech": {"date": self.time_speech["date"], "spoken": list(self.time_speech["spoken"])},
+            "connection_prompt": self.connection_prompt,
         }
 
     @classmethod
@@ -260,6 +262,8 @@ class SaveData:
         d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)
         d.always_on_top = _bool(raw.get("always_on_top"), True)
         d.time_speech = _time_speech_record(raw.get("time_speech"))
+        prompt = raw.get("connection_prompt")
+        d.connection_prompt = prompt if prompt in ("pending", "connect", "later", "skipped") else None
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
         expr = raw.get("fixed_expression")

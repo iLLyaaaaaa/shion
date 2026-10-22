@@ -77,12 +77,14 @@ def test_every_shipped_language_is_complete(code):
 
 
 @pytest.mark.parametrize("code", ["zh", "en", "ja"])
-def test_ready_reminders_are_native_and_interface_has_no_claude(code):
+def test_ready_reminders_are_native_and_brand_only_describes_connection(code):
     raw = _raw(code)
     for key in ("plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end", "claude_done"):
         assert raw["lines"][key]  # 必须原生提供，不能依赖中文回退
         assert Lines(code).pick(key) in raw["lines"][key]
-    visible = list(raw["ui"].values()) + [s if isinstance(s, str) else s["text"]
+    compatibility = {"menu_connect", "menu_reconnect", "connection_explain"}
+    assert all("Claude Code" in raw["ui"][key] for key in compatibility)
+    visible = [text for key, text in raw["ui"].items() if key not in compatibility] + [s if isinstance(s, str) else s["text"]
                                           for pool in raw["lines"].values() for s in pool]
     assert all("claude" not in text.casefold() for text in visible)
     assert "done_summary" not in raw["ui"]

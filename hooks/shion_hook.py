@@ -285,14 +285,16 @@ def take_feedback() -> str:
 
 
 def launch_shion() -> None:
-    exe = ROOT / ".venv" / "Scripts" / "pythonw.exe"
+    frozen = getattr(sys, "frozen", False)
+    exe = Path(sys.executable) if frozen else ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if not exe.exists():
         return
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     for extra in (0x01000000, 0):  # CREATE_BREAKAWAY_FROM_JOB；被拒绝就去掉重试
         try:
             subprocess.Popen(
-                [str(exe), "-m", "shion"], cwd=str(ROOT), creationflags=flags | extra,
+                [str(exe)] + ([] if frozen else ["-m", "shion"]),
+                cwd=str(exe.parent if frozen else ROOT), creationflags=flags | extra,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 env={**os.environ, "SHION_LAUNCHED_BY_HOOK": "1"},
             )
@@ -446,7 +448,9 @@ def _guarded_main() -> None:
         pass
 
 
-if __name__ == "__main__":
+def run_hook(argv=None) -> int:
+    if argv is not None:
+        sys.argv = [sys.argv[0], *argv]
     # 总时限：服务器卡住（收了连接不回包）时 socket 超时只管单次操作，这里兜底强制退出
     worker = threading.Thread(target=_guarded_main, daemon=True)
     worker.start()
@@ -457,4 +461,8 @@ if __name__ == "__main__":
         sys.stdout.flush()
     except BaseException:
         pass
-    os._exit(0)
+    return 0
+
+
+if __name__ == "__main__":
+    os._exit(run_hook())

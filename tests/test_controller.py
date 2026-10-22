@@ -196,8 +196,9 @@ def find_action(menu, text):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "松手后落到任务栏", "置于最上层", "静音气泡", "只显示状态，不显示内容", "语言", "开机自启（v1.0）", "关于", "退出"]
-    assert not find_action(menu, "开机自启（v1.0）").isEnabled()
+    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "松手后落到任务栏", "置于最上层", "静音气泡", "只显示状态，不显示内容", "语言", "连接状态：未连接", "连接 Claude Code", "开机自启", "关于", "退出"]
+    assert find_action(menu, "开机自启").isCheckable()
+    assert not find_action(menu, "开机自启").isChecked()
     sizes = find_action(menu, "大小").menu().actions()
     assert [a.text() for a in sizes] == ["160", "200", "260", "320"]
     assert [a.isChecked() for a in sizes] == [False, True, False, False]
