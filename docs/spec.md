@@ -477,6 +477,9 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
 - 睡眠截图自动合成 Z：`--state sleep|bed --at 0/.9/1.8/2.2` 检查单枚/多枚、漂移与淡出，截图重建历史发射时刻但正式运行不补发。`--state working --nod --at 0/.2/.4` 检查点头，`--state neglect2 --at .875/2.625` 检查慢摇两端；`--state desk --desk-blink single|double --at 0/.15/.4/.55` 检查双眨与间隔。`--nod`、`--desk-blink` 与其他截图动作参数互斥。
 - 截图 `--panel permission|input [--panel-text 内容] [--panel-more N] [--panel-expand] [--lang ja]` 只画遥控面板。
 - 截图 `--panel dialogue|snacks|eating [--lang zh|en|ja]` 检查对话首页、零食页或 happy 与碎屑效果；只查看此入口生成的截图，不打开精灵原图。
+- **README 媒体**：`.venv\Scripts\python tools\make_media.py` 在 `docs/images/` 生成 4 秒、20 fps、480×360 的 `hero.gif`，以及统一 720×420 的 `pat.png`（爱心）、`desk.png`、`permission.zh/en/ja.png`（带诗音，命令 `npm test`）、`sleep-bed.png`（Z）。其余场景无台词气泡。全部用不透明浅色圆角卡片，以 2 倍像素渲染再 Lanczos 缩小；文档引用使用相对路径。
+- 媒体与旧截图共用 `SnapshotScene` / `render_snapshot` / `render_snapshot_panel`，同一进程连续推进假时钟、复用宠物窗口；旧 `--snapshot` 参数、输出及真实屏幕定位不变。媒体单独固定种子 42、时钟起点 100.0、DPI、区域设置、字体与虚拟布局，使用 Windows Qt 原生字体但不显示窗口；不读取用户存档、连接配置或桌面，不启动逐帧子进程。缺少固定字体时明确失败，不静默替换。
+- 媒体在相同 Windows、字体文件、Python/Qt/Pillow 版本下要求逐字节一致；跨系统或字体/依赖版本不保证一致。无编码时间或机器信息；GIF 共用全局调色板、无抖动、无限循环且解码首尾一致。GIF ≤2,000,000 字节、单 PNG ≤300,000 字节、目录总量（含已有其他文件）≤5,000,000 字节，超限退出失败。先在临时目录生成并校验，成功后只替换上述七个文件，保留其他文件。`--output-dir` 可指定重跑校验目录。
 - **调试模式**：设置环境变量 `SHION_DEBUG=1` 时，冷落、睡眠的阈值缩短为秒级，并在控制台输出状态变化日志；诗音旁显示 FPS，每 0.5 秒按实际经过时间统计桌宠 paintEvent 次数。计数器独立刷新、透明点穿、不抢焦点，跟随移动与大小变化且限制在屏幕内，随桌宠隐藏/关闭。普通模式不创建该窗口。它表示 Qt 绘制频率，不代表显示器呈现频率；定时器、render_frame 和计数器自身绘制不计入。保留静止画面的重绘优化，静止时 FPS 较低是正常现象。
 - 程序日志写进 `%APPDATA%\Shion\shion.log`，不要大量打印到终端。
 

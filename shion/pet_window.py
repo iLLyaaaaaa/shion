@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import os
+import random
 import re
 import time
 from collections import OrderedDict
@@ -99,6 +100,8 @@ class PetWindow(QWidget):
         clock: Callable[[], float] = time.perf_counter,
         autostart: bool = True,
         *, debug: bool | None = None,
+        rng: random.Random | None = None,
+        pixel_ratio: float | None = None,
     ):
         super().__init__()
         self.setWindowFlags(
@@ -114,6 +117,7 @@ class PetWindow(QWidget):
         self._sleep_z = None
         self._pause_badge = None  # 暂停文字标签，第一次要显示时才建
         self._height = height
+        self._pixel_ratio = pixel_ratio
         self._pixmaps: dict[str, QPixmap] = {}
         self._sequences: dict[str, tuple[str, ...]] = {}
         self._sw = 0  # 精灵逻辑宽高
@@ -121,7 +125,7 @@ class PetWindow(QWidget):
         self._load_sprites()
         self.setFixedSize(self._sw + 2 * MARGIN_X, self._sh + MARGIN_TOP + MARGIN_BOTTOM)
 
-        self._animator = Animator()
+        self._animator = Animator(rng)
         self._frame = Frame("idle")
         self._action_fade: tuple[float, tuple[tuple[str, float], ...]] | None = None
         self._mask_cache: OrderedDict[tuple, QRegion] = OrderedDict()
@@ -306,7 +310,7 @@ class PetWindow(QWidget):
 
     def _load_sprites(self) -> None:
         screen = QGuiApplication.primaryScreen()
-        dpr = screen.devicePixelRatio() if screen else 1.0
+        dpr = self._pixel_ratio or (screen.devicePixelRatio() if screen else 1.0)
         self._pixmaps.clear()
         self._sequences.clear()
 
@@ -414,9 +418,10 @@ class PetWindow(QWidget):
         if self._fps_overlay is not None:
             self._fps_overlay.counter.record()
 
-    def render_frame(self) -> QImage:
+    def render_frame(self, scale: int = 1) -> QImage:
         """把当前帧画进一张透明 QImage（不受遮罩裁剪，截图和测试用）。"""
-        img = QImage(self.size(), QImage.Format_ARGB32_Premultiplied)
+        img = QImage(self.size() * scale, QImage.Format_ARGB32_Premultiplied)
+        img.setDevicePixelRatio(scale)
         img.fill(0)
         p = QPainter(img)
         p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)

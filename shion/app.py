@@ -4,11 +4,13 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import math
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QStandardPaths, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QStandardPaths, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
@@ -150,8 +152,69 @@ def run() -> int:
     return code
 
 
-def snapshot(
-    out: str,
+def render_pet_snapshot(win: PetWindow, scale: int = 1) -> QImage:
+    """当前宠物帧与睡眠特效；单帧截图和连续媒体共用，不推进时钟。"""
+    img = win.render_frame(scale)
+    if win._sleep_z is not None:
+        from shion.effects import sleep_z_anchor
+        painter = QPainter(img)
+        win._sleep_z.draw(painter, QPointF(win.mapFromGlobal(sleep_z_anchor(win, win._sleep_z.state))))
+        painter.end()
+    return img
+
+
+def render_widget_image(widget, scale: int = 1) -> QImage:
+    """直接画到目标像素密度，不读取桌面或受窗口遮罩裁剪。"""
+    img = QImage(widget.size() * scale, QImage.Format_ARGB32_Premultiplied)
+    img.setDevicePixelRatio(scale)
+    img.fill(0)
+    painter = QPainter(img)
+    try:
+        widget.render(painter, QPoint())
+    finally:
+        painter.end()
+    return img
+
+
+class SnapshotScene:
+    """一次创建、按假时钟连续取帧。调用者负责触发动作和 close。"""
+
+    def __init__(self, state: str = "idle", height: int = 200, activity: str = "normal",
+                 *, seed: int | None = None, scale: int = 1):
+        self.app = QApplication.instance() or QApplication(sys.argv)
+        self.time = [100.0]
+        self.scale = scale
+        self.win = PetWindow(height=height, clock=lambda: self.time[0], autostart=False,
+                             debug=False, rng=random.Random(seed) if seed is not None else None,
+                             pixel_ratio=scale if seed is not None or scale != 1 else None)
+        self.win.setAttribute(Qt.WA_DontShowOnScreen)
+        self.win.set_activity(activity)
+        self.win.set_calm(activity == "quiet")
+        self.win.set_state(state, animate=False)
+
+    def advance_to(self, elapsed: float) -> None:
+        target = 100.0 + elapsed
+        if not math.isfinite(target) or target < self.time[0]:
+            raise ValueError("截图时间必须有限且单调递增")
+        self.time[0] = target
+        self.win.advance_to(target)
+
+    def render(self) -> QImage:
+        return render_pet_snapshot(self.win, self.scale)
+
+    def close(self) -> None:
+        self.win.close()
+        self.win.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+
+
+def render_snapshot(
     state: str = "idle",
     bubble: str | None = None,
     at: float = 0.0,
@@ -170,8 +233,8 @@ def snapshot(
     weight_shift: str | None = None,
     nod: bool = False,
     desk_blink: str | None = None,
-) -> int:
-    """离屏渲染一帧存成 PNG。不显示窗口，不做单实例检查。
+) -> QImage:
+    """离屏渲染一帧并返回 QImage。不显示窗口，不做单实例检查。
 
     at：切到该状态后第几秒的那一帧（用来检查晃动、呼吸）。squash：在 0 秒触发压扁。
     bubble：同时画出头顶的气泡；此时 at 是气泡打字的进度，at=0 表示显示完整台词。
@@ -179,12 +242,8 @@ def snapshot(
     """
     # 不强制 offscreen：offscreen 平台没有任何字体，中文会变成方块；
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
-    app = QApplication.instance() or QApplication(sys.argv)
-    t = [100.0]  # 假时钟，不用真的等
-    win = PetWindow(height=height, clock=lambda: t[0], autostart=False, debug=False)
-    win.set_activity(activity)
-    win.set_calm(activity == "quiet")
-    win.set_state(from_state or state, animate=False)
+    scene = SnapshotScene(from_state or state, height, activity)
+    t, win = scene.time, scene.win
     if from_state:
         win.set_state(state)
     if squash:
@@ -228,13 +287,7 @@ def snapshot(
             index += 1
     t[0] += at
     win.advance_to(t[0])
-    img = win.render_frame()
-    if win._sleep_z is not None:
-        from shion.effects import sleep_z_anchor
-        from PySide6.QtCore import QPointF
-        painter = QPainter(img)
-        win._sleep_z.draw(painter, QPointF(win.mapFromGlobal(sleep_z_anchor(win, win._sleep_z.state))))
-        painter.end()
+    img = scene.render()
     if badge:  # 暂停文字标签：与真实窗口一样相对精灵本体定位
         from shion.badge import badge_geometry, label_font, render_badge
         sw, sh = win.sprite_size
@@ -271,32 +324,60 @@ def snapshot(
         p.drawImage(bx, by, bimg)
         p.end()
         img = canvas
+        bw.close()
+        bw.deleteLater()
+
+    scene.close()
+    return img
+
+
+def snapshot(
+    out: str, state: str = "idle", bubble: str | None = None, at: float = 0.0,
+    squash: str | None = None, lang: str = "zh", from_state: str | None = None,
+    jump: bool = False, turn: bool = False, drag: bool = False, face: str | None = None,
+    cheek: str | None = None, tickle: bool = False, badge: bool = False, height: int = 200,
+    activity: str = "normal", weight_shift: str | None = None, nod: bool = False,
+    desk_blink: str | None = None,
+) -> int:
+    """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
+    img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, turn, drag,
+                          face, cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
 
     ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)
         return 1
-    win.close()
     print(f"saved {out} ({img.width()}x{img.height()})")
-    del app
     return 0
 
 
-def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
-                   more: int = 0, expand: bool = False, with_pet: bool = False) -> int:
-    """离屏渲染遥控面板存成 PNG（自查画面用）。同意/否决面板的按钮在 0.6 秒内是灰的，截图时按“已生效”画。"""
+def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
+                          more: int = 0, expand: bool = False, with_pet: bool = False,
+                          *, scale: int = 1, fixed_scene: bool = False) -> QImage:
+    """返回面板 QImage；默认保留真实屏幕定位，固定媒体场景隐藏窗口并在 2x 画布绘制。
+
+    同意/否决按钮在 0.6 秒内是灰的，截图时按“已生效”画。
+    """
     from shion.panel import ARM_DELAY, ConnectionPanel, InputPanel, PermissionPanel
 
+    if fixed_scene and kind != "permission":
+        raise ValueError("固定媒体场景仅支持授权面板")
     app = QApplication.instance() or QApplication(sys.argv)
     lines = Lines(lang)
     ui = lines.ui
     font_bubble = BubbleWindow()
     font_bubble.set_font_fallback(lines.font_fallback)
     family = font_bubble.font_family
+    if fixed_scene:
+        family = {"zh": "Microsoft YaHei UI", "en": "Cascadia Mono", "ja": "Yu Gothic UI"}[lang]
     body = (400, 400, 100, 100)
     scene_pet = None
     if with_pet and kind != "eating":
-        scene_pet = PetWindow(autostart=False, debug=False)
+        scene_pet = PetWindow(autostart=False, debug=False, **(
+            {"height": 260, "clock": lambda: 100.0, "rng": random.Random(42), "pixel_ratio": scale}
+            if fixed_scene else {}))
+        if fixed_scene:
+            scene_pet.setAttribute(Qt.WA_DontShowOnScreen)
         scene_pet.move(body[0] - MARGIN_X, body[1] - MARGIN_TOP)
         body = scene_pet.body_rect()
     if kind == "eating":
@@ -352,6 +433,8 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
     else:
         t = [0.0]
         panel = PermissionPanel(family, clock=lambda: t[0])
+        if fixed_scene:
+            panel.setAttribute(Qt.WA_DontShowOnScreen)
         panel.show_request(
             "snapshot", "Bash", text, more,
             {"title": ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
@@ -363,27 +446,43 @@ def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "z
             panel._toggle.click()
         t[0] += ARM_DELAY + 0.1
         panel.refresh_enabled()
-        img = panel.grab().toImage()
+        if fixed_scene:
+            panel._timer.stop()
+            panel.hide()
+            panel.move(body[0] + body[2] + 16, body[1] + (body[3] - panel.height()) // 2)
+            img = render_widget_image(panel, scale)
+        else:
+            img = panel.grab().toImage()
     if scene_pet is not None:
         # 使用真实定位结果合成，能同时检查对话框与身体是否重叠。
         bounds = scene_pet.geometry().united(panel.geometry())
-        canvas = QImage(bounds.size(), QImage.Format_ARGB32_Premultiplied)
+        canvas = QImage(bounds.size() * scale, QImage.Format_ARGB32_Premultiplied)
+        canvas.setDevicePixelRatio(scale)
         canvas.fill(0)
         painter = QPainter(canvas)
-        painter.drawImage(scene_pet.pos() - bounds.topLeft(), scene_pet.render_frame())
+        painter.drawImage(scene_pet.pos() - bounds.topLeft(), scene_pet.render_frame(scale))
         painter.drawImage(panel.pos() - bounds.topLeft(), img)
         painter.end()
         img = canvas
         scene_pet.close()
+        scene_pet.deleteLater()
     font_bubble.close()
+    font_bubble.deleteLater()
     panel.hide()
     panel.setParent(None)
     panel.deleteLater()  # 在这里（GUI 线程）立刻销毁，别留给别的线程里的垃圾回收
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    del app
+    return img
+
+
+def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
+                   more: int = 0, expand: bool = False, with_pet: bool = False) -> int:
+    """原面板截图入口，保留真实屏幕定位与 PNG 输出。"""
+    img = render_snapshot_panel(kind, text, lang, more, expand, with_pet)
     ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)
         return 1
     print(f"saved {out} ({img.width()}x{img.height()})")
-    del app
     return 0

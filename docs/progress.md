@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-22 README 媒体离屏生成**：按确认方案新增 `tools/make_media.py`，复用 snapshot 渲染并在同一进程连续取帧，输出 4 秒循环 GIF 与 6 张 PNG，共 **1,863,957 字节**。种子/时钟/字体/DPI 固定、2 倍渲染再缩小；两次独立运行逐文件字节一致，同进程重复生成也通过；13 张旧截图重构前后逐字节相同。专项 **296 passed、3 skipped、2 warnings**，全量 **1571 passed、9 skipped、2 warnings**。成品观感 **待用户验收**。原素材与 README 草稿未改，`docs/drafts/` 不暂存；仅本地 commit，不 push。
 - **2026-10-22 立即中断只有文字时的 Stop 收尾**：补齐待确认中断会话直接收到 Stop 时的三语 `interrupt_done_after_text`，stop 表情、遵守当前静音，每会话一次；不计完成任务、不说完成台词，保留“继续”入口。专项 **179 passed、1 skipped**；全量 **1561 passed、9 skipped、2 warnings**。真实 CC 文字写完直接 Stop 的表现 **待用户验收**。只本地 commit，不 push；`docs/drafts/` 不暂存，本轮不重建 exe。
 - **2026-10-22 Win+D 后跟随修复与分段中断提示**：前台/恢复双事件、150ms/500ms 有限补查和非激活显示恢复；中断点击与 `work_stopped` 分开提示、三语 stop 表情，连接面板/spec 补充源码迁移限制。全量 **1552 passed、9 skipped、2 warnings**，原生 Windows 150% 专项 **64 passed**，修正版 exe 复制目录自检 **78 项通过**。PreToolUse 启动到退出各 20 次中位数：**exe 392.562ms / .venv 329.602ms**，未做启动优化。真实桌面与实际 CC 联动 **待用户验收**。本轮仅本地 commit，不 push；三份既有 README 草稿保留、不纳入提交。
 - **2026-10-22 v1.0 第 2 步：Windows onedir 打包**：已生成 `dist/Shion/Shion.exe`，完整目录 **105,519,736 字节（105.52 MB / 100.63 MiB，221 文件）**。复制到无 `.venv` 的中文/空格临时路径后，exe 内 HookConnection、九张截图、八类 hook、自启动和存档日志落点等 **78 项自检通过**；全量 **1531 passed、7 skipped、2 warnings**，最终修正回归 **31 passed**。真实桌面、干净机器、杀毒及 Claude Code 实际联动 **待用户验收**。只做本步，本地 commit，不 push。
@@ -36,6 +37,40 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-22：README 媒体离屏生成（待用户验收）
+- **范围**：用户确认方案及其他场景不加气泡后实施。新增生成器与 7 个成品，抽出共享取帧/面板合成接口；无新依赖、不改原素材或 README 草稿、不截连接面板、不读用户存档与 Claude 配置、不读取桌面。开始时只有未跟踪的 `docs/drafts/`，保留且不暂存；精灵 PNG（含 raw）与既有草稿共 121 个受保护文件的 SHA-256 均未变。仅本地 commit，不 push。
+- **生成命令**（仓库根目录执行）：`.venv\Scripts\python tools\make_media.py`。校验重跑可用 `.venv\Scripts\python tools\make_media.py --output-dir .venv/preview-run/make-media/repeat`。输出只替换本工具的七个文件，保留目录中其他文件；先临时生成并校验预算，编码或预算失败不覆盖已有成品，失败返回非零。
+- **实现与复现边界**：
+  - `SnapshotScene` 创建一次 QApplication/PetWindow，以假时钟连续推进；旧单帧入口复用 `render_snapshot`、睡眠合成与 `render_snapshot_panel`。PetWindow / HeartOverlay 仅追加可选随机源、像素密度参数；旧参数、默认渲染、PNG 保存及终端输出保持不变。
+  - 种子 **42**、假时钟起点 **100.0**，关闭自动时间推进与随机换重心/慢摇；卡片、特效、文字均在目标 **2 倍像素**绘制后 Lanczos 缩小。Windows Qt 使用隐藏窗口直接绘制，不截桌面；授权固定右侧布局与 `npm test`，不依赖鼠标或显示器可用区。卡片为不透明暖浅色，不随 GitHub 深浅主题改变。
+  - GIF 4 秒、20 fps / 80 个采样时刻：0～0.8 秒 idle（0.4 秒眨眼），0.8～1.35 秒四阶段 jump，1.35～2.1 秒落地/happy，2.1～3.6 秒 idle，3.6～3.8 秒收束到首帧，3.8～4 秒保持；最后的收束只用于媒体，不改运行时动画。全局 256 色调色板、无抖动、无限循环，编码合并相邻相同帧，解码首尾完全一致。
+  - 摸头使用原 HeartOverlay，0/.2/.4 秒固定发射、取 .65 秒；desk 取 .3 秒睁眼帧；床睡推进 .9/1.8 秒并保留三枚 Z。三语面板使用现有 UI 文案，没有额外气泡或合成身份信息。
+  - 已验证环境：Windows build **10.0.26200**、Python **3.10.11**、PySide6/Qt **6.12.0**、Pillow **12.3.0**、NumPy **2.2.6**；固定 zh=`Microsoft YaHei UI`、en=`Cascadia Mono`、ja=`Yu Gothic UI`，区域 en-US、字体 DPI 96，缺字体明确失败。**相同环境下逐字节可复现；跨系统、字体文件或依赖版本不保证一致**。PNG 无附加元数据；GIF 仅编码调色板、时长及循环控制，不写日期、路径或机器信息。
+
+| 成品（相对链接） | 尺寸 | 字节数 |
+|---|---:|---:|
+| [hero.gif](images/hero.gif) | 480×360 | 1,431,248 |
+| [pat.png](images/pat.png) | 720×420 | 67,447 |
+| [desk.png](images/desk.png) | 720×420 | 70,853 |
+| [permission.zh.png](images/permission.zh.png) | 720×420 | 73,046 |
+| [permission.en.png](images/permission.en.png) | 720×420 | 73,183 |
+| [permission.ja.png](images/permission.ja.png) | 720×420 | 72,763 |
+| [sleep-bed.png](images/sleep-bed.png) | 720×420 | 75,417 |
+| **合计** | **7 文件** | **1,863,957** |
+
+- **预算**：GIF ≤2,000,000 字节、各 PNG ≤300,000 字节、整个 `docs/images/`（包括已有其他文件）≤5,000,000 字节均通过；代码会强制校验并在超限时失败。
+- **验证**：
+  - 两次独立 CLI 生成的七个成品逐字节/SHA-256 相同；同一进程内连续生成两次、另起 CLI 再生成的结果也完全相同。测试禁止生成器启动子进程、访问用户数据目录；验证无遗留顶层窗口、非本工具文件不被覆盖。
+  - 重构前后在相同原生 Windows Qt 环境生成 **13 张**状态、淡化、jump/turn、床睡 Z、暂停标签、三语气泡及三语带诗音授权面板截图，逐文件 SHA-256 **全部相同**。对照在 `.venv/preview-run/make-media/before/` 与 `after/`。
+  - `.venv\Scripts\python -m pytest -q tests/test_make_media.py tests/test_pet_window.py tests/test_sleep_motion.py tests/test_windowing.py tests/test_effects.py tests/test_action_fade.py tests/test_permission.py --basetemp=.venv/preview-run/make-media/targeted-tmp` → **296 passed、3 skipped、2 warnings（138.00 秒）**，日志 `.venv/preview-run/make-media/targeted.log`。新增 10 项覆盖随机时间线、窗口释放、非法时间、2 倍源像素、真实爱心/Z、单场景 GIF 动作与循环、编码/单图/总量限制、同进程及跨进程完整复现；跳过原有原生平台项，警告为既有 Pillow getdata 弃用。
+  - 全量 `.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/make-media/full-tmp` → **1571 passed、9 skipped、2 warnings（468.20 秒）**，日志 `.venv/preview-run/make-media/full.log`。跳过与上一轮相同，为 8 个需要原生 Windows 的既有项及 1 个缺少 CC 进程链的项；两条警告仍为既有 Pillow getdata 弃用。`git diff --check` 通过；提交身份已核对 Author/Committer 均为指定 GitHub noreply。
+  - 仅查看生成的六张成品拼图与 GIF 关键帧：三语可读、`npm test` 完整，爱心/Z 可见，人物、面板和跳跃均无明显裁切；没有打开原始素材 PNG。检查拼图与临时对照图只留在已忽略的 `.venv/preview-run/make-media/`。
+- **踩过的坑**：当前 PySide6 的 `QWidget.render(QPainter, QPoint)` 需要显式传偏移；媒体取帧使用该重载与高密度 QImage，不能把低分辨率截图先放大冒充 2 倍渲染。GIF 用共用调色板避免各帧颜色漂移；旧截图继续使用原抓图路径与原定位，媒体固定布局单独启用。
+- **待用户验收**：
+  - [ ] 查看 [hero.gif](images/hero.gif)：眨眼、跳跃、开心和返回 idle 自然，循环接缝无跳变。
+  - [ ] 查看六张 PNG：爱心/Z、三语文字及 `npm test` 清楚，卡片留白、尺寸和深浅主题观感合适。
+- **下一步**：用户验收本批媒体；此前真实桌面焦点/点穿与动态清单继续保留，本轮不推进 README 编辑、打包或发布。
 
 ## 2026-10-22：立即中断只有文字时的 Stop 收尾（待用户验收）
 - **范围**：已读 AGENTS/CLAUDE、当前进度和中断相关规格，用户确认方案后实施。开始时仅有未跟踪的 `docs/drafts/`，保留、不修改、不暂存。无新依赖，不改 hook、素材或打包产物，仅本地 commit，不 push。
