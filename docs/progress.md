@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-22 README 入根目录与许可证准备**：用户确认方案后，将三份 README 草稿迁入根目录，接入既有 GIF 与 2×2 截图表格；逐条核对三语菜单、按钮与功能说明，补充焦点、中断、日志和窗口跟随边界。按用户文档验收意见，诗音角色图片（目前包括 `assets/sprites/`、`docs/images/`，以及未来诗音角色图标）使用 CC BY-NC 4.0；其余内容用 MIT。根许可证前置英文范围说明、MIT 正文不变；安装部分保留直接下载步骤。用户其余内容验收通过，三项修订后文档检查通过；全量 **1571 passed、9 skipped、2 warnings**，未重复全量测试。此前真机清单继续 **待用户验收**。本轮仅六个文档文件，本地 commit，不 push，不制作 ZIP。
 - **2026-10-22 README 媒体离屏生成**：按确认方案新增 `tools/make_media.py`，复用 snapshot 渲染并在同一进程连续取帧，输出 4 秒循环 GIF 与 6 张 PNG，共 **1,863,957 字节**。种子/时钟/字体/DPI 固定、2 倍渲染再缩小；两次独立运行逐文件字节一致，同进程重复生成也通过；13 张旧截图重构前后逐字节相同。专项 **296 passed、3 skipped、2 warnings**，全量 **1571 passed、9 skipped、2 warnings**。成品观感 **待用户验收**。原素材与 README 草稿未改，`docs/drafts/` 不暂存；仅本地 commit，不 push。
 - **2026-10-22 立即中断只有文字时的 Stop 收尾**：补齐待确认中断会话直接收到 Stop 时的三语 `interrupt_done_after_text`，stop 表情、遵守当前静音，每会话一次；不计完成任务、不说完成台词，保留“继续”入口。专项 **179 passed、1 skipped**；全量 **1561 passed、9 skipped、2 warnings**。真实 CC 文字写完直接 Stop 的表现 **待用户验收**。只本地 commit，不 push；`docs/drafts/` 不暂存，本轮不重建 exe。
 - **2026-10-22 Win+D 后跟随修复与分段中断提示**：前台/恢复双事件、150ms/500ms 有限补查和非激活显示恢复；中断点击与 `work_stopped` 分开提示、三语 stop 表情，连接面板/spec 补充源码迁移限制。全量 **1552 passed、9 skipped、2 warnings**，原生 Windows 150% 专项 **64 passed**，修正版 exe 复制目录自检 **78 项通过**。PreToolUse 启动到退出各 20 次中位数：**exe 392.562ms / .venv 329.602ms**，未做启动优化。真实桌面与实际 CC 联动 **待用户验收**。本轮仅本地 commit，不 push；三份既有 README 草稿保留、不纳入提交。
@@ -37,6 +38,34 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-22：README 入根目录与许可证准备（用户定点修订与检查完成）
+- **范围**：已读取 AGENTS/CLAUDE、当前进度与相关规格；用户明确确认实施方案及“按现状修正文档”，随后给出文档验收修订：角色图片许可覆盖 README 媒体和未来角色图标，根 MIT 前加范围说明，安装部分不留首次 Release 提示。开始时仅三份未跟踪 README 草稿，提交身份为指定 GitHub noreply。迁入 `README.md`（英文默认）、`README.zh.md`、`README.ja.md`；不改程序、测试、资源 JSON 或图片，不重建媒体、exe 或 ZIP，不改版本、不发布远端。
+- **媒体与迁移**：顶部既有居中区加入宽 360 的 `docs/images/hero.gif`；功能区两行两列表格依次使用 pat、desk、对应语言 permission、sleep-bed，均有三语说明与 alt。保留原草稿全部章节，确认内容迁入后删除未跟踪 `docs/drafts/`，不存在历史删除或改写；初版迁移前后文本差异留在已忽略的 `.venv/preview-run/readme-license/migration.diff`，最终许可范围再按下述用户验收意见修订。
+- **文案核对与修正**（名称以三语 `assets/lines/*.json` 的 ui、`assets/menu/*.json` 为准；行为同时对照当前 controller、dialogue、hooks、activity、foreground 与构建代码）：
+
+  | 原描述 | 修正与依据 |
+  |---|---|
+  | 英文 Pause / Resume、Good job / Something's wrong、Work controls | 改为 Stop / Continue、Nice work / Something's wrong...、Work remote，对应 menu_stop / menu_resume / menu_good / menu_bad / menu_remote。中文“有问题”也补齐“有问题……”的原文标点。 |
+  | 日文 一時停止 / 再開、すぐに中断、よくできた / 問題あり、自動起動 | 改为 止める / 続ける、今すぐ中断、よくできました / 問題あり……、スタートアップで起動，与对应菜单 JSON 一致。 |
+  | 泛称喂零食、床睡、趴桌；日文机でうたた寝 | 使用实际“对话 → 喂零食”和动作入口；英文 Jump / Turn around / Go to bed / Rest at the desk，中文 跳一跳 / 转个身 / 去睡觉 / 趴一会儿，日文 ジャンプ / 振り向く / ベッドで寝る / ちょっと伏せる。台词与菜单 JSON 中的预设、零食、睡眠动作及等级条件均存在；补充高等级也会解锁零食。 |
+  | 连接/重新连接的简称；“路径失效”意味着一定挪动过 | 区分连接面板按钮与右键菜单的完整名称；连接异常使用 JSON 完整状态“路径失效或连接不完整”及对应英文/日文，不把原因只归为移动目录。 |
+  | 所有面板永不取得键盘焦点 | 写清显示时不主动获取焦点；点击对话窗口后支持数字键，点击反馈输入框后可输入。依据 dialogue 的显式点击激活与输入面板行为。 |
+  | 立即中断马上结束这一轮 | 写清先停止工具进程、下个检查点结束；文字可能等当前这句说完，找不到进程时退回检查点暂停。依据三语 interrupt_* 提示及 interrupt_work。 |
+  | 关闭置顶后始终在 Claude 窗口之上 | 限定为 Claude 桌面应用窗口回到前台时跟随其窗口层级；不把它写成对所有终端或后台窗口的持续置顶。依据前台跟随实现。 |
+  | hook 事件只用于显示；“不联网” | 写明仅本机通信、不访问外网；普通事件摘要中的文件名等可能写入本地日志。隐私模式隐藏活动详情，并省略之后事件日志详情，既有日志不删除；授权面板仍显示待确认操作。代码文件和对话正文不保存。依据 describe_tool、handle_event、set_privacy 与权限面板路径。 |
+  | 连接说明缺少旧项目 hooks 限制；卸载直接删除程序目录 | 按 connection_explain 补充：exe 不迁移旧源码项目 hooks，先在旧项目运行卸载工具；卸载步骤先通过实际“退出 / Quit / 終了”菜单关闭程序。 |
+  | 下载与安装说明；SmartScreen 提示后保证“不是病毒” | 按用户最终验收要求，删除首次 Release 提示，保留直接下载 ZIP 的安装步骤，push 与 Release 计划同期进行；保留缺少代码签名的解释，去掉无法据此保证安全的断言。本轮不制作 ZIP，不执行 push 或 Release。 |
+
+- **许可**：根目录 `LICENSE` 在完整 MIT 正文前加英文范围说明；MIT 正文及版权 `Copyright (c) 2026 iLLyaaaaaa` 不变。`assets/LICENSE` 采用 CC BY-NC 4.0 官方法律文本链接与摘要，说明署名、许可证链接、保留声明、标注修改、非商业使用及不得附加限制。按用户验收修订，CC 适用于诗音的角色图片，目前包括 `assets/sprites/`、`docs/images/`（README 截图与 hero.gif），也覆盖未来新增的诗音角色图标（.ico/.png）；Shion/诗音为 iLLyaaaaaa 原创。其他内容（含台词与菜单数据）与代码一样用 MIT。两份许可证与三语 README 的表格/说明范围一致，没有把整个 assets 或所有 PNG/ICO 一概改为 CC。
+- **自动验证**：三份 README 的全部原章节保留、语言切换、相对文件链接、五张媒体的顺序/alt/宽度、对应语言授权图、2×2 HTML 结构、无 TODO，以及每份 27 个 UI 名称检查通过；五级好感、等级解锁、预设与零食、时段问候和四档大小等逐条与数据/代码核对。按最终用户意见复查三语无首次 Release 提示、许可表格同时包含两处角色图片目录、未来角色图标说明、根 LICENSE 英文范围前言与完整 MIT 正文逐字符一致，两份许可证范围检查通过。185 个既有跟踪文件建立 SHA-256 基线，除本轮 progress 外其他 184 个逐字节不变，改动仅六个文档文件。检查日志 `.venv/preview-run/readme-license/document-check.log`，`git diff --check` 通过。
+- **测试**：`QT_QPA_PLATFORM=offscreen`、`PYTHONUTF8=1`，`.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/readme-license/full-tmp` → **1571 passed、9 skipped、2 warnings（524.88 秒）**，日志 `.venv/preview-run/readme-license/pytest.log`。8 个原生 Qt/Windows 条件项及 1 个非 CC 进程链项跳过，两条为既有 Pillow getdata 弃用警告。该轮在用户定点修订前已经启动，最终文档修订后仅重新跑文档检查，未重复全量测试。沿用隔离 HOME/APPDATA 与注册表替身，未读取或修改真实 Claude 配置、未运行 claude。
+- **文档验收反馈**：用户要求扩大角色图片 CC 范围、根 MIT 前加英文范围说明并删掉三语首次 Release 提示；“其余内容验收通过”，明确本轮修改后只跑文档检查、不重跑全量测试，并按计划本地提交、不 push。三项已修订且最终检查通过，按该授权提交，不另索要重复验收。
+- **文档验收清单**：
+  - [x] 根目录三语 README 切换正确，GIF 居中、四图两行两列，对应语言授权图与说明清楚（用户其余内容验收通过）。
+  - [x] 菜单/按钮名称、焦点/中断/日志边界自然准确，安装部分无首次 Release 提示（用户其余内容验收通过，定点删除完成）。
+  - [x] 两份许可证与三语许可表格清楚表达诗音角色图片（含 README 媒体与未来角色图标）仅限非商业、其他内容 MIT；MIT 正文保持完整（按用户指定范围修订并检查通过）。
+- **下一步**：按用户授权只提交本轮六个文档文件，提交身份核对为指定 noreply；此前真实桌面/实际 CC 清单继续待用户验收。之后另行完成发布 ZIP、干净 Windows 验证与用户授权的远端发布，本轮不 push。
 
 ## 2026-10-22：README 媒体离屏生成（待用户验收）
 - **范围**：用户确认方案及其他场景不加气泡后实施。新增生成器与 7 个成品，抽出共享取帧/面板合成接口；无新依赖、不改原素材或 README 草稿、不截连接面板、不读用户存档与 Claude 配置、不读取桌面。开始时只有未跟踪的 `docs/drafts/`，保留且不暂存；精灵 PNG（含 raw）与既有草稿共 121 个受保护文件的 SHA-256 均未变。仅本地 commit，不 push。
