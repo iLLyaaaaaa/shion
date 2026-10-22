@@ -60,6 +60,8 @@ def data_dir() -> Path:
     override = os.environ.get("SHION_DATA_DIR")
     if override:
         return Path(override)
+    if os.environ.get("APPDATA"):
+        return Path(os.environ["APPDATA"]) / "Shion"
     return Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
 
 

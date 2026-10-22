@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import logging
 import random
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
@@ -32,6 +31,7 @@ from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
 from shion.remote import RemoteHub
+from shion.runtime import console_send_command, hook_process_images
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
 from shion.state import ACTIVITY_LEVELS, EXPRESSIONS, PetState, Reaction, SaveScheduler
@@ -100,7 +100,7 @@ class PetController(QObject):
         self._continue_sending = False
         self.continue_runner: Callable[[interrupt.CCProcess, str, Callable[[dict], None]], None] =             self._run_console_send
         self.process_view = interrupt.ProcessView()
-        self.hook_images: tuple[str, ...] = (str(ROOT / ".venv" / "Scripts" / "python.exe"),)
+        self.hook_images: tuple[str, ...] = hook_process_images(ROOT)
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
         self._dialogue: Optional[DialoguePanel] = None
@@ -815,9 +815,9 @@ class PetController(QObject):
     def _run_console_send(self, proc: interrupt.CCProcess, text: str, done: Callable[[dict], None]) -> None:
         """在单独的子进程里附着 CC 的控制台发送（见 shion/console_send.py），结果回到 GUI 线程。"""
         qp = QProcess(self)
-        qp.setProgram(sys.executable)
-        qp.setArguments(["-m", "shion.console_send", "--pid", str(proc.pid), "--created", str(proc.created),
-                         "--text", text])
+        command = console_send_command(proc.pid, proc.created, text)
+        qp.setProgram(command[0])
+        qp.setArguments(command[1:])
         qp.setWorkingDirectory(str(ROOT))
         timer = QTimer(qp)
         timer.setSingleShot(True)

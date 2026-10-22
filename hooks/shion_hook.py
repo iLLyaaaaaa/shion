@@ -296,7 +296,8 @@ def launch_shion() -> None:
                 [str(exe)] + ([] if frozen else ["-m", "shion"]),
                 cwd=str(exe.parent if frozen else ROOT), creationflags=flags | extra,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env={**os.environ, "SHION_LAUNCHED_BY_HOOK": "1"},
+                env={**os.environ, "SHION_LAUNCHED_BY_HOOK": "1",
+                     **({"PYINSTALLER_RESET_ENVIRONMENT": "1"} if frozen else {})},
             )
             return
         except OSError:

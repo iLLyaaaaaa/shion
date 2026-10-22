@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-22 v1.0 第 2 步：Windows onedir 打包**：已生成 `dist/Shion/Shion.exe`，完整目录 **105,519,736 字节（105.52 MB / 100.63 MiB，221 文件）**。复制到无 `.venv` 的中文/空格临时路径后，exe 内 HookConnection、九张截图、八类 hook、自启动和存档日志落点等 **78 项自检通过**；全量 **1531 passed、7 skipped、2 warnings**，最终修正回归 **31 passed**。真实桌面、干净机器、杀毒及 Claude Code 实际联动 **待用户验收**。只做本步，本地 commit，不 push。
 - **2026-10-22 v1.0 第 1 步：连接管理、首次引导与开机自启**：已实现共用 hooks 服务的用户级连接/断开、项目级迁移及失败恢复，三语状态和不激活引导面板，HKCU 自启与源码/打包分支。最终全量 **1519 passed、7 skipped、2 warnings**；修正回归 **105 passed**，原生 Windows 专项 **23 passed**，三语截图已自查。只完成本步，不推进打包/发布；真实桌面与实际联动 **待用户验收**。本轮按用户要求本地 commit，不 push。
 - **2026-10-22 Claude 前台窗口层级跟随**：关闭「置于最上层」时，原生 Windows 用前台 hook 将诗音与可见附属窗口紧邻放到任一 Claude.exe 窗口之上；其他程序前台不调整。不激活、不移动缩放、不绑定 Claude owner；延迟创建/句柄重建补同步，开启置顶及退出注销。全量 **1473 passed、6 skipped、2 warnings**；最终专项与独立暂存副本均 **81 passed、2 skipped**，原生 hook 两轮注册/注销、真实受控窗口组 Z 序 **1 passed**。真实焦点、遮挡、最小化和高分屏 **待用户验收**。只提交本轮改动，不 push。
 - **2026-10-21 三语台词扩充、时段问候与等级混合抽样**：按确认方案追加三语各 24 句现有类别台词、五类各三句时段台词；原文全部保留。时段成功显示才记入兼容 v5 的每日存档，跨天清零、重启/换语言不重置；工作/静音/睡眠/气泡阻挡不消耗机会。等级池按当前 60%、较低各级及通用池平分 40% 抽样。专项 **315 passed、1 skipped**，修正回归 **201 passed**；恢复后核对包含本轮改动的后续全量 **1473 passed、6 skipped、2 warnings**。真实桌面台词节奏与三语观感 **待用户验收**。草稿核对迁入 JSON 后删除；本地 commit，不 push。
@@ -33,6 +34,33 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-22：v1.0 第 2 步——Windows onedir 打包（待用户验收）
+- **范围**：开始时已读取 AGENTS/CLAUDE、相关规格，master 工作区干净、提交邮箱正确。用户确认方案后实现本步；按用户选择不生成自定义图标、版本资源或 zip，不改版本、不推进许可/发布，不修改素材原图或精灵。
+- **构建与使用**：
+  - `.venv\Scripts\python tools\build.py` 一条命令检查/安装构建依赖、清洁构建、统计体积并执行复制目录自检；`.venv\Scripts\python tools\build.py --check-only` 可复查现有产物。构建/检查失败返回非零，详细日志和证据在已忽略的 `build/`。
+  - 新增 `Shion.spec` 和独立 `requirements-build.txt`，固定 **PyInstaller 6.22.3 / hooks-contrib 2026.9**；本机运行库为 Python 3.10.11、PySide6 6.12.0、NumPy 2.2.6。输出为 GUI 子系统的 onedir：`dist/Shion/Shion.exe` 与 `_internal/`，最终用户复制整个 Shion 文件夹即可，不需要 Python。build/、dist/ 已加入忽略。
+  - 收集运行 JSON、sprites 顶层运行图和冻结的 hook/连接模块；raw、旧备份、reference、测试/开发工具不进包。Qt 仅保留 Core/Gui/Widgets/Network，以及 qwindows、qoffscreen、qmodernwindowsstyle；不用的 WebEngine、QML/Quick、多媒体、PDF、3D、OpenGL 软件渲染器及 Qt TLS 附带库排除。NumPy 与标准库自身需要的 DLL 保留。
+  - `--hook <事件>` 在业务 GUI 导入前复用原标准库 hook；缺失的标准流从继承的 Windows 管道/文件句柄副本恢复，无句柄用空设备，不创建/附着控制台。冻结文本流统一 UTF-8，hook 的中文输入、反馈和授权 JSON 均实测。PyInstaller 自带运行时 hook 会加载 QtCore 注册资源，内部自检断言不加载 QtGui/QtWidgets。
+  - 冻结的“继续”子进程改走当前 exe 的内部 `--console-send`；中断候选排除当前 exe，避免误杀 hook。SessionStart 拉起当前 exe 时设置 `PYINSTALLER_RESET_ENVIRONMENT=1`。源码路径保持原 Python 模块命令。
+  - 存档/日志默认显式取 `%APPDATA%\Shion`，保留 SHION_DATA_DIR 测试覆盖与无 APPDATA 时的原 Qt 后备；正常用户落点不变。复制程序目录前后逐文件 SHA-256 清单一致，没有新增状态、日志、缓存或连接配置。
+- **自检与验证**：
+  - host 自检只用标准库，复制产物到系统临时目录下的 `诗音 with spaces/Shion`，工作目录另设；移除 Python/虚拟环境/外部 Qt 搜索变量，PATH 只留系统目录。子进程所有 HOME/USERPROFILE/HOMEDRIVE/HOMEPATH/APPDATA 隔离，SHION_DATA_DIR 不设置，从而验证真正的默认 APPDATA 落点。随机端口、唯一实例名；结束时按临时 exe 完整路径核对并清理自己启动的进程。
+  - exe 内 `--self-check-connection` 仅允许系统临时目录下且与隔离 HOME 一致的全新目录；直接使用包内 HookConnection，验证三语连接、迁移、备份、幂等、旧路径失效/修复、断开和第三方配置保留。验证包内模块路径与 sys.path 均不依赖源码；不匹配 HOME 的调用拒绝读写。
+  - 八类 hook 通过临时 HTTP mock 检查事件与中文会话信息；额外验证 allow/deny/gone、中文反馈、检查点 continue=false、ExitPlanMode 只提醒、Stop 无回复内容、服务不可达静默，以及无效目标的 console-send JSON。另用 SessionStart 启动真实复制版 GUI 服务、发送 working/stop 并核对日志与存档。
+  - 最终复制目录 **78 项检查通过**，证据 `build/bundle-check/report.json`、`subprocess.log`、临时存档/日志副本；九张 `--snapshot` 包含 Windows 原生平台的 idle/working、bed/desk、日文零食与三语连接面板，另有一张 offscreen idle。已自查生成截图，文字和布局完整。截图是静态渲染证据，不代表真实桌面焦点或动态观感验收。
+  - 首轮相关专项 **65 passed（13.92 秒）**；扩展 hook/中断/连接/自启回归 **158 passed、1 skipped（68.33 秒）**；最终打包/连接修正回归 **31 passed（7.26 秒）**，日志 `.venv/preview-run/v1-packaging-final-targeted.log`。
+  - 完整 `.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/v1-packaging-full` → **1531 passed、7 skipped、2 warnings（436.10 秒）**，日志 `.venv/preview-run/v1-packaging-full.log`。六项原生 Qt/焦点条件和一项 CC 父进程链环境限制跳过；两条为既有 Pillow getdata 弃用警告。最终一条命令构建与 **78 项自检**同样通过，日志 `.venv/preview-run/v1-packaging-build-final.log`；`git diff --check` 通过。
+- **体积与踩坑**：
+  - 首包 **173.24 MB**，最大项为误收的 `icudt78.dll` **33.13 MB**、OpenGL 软件渲染器 **20.64 MB**、NumPy OpenBLAS **20.39 MB**、QtCore **10.47 MB**、QtGui **9.68 MB**、Qt TLS OpenSSL crypto **7.45 MB**。初始明细在 `build/size-report-initial.json`。
+  - PyInstaller 从本机 PATH 中误收了 Poppler 的 ICU（版本化导出），遮住 Qt 需要的 Windows 系统 ICU（非版本化导出），造成 QtCore 导入失败和无控制台错误框；用 PE 导入/导出检查定位后，构建子进程改用仅含当前 Python 与系统目录的 PATH，不再携带外部 ICU 和其他应用库。OpenGL 软件渲染器、Qt TLS 插件配套 OpenSSL 3 也无需携带；保留标准库 OpenSSL 1.1。最终 **105.52 MB**，无需进一步删除 Qt 模块。完整大小/前十项/目录汇总与依赖版本在 `build/size-report.json`。
+  - 不仅要处理 None 标准流：本机冻结 exe 的已有文本流可能还是 GBK；已统一 UTF-8 并覆盖恢复管道和编码两条路径。构建依赖文件使用 ASCII 注释，避免本机 pip 按 GBK 读取 UTF-8 注释失败。
+  - offscreen 的日文字体回退与 Windows 原生不同，不能用它判断发布版文字；面板与零食截图用 windows 平台，offscreen 仅做资源/后台链路验证。
+- **待用户验收**：
+  - [ ] 双击整个复制后的 Shion 文件夹中的 exe：启动耗时、无控制台闪窗、动画、交互、透明区域、高分屏和多屏观感。
+  - [ ] 从 exe 的菜单连接后，实际 Claude Code 事件、授权、暂停/继续与“继续”完整链路；本轮不运行 claude，也不访问真实 `~/.claude`。
+  - [ ] 无 Python 的干净 Windows 机器启动、系统安全软件表现。当前证据是本机复制路径与环境隔离自检，不冒充干净虚拟机或实际联动结果。
+- **下一步**：用户集中验收；后续另做图标、版本资源、zip、README/许可与发布准备。本轮只本地 commit，不 push。
 
 ## 2026-10-22：v1.0 第 1 步——连接管理、首次引导与开机自启（待用户验收）
 - **范围**：开始前读取 AGENTS/CLAUDE 和相关规格，`git status` 为 master 干净。用户确认完整方案，明确旧存档不补弹引导；只做连接、迁移、引导、自启和状态，不引入依赖、不改素材、不推进 exe 打包/许可/发布。

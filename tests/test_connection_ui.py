@@ -204,6 +204,7 @@ def test_frozen_hook_launch_uses_current_exe_without_python(tmp_path, monkeypatc
     assert calls[0][0] == [str(exe)]
     assert calls[0][1]["cwd"] == str(tmp_path)
     assert calls[0][1]["env"]["SHION_LAUNCHED_BY_HOOK"] == "1"
+    assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
 
 
 def test_source_startup_command_runs_from_unrelated_workdir(tmp_path):

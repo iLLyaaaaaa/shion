@@ -1,4 +1,6 @@
 .venv/
+/build/
+/dist/
 /docs/preview.png
 __pycache__/
 *.pyc

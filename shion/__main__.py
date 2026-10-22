@@ -11,10 +11,18 @@ if __package__ in (None, ""):
 
 
 def main(argv: list[str] | None = None) -> int:
+    from shion.runtime import prepare_standard_streams
+    prepare_standard_streams()
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["--hook"]:
         from hooks.shion_hook import run_hook
         return run_hook(argv[1:])
+    if argv[:1] == ["--console-send"]:
+        from shion.console_send import main as console_send
+        return console_send(argv[1:])
+    if argv[:1] == ["--self-check-connection"]:
+        from shion.bundle_check import main as check_connection
+        return check_connection(argv[1:])
 
     from shion.pet_window import STATES, PROP_STATES
 
