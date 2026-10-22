@@ -438,7 +438,8 @@ def test_interrupt_kills_tool_flags_session_and_goes_idle(pet2):
     act.trigger()
     assert pet2.world.killed == [302, 301, 300]
     assert pet2.ctl.hub.interrupt_pending("s1")
-    assert pet2.said[-1] == INTERRUPTED
+    assert pet2.said[-1] == "命令停掉了，等它说完这句就停～"
+    assert pet2.win.sprite_name == "stop"
     assert not pet2.state.is_working(pet2.now)
     _, act = interrupt_action(pet2)
     assert not act.isEnabled()  # 发过一次就是空闲，不会再发
@@ -452,6 +453,68 @@ def test_interrupt_without_process_falls_back_to_stop(pet2):
     assert pet2.said[-1] == NO_PROCESS
     assert pet2.ctl.hub.is_paused and pet2.state.paused
     assert not pet2.ctl.hub.interrupt_pending("s1")
+
+
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+@pytest.mark.parametrize("has_command", [True, False])
+def test_interrupt_two_stage_speech_uses_actual_kills_and_waits_for_own_checkpoint(
+        pet2, lang, has_command):
+    e = pet2
+    e.ctl.set_language(lang)
+    work(e)
+    start = e.ctl._tool_wall["s1"]["t1"]
+    e.world._created.update({300: ft(start + 0.2), 301: ft(start + 0.3), 302: ft(start + 0.4),
+                             150: ft(start - 3500), 201: ft(start - 1), 202: ft(start + 2)})
+    if not has_command:
+        e.ctl.handle_event("tool_done", None, {"session": "s1", "tool_id": "t1"})
+    e.ctl.interrupt_work()
+    key = "interrupt_command_stopped" if has_command else "interrupt_waiting"
+    assert e.said[-1] == e.ctl.lines.ui(key)
+    assert e.win.sprite_name == "stop"
+    assert bool(e.world.killed) == has_command
+    e.said.clear()
+    e.ctl.handle_event("work_stopped", None, {"session": "other"})
+    assert e.said == []
+    e.ctl.handle_event("work_stopped", None, {"session": "s1"})
+    assert e.said == [e.ctl.lines.ui("interrupted")]
+    assert e.win.sprite_name == "stop"
+    e.ctl.handle_event("work_stopped", None, {"session": "s1"})
+    e.ctl.handle_event("stop", None, {"session": "s1"})
+    assert e.said == [e.ctl.lines.ui("interrupted")]
+    assert e.data.stats["claude_tasks"] == 0
+
+
+def test_failed_termination_does_not_claim_command_stopped(pet2):
+    work(pet2)
+    pet2.world._terminate = lambda *args: False
+    pet2.ctl.process_view = pet2.world.view()
+    pet2.ctl.interrupt_work()
+    assert pet2.said[-1] == "等它说完这句就停～"
+
+
+@pytest.mark.parametrize("muted_at_click,muted_at_end", [(True, True), (True, False), (False, True)])
+def test_each_interrupt_stage_obeys_current_mute_setting(pet2, muted_at_click, muted_at_end):
+    work(pet2)
+    pet2.said.clear()
+    pet2.data.bubble_muted = muted_at_click
+    pet2.ctl.interrupt_work()
+    assert bool(pet2.said) != muted_at_click
+    assert pet2.win.sprite_name == "stop"
+    pet2.said.clear()
+    pet2.data.bubble_muted = muted_at_end
+    pet2.ctl.handle_event("work_stopped", None, {"session": "s1"})
+    assert pet2.said == ([] if muted_at_end else [INTERRUPTED])
+    assert pet2.win.sprite_name == "stop"
+
+
+@pytest.mark.parametrize("event", ["prompt", "stop", "pause_timeout"])
+def test_new_turn_or_other_end_discards_pending_interrupt_speech(pet2, event):
+    work(pet2)
+    pet2.ctl.interrupt_work()
+    pet2.ctl.handle_event(event, None, {"session": "s1"})
+    pet2.said.clear()
+    pet2.ctl.handle_event("work_stopped", None, {"session": "s1"})
+    assert INTERRUPTED not in pet2.said
 
 
 def test_interrupt_with_dead_process_falls_back_to_stop(pet2):

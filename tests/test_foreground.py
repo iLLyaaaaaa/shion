@@ -4,6 +4,7 @@ import sys
 
 import pytest
 from PySide6.QtCore import QEvent, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
 from shion import foreground as F
@@ -41,9 +42,9 @@ class Api:
         self.calls.append(("callback",))
         return fn
 
-    def register(self, callback):
-        self.calls.append(("register", callback))
-        return self.registration
+    def register(self, callback, event=F.EVENT_SYSTEM_FOREGROUND):
+        self.calls.append(("register", callback, event))
+        return self.registration + (event == F.EVENT_SYSTEM_MINIMIZEEND) if self.registration else 0
 
     def unregister(self, hook):
         self.calls.append(("unregister", hook))
@@ -59,6 +60,14 @@ class Api:
 
     def pid(self, hwnd):
         return self.pids.get(hwnd, 0)
+
+    def show_without_activation(self, hwnd):
+        self.calls.append(("show_without_activation", hwnd))
+        if hwnd in self.invalid:
+            return False
+        self.hidden.discard(hwnd)
+        self.minimized.discard(hwnd)
+        return self.usable(hwnd)
 
     def image(self, pid):
         self.calls.append(("image", pid))
@@ -290,11 +299,13 @@ def test_stopping_cancels_pending_work_and_reenable_registers_once(follower):
     sync(f)
     assert not f._timer.isActive() and not api.positions
     assert f._hook is None and f._callback is None
-    assert sum(c[0] == "register" for c in api.calls) == 1
+    assert sum(c[0] == "register" for c in api.calls) == 2
     assert api.calls.count(("unregister", 123)) == 1
+    assert api.calls.count(("unregister", 124)) == 1
+    assert all(not t.isActive() for t in f._retry_timers)
     f.set_enabled(True)
     sync(f)
-    assert sum(c[0] == "register" for c in api.calls) == 2
+    assert sum(c[0] == "register" for c in api.calls) == 4
     assert api.positions
 
 
@@ -303,7 +314,7 @@ def test_registration_failure_is_nonfatal(follower, failure, caplog):
     f, api, _ = follower
     api.registration = 0
     if failure == "exception":
-        def fail(callback):
+        def fail(callback, event=F.EVENT_SYSTEM_FOREGROUND):
             raise OSError("unavailable")
         api.register = fail
     f.set_enabled(True)
@@ -436,13 +447,19 @@ def test_native_api_signatures_registration_flags_and_noactivate_position(monkey
     dll = DLL()
     for name in ("SetWinEventHook", "UnhookWinEvent", "GetForegroundWindow",
                  "GetWindowThreadProcessId", "IsWindow", "IsWindowVisible", "IsIconic",
-                 "GetWindow", "GetWindowLongW", "SetWindowPos"):
+                 "GetWindow", "GetWindowLongW", "SetWindowPos", "ShowWindow"):
         setattr(dll, name, Fn())
     monkeypatch.setattr(F.ctypes, "WinDLL", lambda *a, **kw: dll)
     api = F._Win32ForegroundApi()
     callback = api.callback(lambda *args: None)
     assert api.register(callback) == 1
     assert dll.SetWinEventHook.calls == [(3, 3, None, callback, 0, 0, 0)]
+    api.register(callback, F.EVENT_SYSTEM_MINIMIZEEND)
+    assert dll.SetWinEventHook.calls[-1] == (23, 23, None, callback, 0, 0, 0)
+    dll.IsIconic.result = 0
+    dll.ShowWindow.result = 0  # 此前不可见不等于本次恢复失败
+    assert api.show_without_activation(2**40 + 1)
+    assert dll.ShowWindow.calls == [(2**40 + 1, 4)]
     api.position(2**40 + 1, 2**40 + 2)
     assert dll.SetWindowPos.calls == [(2**40 + 1, 2**40 + 2, 0, 0, 0, 0, 0x213)]
     assert dll.SetWindowPos.argtypes[:2] == [F.wintypes.HWND, F.wintypes.HWND]
@@ -451,6 +468,92 @@ def test_native_api_signatures_registration_flags_and_noactivate_position(monkey
     assert dll.UnhookWinEvent.calls == [(1,)]
     assert not hasattr(dll, "SetForegroundWindow")
     assert not hasattr(dll, "SetWindowLongPtrW")
+
+
+@pytest.mark.parametrize("restore_after", [50, 250])
+def test_foreground_before_restore_gets_two_finite_rechecks(follower, qapp, restore_after):
+    f, api, _ = follower
+    api.minimized.add(300)
+    f.set_enabled(True)
+    qapp.processEvents()
+    assert not api.positions
+    assert [t.interval() for t in f._retry_timers] == [150, 500]
+    assert all(t.isActive() for t in f._retry_timers)
+    QTest.qWait(restore_after)
+    api.minimized.clear()  # FOREGROUND 比恢复完成早；也不再发任何系统事件
+    QTest.qWait(600 - restore_after)
+    assert api.order[2:6] == [12, 11, 10, 300]
+    assert api.calls.count(("image", 400)) == 3  # 立即、150ms、500ms，无轮询
+    calls = len(api.calls)
+    QTest.qWait(180)
+    assert len(api.calls) == calls
+    assert all(not t.isActive() for t in f._retry_timers)
+
+
+def test_minimizeend_rechecks_current_foreground_and_bursts_keep_deadlines(follower):
+    f, api, _ = follower
+    f.set_enabled(True)
+    sync(f)
+    assert [c[2] for c in api.calls if c[0] == "register"] == [3, 23]
+    ids = [t.timerId() for t in f._retry_timers]
+    api.calls.clear()
+    for _ in range(100):
+        event(f, kind=F.EVENT_SYSTEM_MINIMIZEEND)
+    assert api.calls == []  # 回调仍不查进程、不排 Z 序
+    sync(f)
+    assert [t.timerId() for t in f._retry_timers] == ids
+    assert api.calls.count(("image", 400)) == 1
+    api.current = 90
+    event(f, kind=F.EVENT_SYSTEM_MINIMIZEEND)
+    sync(f)
+    assert all(not t.isActive() for t in f._retry_timers)
+
+
+@pytest.mark.parametrize("state", ["hidden", "minimized"])
+def test_system_hidden_pet_is_restored_but_explicitly_hidden_attachment_is_not(follower, state):
+    f, api, windows = follower
+    getattr(api, state).update([10, 11, 12])
+    windows[2].visible = False  # 程序主动收起的特效不能复活
+    f.set_enabled(True)
+    sync(f)
+    assert [c[1] for c in api.calls if c[0] == "show_without_activation"] == [10, 11]
+    assert api.positions == [(11, 70), (10, 11)]
+    assert 12 in getattr(api, state)
+    assert api.current == 300 and api.topmosts == {800}
+
+
+@pytest.mark.parametrize("failure", ["return", "exception"])
+def test_second_hook_failure_cleans_first_and_can_retry(follower, failure):
+    f, api, _ = follower
+    original = api.register
+    def register(callback, event=F.EVENT_SYSTEM_FOREGROUND):
+        if event == F.EVENT_SYSTEM_MINIMIZEEND:
+            if failure == "exception":
+                raise OSError("restore hook unavailable")
+            return 0
+        return original(callback, event)
+    api.register = register
+    f.set_enabled(True)
+    assert not f._enabled and f._hook is f._restore_hook is f._callback is None
+    assert ("unregister", 123) in api.calls
+    api.register = original
+    f.set_enabled(True)
+    assert f._enabled and f._restore_hook == 124
+
+
+def test_failed_cleanup_of_second_hook_keeps_callback_until_retry(follower):
+    f, api, _ = follower
+    f.set_enabled(True)
+    callback = f._callback
+    original = api.unregister
+    api.unregister = lambda hook: False if hook == 124 else original(hook)
+    f.stop()
+    assert f._hook is None and f._restore_hook == 124 and f._callback is callback
+    f.set_enabled(True)
+    assert not f._enabled  # 仍注销失败，不注册新 hook
+    api.unregister = original
+    f.set_enabled(True)
+    assert f._enabled and f._hook == 123 and f._restore_hook == 124
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
@@ -499,3 +602,46 @@ def test_native_controlled_group_z_order_without_changing_real_foreground(qapp):
         f.stop()
         for window in reversed([target, *windows]):
             window.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+@pytest.mark.parametrize("shell_show_state", [0, 6])  # SW_HIDE / SW_MINIMIZE
+def test_native_system_hidden_pet_restores_geometry_and_mask_without_activation(qapp, shell_show_state):
+    if not F._native_windows():
+        pytest.skip("requires native Windows Qt")
+    from shion.pet_window import PetWindow
+    from shion.windowing import set_topmost
+
+    target = QWidget(None, Qt.Tool | Qt.WindowDoesNotAcceptFocus)
+    target.setAttribute(Qt.WA_ShowWithoutActivating)
+    pet = PetWindow(autostart=False)
+    api = F._Win32ForegroundApi()
+    class ControlledApi(F._Win32ForegroundApi):
+        def foreground(self):
+            return int(target.winId())
+        def image(self, pid):
+            return "Claude.exe"
+    f = F.ForegroundFollower(lambda: [pet], api_factory=ControlledApi)
+    try:
+        for window in (target, pet):
+            set_topmost(window, False)
+            window.show()
+        qapp.processEvents()
+        geometry, mask = pet.geometry(), pet.mask()
+        before = api.foreground()
+        api.user32.ShowWindow(int(pet.winId()), shell_show_state)
+        qapp.processEvents()
+        assert pet.isVisible()  # 系统隐藏不是程序调用 hide()
+        assert not api.usable(int(pet.winId()))
+        f.set_enabled(True)
+        qapp.processEvents()
+        assert api.usable(int(pet.winId()))
+        assert pet.geometry() == geometry and pet.mask() == mask
+        assert not api.topmost(int(pet.winId()))
+        assert api.previous(int(target.winId())) == int(pet.winId())
+        if before:
+            assert api.foreground() == before
+    finally:
+        f.stop()
+        pet.close()
+        target.close()

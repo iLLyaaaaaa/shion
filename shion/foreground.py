@@ -16,6 +16,9 @@ from shion.winproc import process_image
 log = logging.getLogger("shion.foreground")
 
 EVENT_SYSTEM_FOREGROUND = 0x0003
+EVENT_SYSTEM_MINIMIZEEND = 0x0017
+RECHECK_DELAYS_MS = (150, 500)
+SW_SHOWNOACTIVATE = 4
 WINEVENT_OUTOFCONTEXT = 0x0000
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -51,6 +54,7 @@ class _Win32ForegroundApi:
             "IsWindow": ([wintypes.HWND], wintypes.BOOL),
             "IsWindowVisible": ([wintypes.HWND], wintypes.BOOL),
             "IsIconic": ([wintypes.HWND], wintypes.BOOL),
+            "ShowWindow": ([wintypes.HWND, ctypes.c_int], wintypes.BOOL),
             "GetWindow": ([wintypes.HWND, wintypes.UINT], wintypes.HWND),
             "GetWindowLongW": ([wintypes.HWND, ctypes.c_int], wintypes.LONG),
             "SetWindowPos": ([wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
@@ -63,9 +67,9 @@ class _Win32ForegroundApi:
     def callback(self, fn):
         return self.callback_type(fn)
 
-    def register(self, callback):
+    def register(self, callback, event=EVENT_SYSTEM_FOREGROUND):
         return self.user32.SetWinEventHook(
-            EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, callback,
+            event, event, None, callback,
             0, 0, WINEVENT_OUTOFCONTEXT,
         )
 
@@ -78,6 +82,13 @@ class _Win32ForegroundApi:
     def usable(self, hwnd):
         return (self.user32.IsWindow(hwnd) and self.user32.IsWindowVisible(hwnd)
                 and not self.user32.IsIconic(hwnd))
+
+    def show_without_activation(self, hwnd):
+        if not self.user32.IsWindow(hwnd):
+            return False
+        # ShowWindow 的返回值是此前是否可见，不能作为本次恢复成功与否。
+        self.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+        return self.usable(hwnd)
 
     def pid(self, hwnd):
         pid = wintypes.DWORD()
@@ -106,12 +117,22 @@ class ForegroundFollower(QObject):
         self._api_factory = api_factory or _Win32ForegroundApi
         self._api = None
         self._hook = None
+        self._restore_hook = None
         self._callback = None  # Unhook 成功前必须保留，不能让 ctypes 回调被回收
         self._enabled = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._sync)
+        self._recheck_requested = False
+        self._retry_target = None
+        self._retry_timers = []
+        for delay in RECHECK_DELAYS_MS:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(delay)
+            timer.timeout.connect(self._request_sync)
+            self._retry_timers.append(timer)
         self._app = QApplication.instance()
         if self._app is not None:
             self._app.aboutToQuit.connect(self.stop)
@@ -122,47 +143,75 @@ class ForegroundFollower(QObject):
             return
         if self._enabled or not _native_windows():
             return
+        # 上次注销失败时先清理，不能复用只有一个事件还在监听的半套 hook。
+        if self._hook or self._restore_hook:
+            self.stop()
+            if self._hook or self._restore_hook:
+                return
         try:
-            if not self._hook:
-                self._api = self._api_factory()
-                self._callback = self._api.callback(self._on_event)
-                self._hook = self._api.register(self._callback)
-            if not self._hook:
-                self._callback = None
-                log.warning("无法注册前台窗口 hook，跳过 Claude 层级跟随")
+            self._api = self._api_factory()
+            self._callback = self._api.callback(self._on_event)
+            self._hook = self._api.register(self._callback) or None
+            if self._hook:
+                self._restore_hook = self._api.register(self._callback, EVENT_SYSTEM_MINIMIZEEND) or None
+            if not self._hook or not self._restore_hook:
+                log.warning("无法注册前台/恢复窗口 hook，跳过 Claude 层级跟随")
+                self.stop()
                 return
         except Exception:
-            self._callback = None
             log.exception("注册前台窗口 hook 失败，跳过 Claude 层级跟随")
+            self.stop()
             return
         self._enabled = True
         if self._app is not None:
             self._app.installEventFilter(self)
-        self._request_sync()  # 启动/关闭置顶时，Claude 可能已经在前台
+        self._request_sync(recheck=True)  # 启动/关闭置顶时，Claude 可能已经在前台
 
     def stop(self) -> None:
         self._enabled = False
         self._timer.stop()
+        self._cancel_rechecks()
+        self._recheck_requested = False
         if self._app is not None:
             self._app.removeEventFilter(self)
-        if self._hook:
+        for attr in ("_hook", "_restore_hook"):
+            hook = getattr(self, attr)
+            if not hook:
+                continue
             try:
-                if not self._api.unregister(self._hook):
+                if not self._api.unregister(hook):
                     log.warning("注销前台窗口 hook 失败，保留回调并在下次清理时重试")
-                    return
+                    continue
+                setattr(self, attr, None)
             except Exception:
                 log.exception("注销前台窗口 hook 失败，保留回调")
-                return
-        self._hook = self._callback = None
+        if not self._hook and not self._restore_hook:
+            self._callback = None
 
-    def _request_sync(self) -> None:
-        if self._enabled and not self._timer.isActive():
+    def _request_sync(self, *, recheck=False) -> None:
+        if not self._enabled:
+            return
+        self._recheck_requested |= recheck
+        if not self._timer.isActive():
             self._timer.start()
+
+    def _cancel_rechecks(self) -> None:
+        for timer in self._retry_timers:
+            timer.stop()
+        self._retry_target = None
+
+    def _schedule_rechecks(self, target) -> None:
+        if target == self._retry_target and any(t.isActive() for t in self._retry_timers):
+            return  # 同一轮前台/恢复事件不延长已有的两次补查
+        self._cancel_rechecks()
+        self._retry_target = target
+        for timer in self._retry_timers:
+            timer.start()
 
     def _on_event(self, hook, event, hwnd, object_id, child_id, thread, time) -> None:
         # WinEvent 回调只投递合并请求：不查进程、不做 Z 序操作，也不运行事件循环。
-        if event == EVENT_SYSTEM_FOREGROUND and hwnd:
-            self._request_sync()
+        if event in (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND) and hwnd:
+            self._request_sync(recheck=True)
 
     def eventFilter(self, watched, event):
         if self._enabled and event.type() in (QEvent.Show, QEvent.WinIdChange):
@@ -173,14 +222,23 @@ class ForegroundFollower(QObject):
     def _sync(self) -> None:
         if not self._enabled:
             return
+        recheck, self._recheck_requested = self._recheck_requested, False
         try:
             api = self._api
             target = api.foreground()
-            if not target or not api.usable(target):
+            if not target:
+                self._cancel_rechecks()
                 return
             pid = api.pid(target)
             if not pid or PureWindowsPath(api.image(pid)).name.casefold() != "claude.exe":
+                self._cancel_rechecks()
                 return
+            if api.foreground() != target or api.pid(target) != pid:
+                self._cancel_rechecks()
+                return
+            if recheck:
+                # 前台事件可能早于恢复完成；即使此刻仍最小化，也必须安排补查。
+                self._schedule_rechecks((target, pid))
             # 进程查询后重验，避免把过期 Claude 事件应用到别的前台程序。
             if api.foreground() != target or not api.usable(target) or api.pid(target) != pid:
                 return
@@ -188,6 +246,11 @@ class ForegroundFollower(QObject):
             for window in self._windows():
                 if window is not None and window.isVisible():
                     hwnd = int(window.winId())
+                    if api.foreground() != target or not api.usable(target):
+                        return
+                    # Qt 在系统自发 hide/minimize 后仍视为 visible；显式 hide 的窗口不进这里。
+                    if not api.usable(hwnd):
+                        api.show_without_activation(hwnd)
                     if hwnd not in handles and api.usable(hwnd):
                         handles.append(hwnd)
             if not handles:

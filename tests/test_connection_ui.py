@@ -40,6 +40,11 @@ def test_menu_confirm_connect_status_disconnect_in_each_language(connected_env, 
     assert panel.isVisible()
     assert not ctl.connection.user.exists()  # 确认前不写
     assert "Claude Code" in panel._detail.text()
+    assert "tools\\uninstall_hooks.py" in panel._detail.text()
+    assert "exe" in panel._detail.text()
+    assert {"zh": "只有源码运行时", "en": "only when running from source",
+            "ja": "ソースからの実行時のみ"}[lang] in panel._detail.text()
+    assert panel._detail.height() >= panel._detail.heightForWidth(panel._detail.width())
     assert "Claude" not in panel.windowTitle()
     panel._connect.click()
     assert ctl.connection.inspect().state == "connected"

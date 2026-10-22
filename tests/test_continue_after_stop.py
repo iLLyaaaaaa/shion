@@ -177,11 +177,15 @@ def test_desktop_interrupt_copies_continue(pet):
     assert remote_texts(pet)[2][0] == "停下"
 
 
-def test_desktop_interrupt_itself_is_unchanged(pet):
+def test_desktop_interrupt_waits_for_checkpoint_to_confirm(pet):
     work(pet, DESKTOP)
     pet.ctl.interrupt_work()
-    assert pet.said[-1] == "已经中断啦，在 CC 里说一声就能继续"
+    assert pet.said[-1] == "命令停掉了，等它说完这句就停～"
+    assert pet.win.sprite_name == "stop"
     assert remote_texts(pet)[2] == ["停下", "立即中断", "做得好", "有问题……"]  # 还没真的结束
+    pet.ctl.handle_event("work_stopped", None, {"session": "s1"})
+    assert pet.said[-1] == "已经中断啦，在 CC 里说一声就能继续"
+    assert remote_texts(pet)[2][0] == "继续"
 
 
 def test_pause_timeout_offers_continue(pet):

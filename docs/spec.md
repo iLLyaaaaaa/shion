@@ -68,7 +68,7 @@ sleep 在 alpha 清理后仅保留面积最大的连通块；bed 先分帧，每
 
 - 无边框、背景透明、不在任务栏显示：`FramelessWindowHint | Tool | WindowDoesNotAcceptFocus`，加上 `WA_TranslucentBackground` 与 `WA_ShowWithoutActivating`。右键「置于最上层 / Always on top / 最前面に表示」默认开启，存档字段 `always_on_top` 缺失或类型错误时按开启处理（v5 兼容新增字段）。
 - 置顶开关立即同步诗音、气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停文字标签及调试 FPS；新建附属窗口也继承。关闭后可以被普通窗口盖住。Windows 切换 `WindowStaysOnTopHint` 后对原本可见的窗口重新 `show()`，保持几何位置、mask、其他 flags、点穿和不抢焦点属性，原本隐藏的窗口不因此出现。
-- Windows 原生平台关闭「置于最上层」时，用 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT)` 跟随前台：当前前台窗口所属可执行文件名为 `Claude.exe`（大小写无关、多窗口/多 PID 均可）时，仅把本体及可见气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停标签、FPS 按既有层级紧邻排到该窗口之上。查询其上方非本组的 Z 序邻居作为插入点；无普通邻居时使用 `HWND_TOP`，不借 topmost 邻居意外开启置顶。每次 `SetWindowPos` 带 `SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER`，不激活、不改变前台、不关联 Claude owner，Claude 最小化不连带隐藏诗音。回调只投递合并请求，延后查询 PID/程序名及重新确认当前前台；非 Claude、无效/不可见/最小化窗口和查询失败均跳过。启动/关闭置顶时检查一次，附属窗口显示或 HWND 重建时重查，不轮询。开启置顶、退出、应用关闭及 dispose 注销 hook；保留 ctypes 回调至注销成功。非 Windows/offscreen 跳过，API 失败记日志且不阻止运行。
+- Windows 原生平台关闭「置于最上层」时，分别用 `SetWinEventHook` 监听 `EVENT_SYSTEM_FOREGROUND` 和 `EVENT_SYSTEM_MINIMIZEEND`（`WINEVENT_OUTOFCONTEXT`）跟随前台：当前前台窗口所属可执行文件名为 `Claude.exe`（大小写无关、多窗口/多 PID 均可）时，仅把本体及可见气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停标签、FPS 按既有层级紧邻排到该窗口之上。查询其上方非本组的 Z 序邻居作为插入点；无普通邻居时使用 `HWND_TOP`，不借 topmost 邻居意外开启置顶。每次 `SetWindowPos` 带 `SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER`，不激活、不改变前台、不关联 Claude owner，Claude 最小化不连带隐藏诗音。回调只投递合并请求，延后查询 PID/程序名及重新确认当前前台；前台是 Claude 时即使仍最小化，也在约 150ms、500ms 各补查一次，同一轮重复事件合并、不延长已有补查，不轮询。每次操作前重新核对前台，非 Claude 时取消补查；无效/不可见/最小化的目标只跳过本次调整。诗音窗口若仍被 Qt 视为可见、却被 Win+D 等系统操作隐藏或最小化，则在跟随时用 `ShowWindow(SW_SHOWNOACTIVATE)` 恢复，再排 Z 序；显式隐藏/关闭的气泡及特效不恢复。启动/关闭置顶时检查一次，附属窗口显示或 HWND 重建时重查。开启置顶、退出、应用关闭及 dispose 取消补查并注销两个 hook；保留 ctypes 回调至全部注销成功。非 Windows/offscreen 跳过，API 失败记日志且不阻止运行。
 - 授权请求切换到新的队首、计划提醒、有效完成提醒，以及「停下」后首次真正到达检查点时，整个提示前移一次；静音不影响前移，被诗音结束的一轮随后发来的 Stop 不触发。Windows 使用 `SetWindowPos(HWND_TOP, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`，不激活、不改变前台窗口、不重开置顶开关；授权/反馈/对话/关于面板排在本体和特效前面。
 - 所有对话框（关于、反馈输入、对话选择、授权）始终独立置顶。按身体中心选择当前显示器，在可用区域内优先放右侧，放不下换左侧；两侧都不足时尝试上/下，并避免身体重叠。授权展开/折叠、对话换页后重新定位。用户主动打开的反馈输入与关于可以接收键盘；自动授权和对话选择原有不抢焦点规则不变。
 - 程序版本唯一声明为 `shion.__version__ = "0.4.1"`，关于内容与 QApplication 版本均从此读取；存档 schema 和内容 JSON schema 仍为各自协议版本。
@@ -350,7 +350,8 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 - 校验 hook 报来的 CC 进程：还活着、名字和创建时间都对得上（防 PID 复用）。找不到时说“找不到正在工作的进程，先改成普通的停下啦”并退回普通“停下”
 - 结束“在执行的工具开始之后才创建”的 CC 直接子进程及其子孙（先孙后子，核对创建时间）；排除 hook 进程（报来的 hook pid、可执行文件是项目 `.venv\Scripts\python.exe` 的直接子进程）。MCP 服务器等会话开始时就有的子进程不受影响。没有在执行的工具（正在写文字）时不结束任何进程
 - 同时给该会话设**一次性中断标记**：下一个检查点（PreToolUse / PostToolUse）返回 `continue: false`；被结束的工具触发的 PostToolUseFailure 不消耗标记，诗音也不说“出错了”。prompt / Stop 作废没用上的标记
-- 做完把会话标成空闲，下一次 prompt / PreToolUse 之前不会再发；诗音说“已经中断啦，在 CC 里说一声就能继续”，并解除停下
+- 点击后把会话标成空闲，下一次 prompt / PreToolUse 之前不会再发，并解除停下。即时提示分两种：确实结束了至少一个工具进程时说“命令停掉了，等它说完这句就停～”；没有结束进程（例如当时正在写文字）时说“等它说完这句就停～”。两种都用 stop 表情，中英日语义一致，不提前宣称这一轮已经中断
+- 对应会话随后收到 `work_stopped` 时，才说“已经中断啦，在 CC 里说一声就能继续”（stop 表情）；每个待确认的中断会话只提醒一次。普通停下/超时、其他会话及重复事件不触发这句。若只收到 `stop`（文字写完、没有后续检查点），沿用结束会话和“继续”入口，不冒充收到 `work_stopped`；新 prompt / Stop 作废待确认提示
 - 终端版和桌面端 Code 用同一种做法。**不用 Ctrl+C**：实测（2.1.289）用 `GenerateConsoleCtrlEvent` 向终端版 CC 的控制台发 Ctrl+C，CC 会在 1～4 秒内整个退出，而不是像按 Esc 那样只中断当前生成
 - 限制：正在写、后面没有工具调用的文字拦不住（写完就是这一轮结束）
 
@@ -527,7 +528,7 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
    - 中英日右键菜单提供“连接 Claude Code / 重新连接 Claude Code / 断开连接”，菜单及双击状态实时检查用户级配置：已连接、未连接、路径失效或连接不完整、无法读取配置。已连接只表示八个条目完整且指向当前有效路径，不代表实际事件联动已验收
    - 确认面板说明会合并写入 `%USERPROFILE%\.claude\settings.json`、备份及迁移。沿用 `tools/hooks_config.py`，CLI 安装/卸载与界面共用；事件、command + args、matcher、timeout、statusMessage 均沿用现有定义
    - 只处理明确的诗音脚本/打包命令，兼容旧命令格式，不按子串删除第三方条目；statusLine、modelSettings、未知键及混合分组中的其他 hooks 均保留。重复连接无变化时不写盘、不备份
-   - 写前校验用户级及本项目 `.claude/settings.local.json`，损坏/空 JSON 和非法 hooks 结构拒绝写入。所有变更文件先备份原始字节并暂存，再先移除项目级旧诗音 hooks、后写用户级配置，避免双发；任一步失败恢复已改文件，恢复失败明确报告备份位置。检测到并发修改时拒绝覆盖
+   - 写前校验用户级及本项目 `.claude/settings.local.json`，损坏/空 JSON 和非法 hooks 结构拒绝写入。所有变更文件先备份原始字节并暂存，再先移除项目级旧诗音 hooks、后写用户级配置，避免双发；任一步失败恢复已改文件，恢复失败明确报告备份位置。检测到并发修改时拒绝覆盖。**迁移旧项目 hooks 只在源码运行时有效**，且只处理当前源码项目，不扫描其他旧项目；用 exe 连接时，请在旧项目里运行 `tools\uninstall_hooks.py`，再使用用户级连接，避免重复事件。连接确认面板中英日均明确说明此限制
    - 断开只删用户级诗音条目，不恢复旧项目级 hooks，不修改其他设置；变更前同样备份。hooks 路径指向当前运行位置，移动/缺失/条目不完整时可重新连接修复
 
 3. **开机自启**

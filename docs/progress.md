@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-22 Win+D 后跟随修复与分段中断提示**：前台/恢复双事件、150ms/500ms 有限补查和非激活显示恢复；中断点击与 `work_stopped` 分开提示、三语 stop 表情，连接面板/spec 补充源码迁移限制。全量 **1552 passed、9 skipped、2 warnings**，原生 Windows 150% 专项 **64 passed**，修正版 exe 复制目录自检 **78 项通过**。PreToolUse 启动到退出各 20 次中位数：**exe 392.562ms / .venv 329.602ms**，未做启动优化。真实桌面与实际 CC 联动 **待用户验收**。本轮仅本地 commit，不 push；三份既有 README 草稿保留、不纳入提交。
 - **2026-10-22 v1.0 第 2 步：Windows onedir 打包**：已生成 `dist/Shion/Shion.exe`，完整目录 **105,519,736 字节（105.52 MB / 100.63 MiB，221 文件）**。复制到无 `.venv` 的中文/空格临时路径后，exe 内 HookConnection、九张截图、八类 hook、自启动和存档日志落点等 **78 项自检通过**；全量 **1531 passed、7 skipped、2 warnings**，最终修正回归 **31 passed**。真实桌面、干净机器、杀毒及 Claude Code 实际联动 **待用户验收**。只做本步，本地 commit，不 push。
 - **2026-10-22 v1.0 第 1 步：连接管理、首次引导与开机自启**：已实现共用 hooks 服务的用户级连接/断开、项目级迁移及失败恢复，三语状态和不激活引导面板，HKCU 自启与源码/打包分支。最终全量 **1519 passed、7 skipped、2 warnings**；修正回归 **105 passed**，原生 Windows 专项 **23 passed**，三语截图已自查。只完成本步，不推进打包/发布；真实桌面与实际联动 **待用户验收**。本轮按用户要求本地 commit，不 push。
 - **2026-10-22 Claude 前台窗口层级跟随**：关闭「置于最上层」时，原生 Windows 用前台 hook 将诗音与可见附属窗口紧邻放到任一 Claude.exe 窗口之上；其他程序前台不调整。不激活、不移动缩放、不绑定 Claude owner；延迟创建/句柄重建补同步，开启置顶及退出注销。全量 **1473 passed、6 skipped、2 warnings**；最终专项与独立暂存副本均 **81 passed、2 skipped**，原生 hook 两轮注册/注销、真实受控窗口组 Z 序 **1 passed**。真实焦点、遮挡、最小化和高分屏 **待用户验收**。只提交本轮改动，不 push。
@@ -34,6 +35,36 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-22：Win+D 后跟随修复、分段中断与 hook 耗时（待用户验收）
+- **范围**：已读 AGENTS/CLAUDE、相关进度与规格。开始时 master 无已跟踪改动、无暂存内容，但有三份未跟踪的 `docs/drafts/README*.md`；用户确认保留草稿后实施本轮四项。草稿不修改、不暂存。无新依赖、版本或素材改动，不 push。
+- **做了什么**：
+  - 跟随同时注册前台切换与最小化恢复事件；回调只投递合并请求。前台识别为 Claude 后，即使此刻仍最小化，也安排约 150ms、500ms 各一次补查，同一轮重复事件不延长补查，无常驻轮询；每次重新核对前台，切走、开启置顶、退出时取消。两个 hook 部分注册失败会清理；注销失败保留回调并可重试。
+  - 跟随时将 Qt 仍认为可见、但被系统隐藏/最小化的诗音窗口用 `ShowWindow(SW_SHOWNOACTIVATE)` 恢复，再同步层级。显式隐藏的气泡/特效不恢复，不改变置顶选择、不主动激活。Win+D 的完整桌面行为仍须用户验收。
+  - 立即中断实际结束至少一个进程时说“命令停掉了，等它说完这句就停～”；没有结束进程时说“等它说完这句就停～”，均用 stop 表情。只有对应待确认会话收到 `work_stopped` 后才说“已经中断啦，在 CC 里说一声就能继续”，每会话一次，三语同步、两段分别遵守当前静音设置。Stop/新 prompt 清除待确认提示；延续中断工具失败不报错、结束后“继续”、不计完成任务的规则。
+  - 连接确认面板三语与 spec 明确：迁移旧项目 hooks 只在源码运行时有效，且只处理该源码项目；用 exe 连接时，请在旧项目运行 `tools\uninstall_hooks.py`，避免与用户级 hooks 双发。不扫描或修改用户其他项目配置。
+  - 新增可复跑的 `tools/benchmark_hooks.py`：两种入口各 20 次，相同合成 Read 输入、独立随机端口的本机 HTTP mock（未暂停）、隔离 HOME/APPDATA/存档；交替先后顺序，不预热、不丢弃首轮。`perf_counter_ns` 从创建子进程前计到退出并收完管道，包含启动、hook 标准路径与退出，不含脚本整体初始化。不优化启动。
+- **验证**：
+  - 新增“前台事件早于恢复完成”在 150ms / 500ms 补查后恢复、补查有界且不轮询、恢复事件合并且不延后定时、切走/退出取消、双 hook 部分注册及注销失败清理、系统隐藏与显式隐藏区分的回归；原生用例覆盖 SW_HIDE / SW_MINIMIZE 后显示、geometry/mask 与普通层级保持。
+  - 新增三语两段中断、实际结束进程/无工具/结束失败、会话隔离、重复事件、各阶段静音、新 prompt/Stop 作废等测试；更新旧桌面中断即时完成的假设，保留实际结束后“继续”的断言。三语面板测试检查迁移提示和正文高度。
+  - 全量 `.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/restore-interrupt/full-tmp` → **1552 passed、9 skipped、2 warnings（451.29 秒）**，日志 `full.log`。本轮新增的两个原生恢复用例在全量 offscreen 中跳过，已在下列原生专项执行；两条警告均为既有 Pillow getdata 弃用。
+  - `QT_QPA_PLATFORM=windows`、`QT_SCALE_FACTOR=1.5`，前台跟随/连接面板最终专项 → **64 passed（11.38 秒）**，日志 `native-final.log`。初轮离屏相关专项修正后 **200 passed、5 skipped（45.83 秒）**，最终代码由全量与原生专项覆盖。
+  - 重建 `.venv\Scripts\python tools\build.py`，`dist/Shion` **105,521,442 字节（105.52 MB / 100.63 MiB，221 文件）**；复制到独立临时目录后的 **78 项自检通过**。三语连接面板 `--snapshot` 已逐张自查，新增说明、脚本路径与按钮显示完整；截图仅为静态证据。构建日志 `.venv/preview-run/restore-interrupt/build.log`，包内自检和截图 `build/bundle-check/`。
+- **PreToolUse 耗时，仅测量、未优化**：在以上全量/构建/原生专项全部退出后运行 `.venv\Scripts\python tools\benchmark_hooks.py`；两种入口均正常退出、无 stdout/stderr，40 次均由 mock 收到对应 working 事件。
+
+  | 入口（相对仓库根目录） | 次数 | 启动到退出中位数 |
+  | --- | ---: | ---: |
+  | `dist\Shion\Shion.exe --hook PreToolUse` | 20 | **392.562 ms** |
+  | `.venv\Scripts\python.exe hooks\shion_hook.py PreToolUse` | 20 | **329.602 ms** |
+
+  - 测量条件见上方脚本说明；数字为本机本轮结果，非冷启动/其他机器的保证。原始 40 次样本、完整命令、版本及 exe/hook SHA-256 在已忽略的 `build/hook-benchmark.json`；终端记录 `.venv/preview-run/restore-interrupt/benchmark.log`。未修改 `hooks/shion_hook.py`、构建入口或依赖。
+- **踩过的坑与验证边界**：初轮专项发现双 hook 部分注册失败时空句柄需统一为 None，以及旧桌面中断测试还断言点击即完成；已修正并补回归。当前原生平台 `windows`、实际 DPR=1.5，但 `GetForegroundWindow()` 返回空句柄，所以即使原生隐藏/恢复和 Z 序用例通过，也不能据此宣称真实焦点通过。
+- **待用户验收**（重启修正版源码或 `dist/Shion/Shion.exe`）：
+  - [ ] 关闭置顶 → Win+D → 恢复 Claude 桌面端为最大化/全屏，诗音及当时可见附属提示恢复到其上；多次切换、另一个 Claude 窗口、换到其他程序均正常，不抢焦点、不改位置或置顶设置。
+  - [ ] Win+D 若隐藏/最小化诗音，恢复 Claude 后诗音重现；已主动消失的气泡/特效不复活。开启置顶、退出后没有迟到补查。
+  - [ ] 三语立即中断：有命令被结束/只有文字两种即时提示准确、表情为 stop；真正 `work_stopped` 后才显示完成中断，不重复说、不冒充任务完成，静音及“继续”菜单正常。
+  - [ ] 三语连接面板正文完整可读，明确源码迁移限制；按提示卸载旧项目 hooks 后，exe 用户级连接没有重复事件。
+- **下一步**：用户验收本轮及此前保留清单。本轮测试与记录已完成，仅本地提交明确文件清单，不 push；提交 Author/Committer 均核对为 GitHub noreply 邮箱，三份既有 README 草稿继续保留。
 
 ## 2026-10-22：v1.0 第 2 步——Windows onedir 打包（待用户验收）
 - **范围**：开始时已读取 AGENTS/CLAUDE、相关规格，master 工作区干净、提交邮箱正确。用户确认方案后实现本步；按用户选择不生成自定义图标、版本资源或 zip，不改版本、不推进许可/发布，不修改素材原图或精灵。
