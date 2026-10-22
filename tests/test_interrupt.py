@@ -21,6 +21,7 @@ from tests.test_hook import HOOK, run_hook
 from tests.test_stop_work import join, start_waiters
 
 INTERRUPTED = "已经中断啦，在 CC 里说一声就能继续"
+TEXT_DONE = "说完啦，这一轮停下了，在 CC 里说一声就能继续"
 NO_PROCESS = "找不到正在工作的进程，先改成普通的停下啦"
 
 
@@ -484,6 +485,50 @@ def test_interrupt_two_stage_speech_uses_actual_kills_and_waits_for_own_checkpoi
     assert e.data.stats["claude_tasks"] == 0
 
 
+@pytest.mark.parametrize("lang,expected", [
+    ("zh", TEXT_DONE),
+    ("en", "Finished speaking. This turn has ended. Say something in CC to continue."),
+    ("ja", "書き終わったよ。このターンは終わったから、CC で話しかければ続けられるよ"),
+])
+def test_interrupt_text_only_stop_announces_end_once(pet2, lang, expected):
+    e = pet2
+    e.ctl.set_language(lang)
+    work(e)
+    e.ctl.handle_event("tool_done", None, {"session": "s1", "tool_id": "t1"})
+    e.ctl.interrupt_work()
+    assert e.world.killed == []
+    assert e.said[-1] == e.ctl.lines.ui("interrupt_waiting")
+    e.advance(5)  # 点击时的 stop 表情已结束，收尾应重新显示 stop。
+    e.said.clear()
+    e.ctl.handle_event("stop", None, {"session": "s1"})
+    assert e.said == [expected]
+    assert e.win.sprite_name == "stop"
+    _assert_stop_not_counted(e)
+    e.ctl.handle_event("work_stopped", None, {"session": "s1"})  # 迟到的检查点不再提示。
+    assert e.said == [expected]
+
+
+def test_interrupt_text_only_stop_keeps_sessions_independent(pet2):
+    e = pet2
+    for session in ("a", "b"):
+        work(e, session)
+        e.ctl.handle_event("tool_done", None, {"session": session, "tool_id": "t1"})
+    e.ctl.interrupt_work()
+    assert e.world.killed == []
+    e.said.clear()
+    e.ctl.handle_event("stop", None, {"session": "other"})
+    assert TEXT_DONE not in e.said
+    assert e.ctl._interrupt_waiting == {"a", "b"}
+    assert e.data.stats["claude_tasks"] == 1  # 其他会话仍按原规则完成。
+    e.said.clear()
+    for session in ("a", "b"):
+        e.ctl.handle_event("stop", None, {"session": session})
+        assert session not in e.ctl._interrupt_waiting
+        assert e.ctl._ended[0] == session
+    assert e.said == [TEXT_DONE, TEXT_DONE]  # 每个待确认会话各提示一次。
+    assert e.data.stats["claude_tasks"] == 1
+
+
 def test_failed_termination_does_not_claim_command_stopped(pet2):
     work(pet2)
     pet2.world._terminate = lambda *args: False
@@ -492,9 +537,14 @@ def test_failed_termination_does_not_claim_command_stopped(pet2):
     assert pet2.said[-1] == "等它说完这句就停～"
 
 
-@pytest.mark.parametrize("muted_at_click,muted_at_end", [(True, True), (True, False), (False, True)])
-def test_each_interrupt_stage_obeys_current_mute_setting(pet2, muted_at_click, muted_at_end):
+@pytest.mark.parametrize("event,expected", [("work_stopped", INTERRUPTED), ("stop", TEXT_DONE)])
+@pytest.mark.parametrize("muted_at_click,muted_at_end", [
+    (True, True), (True, False), (False, True), (False, False),
+])
+def test_each_interrupt_stage_obeys_current_mute_setting(
+        pet2, event, expected, muted_at_click, muted_at_end):
     work(pet2)
+    pet2.ctl.handle_event("tool_done", None, {"session": "s1", "tool_id": "t1"})
     pet2.said.clear()
     pet2.data.bubble_muted = muted_at_click
     pet2.ctl.interrupt_work()
@@ -502,9 +552,13 @@ def test_each_interrupt_stage_obeys_current_mute_setting(pet2, muted_at_click, m
     assert pet2.win.sprite_name == "stop"
     pet2.said.clear()
     pet2.data.bubble_muted = muted_at_end
-    pet2.ctl.handle_event("work_stopped", None, {"session": "s1"})
-    assert pet2.said == ([] if muted_at_end else [INTERRUPTED])
+    pet2.ctl.handle_event(event, None, {"session": "s1"})
+    assert pet2.said == ([] if muted_at_end else [expected])
     assert pet2.win.sprite_name == "stop"
+    assert "s1" not in pet2.ctl._interrupt_waiting
+    pet2.data.bubble_muted = False
+    pet2.ctl.handle_event("work_stopped", None, {"session": "s1"})
+    assert pet2.said == ([] if muted_at_end else [expected])  # 静音时也消耗提示，不补播。
 
 
 @pytest.mark.parametrize("event", ["prompt", "stop", "pause_timeout"])

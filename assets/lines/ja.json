@@ -321,6 +321,7 @@
     "hook_status_waiting": "詩音が見てるよ～（ここで止まったままなら一時停止中。詩音を右クリックして「続ける」）",
     "work_stopped_timeout": "止まりすぎたから、このターンは終わりにしたよ。CC で話しかければ続きができるよ",
     "interrupted": "中断したよ。CC で話しかければ続けられるよ",
+    "interrupt_done_after_text": "書き終わったよ。このターンは終わったから、CC で話しかければ続けられるよ",
     "interrupt_command_stopped": "コマンドは止めたよ。この一文が終わったら止まるよ～",
     "interrupt_waiting": "この一文が終わったら止まるよ～",
     "interrupt_no_process": "作業中のプロセスが見つからなかったから、普通の「止める」にしたよ",

@@ -94,7 +94,7 @@ class PetController(QObject):
         self._procs: dict[str, interrupt.CCProcess] = {}  # 会话 → hook 报来的 CC 进程（立即中断用）
         self._tool_wall: dict[str, dict[str, float]] = {}  # 会话 → {tool_use_id: 开始的 Unix 秒}
         self._interrupted: set[str] = set()  # 被立即中断、还没重新开始的会话
-        self._interrupt_waiting: set[str] = set()  # 等 work_stopped 后才播“已经中断”，每会话一次
+        self._interrupt_waiting: set[str] = set()  # 等 work_stopped / Stop 后播对应收尾，每会话一次
         self._end_pending: set[str] = set()  # 这一轮被诗音结束了（中断 / 停下拿到 stop / 停太久）：紧接着的 Stop 不算完成
         # 最近一个被诗音结束了这一轮（立即中断 / 停太久）的会话：(会话, CC 进程或 None)，菜单上可以“继续”
         self._ended: Optional[tuple[str, Optional[interrupt.CCProcess]]] = None
@@ -593,10 +593,14 @@ class PetController(QObject):
             # 诗音结束的这一轮（CC 随后照常发 Stop）：和 work_stopped 一样，不加任务数、不 done、不说完成、不催
             self._end_pending.discard(session)
             self._interrupted.discard(session)
-            self._interrupt_waiting.discard(session)
             self._remember_ended(session)
             self.state.end_session(session)
             self._forget_session(session)
+            if session in self._interrupt_waiting:
+                self._interrupt_waiting.discard(session)
+                self.state.menu_talk(now, "stop")
+                self.say_text(self.lines.ui("interrupt_done_after_text"), priority=Priority.HIGH,
+                              category="stop_requested")
             self._sync_pause()
             self.sync()
             return

@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-22 立即中断只有文字时的 Stop 收尾**：补齐待确认中断会话直接收到 Stop 时的三语 `interrupt_done_after_text`，stop 表情、遵守当前静音，每会话一次；不计完成任务、不说完成台词，保留“继续”入口。专项 **179 passed、1 skipped**；全量 **1561 passed、9 skipped、2 warnings**。真实 CC 文字写完直接 Stop 的表现 **待用户验收**。只本地 commit，不 push；`docs/drafts/` 不暂存，本轮不重建 exe。
 - **2026-10-22 Win+D 后跟随修复与分段中断提示**：前台/恢复双事件、150ms/500ms 有限补查和非激活显示恢复；中断点击与 `work_stopped` 分开提示、三语 stop 表情，连接面板/spec 补充源码迁移限制。全量 **1552 passed、9 skipped、2 warnings**，原生 Windows 150% 专项 **64 passed**，修正版 exe 复制目录自检 **78 项通过**。PreToolUse 启动到退出各 20 次中位数：**exe 392.562ms / .venv 329.602ms**，未做启动优化。真实桌面与实际 CC 联动 **待用户验收**。本轮仅本地 commit，不 push；三份既有 README 草稿保留、不纳入提交。
 - **2026-10-22 v1.0 第 2 步：Windows onedir 打包**：已生成 `dist/Shion/Shion.exe`，完整目录 **105,519,736 字节（105.52 MB / 100.63 MiB，221 文件）**。复制到无 `.venv` 的中文/空格临时路径后，exe 内 HookConnection、九张截图、八类 hook、自启动和存档日志落点等 **78 项自检通过**；全量 **1531 passed、7 skipped、2 warnings**，最终修正回归 **31 passed**。真实桌面、干净机器、杀毒及 Claude Code 实际联动 **待用户验收**。只做本步，本地 commit，不 push。
 - **2026-10-22 v1.0 第 1 步：连接管理、首次引导与开机自启**：已实现共用 hooks 服务的用户级连接/断开、项目级迁移及失败恢复，三语状态和不激活引导面板，HKCU 自启与源码/打包分支。最终全量 **1519 passed、7 skipped、2 warnings**；修正回归 **105 passed**，原生 Windows 专项 **23 passed**，三语截图已自查。只完成本步，不推进打包/发布；真实桌面与实际联动 **待用户验收**。本轮按用户要求本地 commit，不 push。
@@ -35,6 +36,18 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-22：立即中断只有文字时的 Stop 收尾（待用户验收）
+- **范围**：已读 AGENTS/CLAUDE、当前进度和中断相关规格，用户确认方案后实施。开始时仅有未跟踪的 `docs/drafts/`，保留、不修改、不暂存。无新依赖，不改 hook、素材或打包产物，仅本地 commit，不 push。
+- **做了什么**：`controller.handle_event` 的待结束 Stop 分支不再静默丢掉待确认提示；只有对应 session 仍在 `_interrupt_waiting` 时，先清除标记，再用 stop 表情和高优先级、遵守静音的 `say_text` 播 `interrupt_done_after_text`。三语文案区分“文字写完自然结束”和实际检查点中断。`work_stopped` 已消费提示时，之后的 Stop 不重复；静音时也消费，不补播；其他会话互不影响。任务计数、完成台词、活动记录、催促和“继续”入口沿用原规则。同步 spec 对仅 Stop 路径的描述。
+- **自动验证**：
+  - 修复前，新/扩展的定向回归 **6 failed、6 passed**，失败均为未静音的仅 Stop 路径缺少收尾；修复后执行下述专项。
+  - `.venv\Scripts\python -m pytest -q tests/test_interrupt.py tests/test_continue_after_stop.py tests/test_stop_work.py tests/test_lines.py --basetemp=.venv/preview-run/interrupt-text-stop/targeted-tmp` → **179 passed、1 skipped（52.93 秒）**，日志 `.venv/preview-run/interrupt-text-stop/targeted.log`。覆盖三语仅 Stop 收尾、过了点击表情时长后重新显示 stop、迟到/重复检查点、`work_stopped` 后 Stop 不重复、两阶段静音组合及解除静音不补播、多会话各一次、其他会话 Stop 照常计数、原有结束后继续等规则。
+  - `.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/interrupt-text-stop/full-tmp` → **1561 passed、9 skipped、2 warnings（439.48 秒）**，日志 `.venv/preview-run/interrupt-text-stop/full.log`。跳过项为 8 个需原生 Windows 平台的用例及 1 个缺少 CC 进程链的用例；两条警告均为既有 Pillow getdata 弃用。`git diff --check` 通过。
+- **待用户验收**（重启源码 `.venv\Scripts\python -m shion`；本轮未重建现有 exe）：
+  - [ ] CC 正在写文字时点立即中断，先说“等它说完这句就停～”；文字写完直接 Stop 后说“说完啦，这一轮停下了，在 CC 里说一声就能继续”，显示 stop，不计任务完成，保留“继续”。英日文语气、显示正常。
+  - [ ] 实际检查点中断后不再追加这句；静音时不播、解除静音不补播；其他会话 Stop 不触发这句。
+- **下一步**：用户验收本轮与此前保留清单。本轮测试与记录已完成，仅本地提交控制器、三语台词、测试及 spec/progress 七个明确文件，不 push；Author/Committer 均核对为指定 GitHub noreply 邮箱，`docs/drafts/` 继续保留。
 
 ## 2026-10-22：Win+D 后跟随修复、分段中断与 hook 耗时（待用户验收）
 - **范围**：已读 AGENTS/CLAUDE、相关进度与规格。开始时 master 无已跟踪改动、无暂存内容，但有三份未跟踪的 `docs/drafts/README*.md`；用户确认保留草稿后实施本轮四项。草稿不修改、不暂存。无新依赖、版本或素材改动，不 push。

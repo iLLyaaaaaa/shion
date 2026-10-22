@@ -319,6 +319,7 @@
     "hook_status_waiting": "Shion is watching~ (stuck here = paused; right-click Shion → Continue)",
     "work_stopped_timeout": "Stopped too long, so this turn ended. Say something in CC to pick it back up.",
     "interrupted": "Interrupted. Say something in CC to continue.",
+    "interrupt_done_after_text": "Finished speaking. This turn has ended. Say something in CC to continue.",
     "interrupt_command_stopped": "The command's stopped. The turn will stop after this sentence~",
     "interrupt_waiting": "The turn will stop after this sentence~",
     "interrupt_no_process": "Couldn't find the working process, so I'll just stop at the next break instead.",
