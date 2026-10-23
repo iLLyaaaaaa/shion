@@ -66,6 +66,77 @@ def manifest(directory: Path) -> dict[str, str]:
             for p in directory.rglob("*") if p.is_file()}
 
 
+def exe_identity(exe: Path) -> dict:
+    """标准库读取 PE 版本与图标资源；以 datafile 加载，不执行目标代码。"""
+    version = ctypes.WinDLL("version", use_last_error=True)
+    version.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+    version.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+    version.GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    version.VerQueryValueW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR,
+                                     ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.UINT)]
+    size = version.GetFileVersionInfoSizeW(str(exe), None)
+    if not size:
+        raise ctypes.WinError(ctypes.get_last_error())
+    buffer = ctypes.create_string_buffer(size)
+    if not version.GetFileVersionInfoW(str(exe), 0, size, buffer):
+        raise ctypes.WinError(ctypes.get_last_error())
+    result = {"strings": {}, "icons": []}
+    for field in ("CompanyName", "FileDescription", "FileVersion", "InternalName", "OriginalFilename",
+                  "ProductName", "ProductVersion"):
+        value, length = ctypes.c_void_p(), wintypes.UINT()
+        if not version.VerQueryValueW(buffer, f"\\StringFileInfo\\040904B0\\{field}",
+                                      ctypes.byref(value), ctypes.byref(length)):
+            raise ValueError(f"Missing version field: {field}")
+        result["strings"][field] = ctypes.wstring_at(value, length.value).rstrip("\0")
+    value, length = ctypes.c_void_p(), wintypes.UINT()
+    if not version.VerQueryValueW(buffer, "\\", ctypes.byref(value), ctypes.byref(length)):
+        raise ValueError("Missing fixed version resource")
+    fixed = struct.unpack("<13I", ctypes.string_at(value, 52))
+    result["file_version"] = [fixed[2] >> 16, fixed[2] & 0xffff, fixed[3] >> 16, fixed[3] & 0xffff]
+    result["product_version"] = [fixed[4] >> 16, fixed[4] & 0xffff, fixed[5] >> 16, fixed[5] & 0xffff]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    kernel.LoadLibraryExW.restype = wintypes.HMODULE
+    kernel.FindResourceW.argtypes = [wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p]
+    kernel.FindResourceW.restype = wintypes.HANDLE
+    kernel.SizeofResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
+    kernel.SizeofResource.restype = wintypes.DWORD
+    kernel.LoadResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
+    kernel.LoadResource.restype = wintypes.HANDLE
+    kernel.LockResource.argtypes = [wintypes.HANDLE]
+    kernel.LockResource.restype = ctypes.c_void_p
+    kernel.FreeLibrary.argtypes = [wintypes.HMODULE]
+    module = kernel.LoadLibraryExW(str(exe), None, 2)
+    if not module:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        def resource(kind, name):
+            handle = kernel.FindResourceW(module, name, kind)
+            if not handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            size = kernel.SizeofResource(module, handle)
+            pointer = kernel.LockResource(kernel.LoadResource(module, handle))
+            if not pointer or not size:
+                raise ctypes.WinError(ctypes.get_last_error())
+            return ctypes.string_at(pointer, size)
+
+        group = resource(14, 1)  # PyInstaller 的第一个 RT_GROUP_ICON。
+        reserved, kind, count = struct.unpack_from("<HHH", group)
+        if reserved != 0 or kind != 1:
+            raise ValueError("Invalid icon group")
+        for index in range(count):
+            width, height, _, _, _, bits, size, name = struct.unpack_from("<BBBBHHIH", group, 6 + index * 14)
+            data = resource(3, name)
+            if len(data) != size or data[:8] != b"\x89PNG\r\n\x1a\n":
+                raise ValueError("Invalid embedded PNG icon")
+            result["icons"].append({"size": [width or 256, height or 256], "bits": bits,
+                                    "sha256": hashlib.sha256(data).hexdigest()})
+    finally:
+        kernel.FreeLibrary(module)
+    return result
+
+
 def own_processes(exe: Path, terminate=False) -> list[int]:
     """只查询/结束本次唯一临时 exe 路径对应的进程，句柄查询与结束之间不重新按 PID 打开。"""
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -154,7 +225,7 @@ class MockHooks:
         self.thread.join(5)
 
 
-def check_bundle(bundle: Path, evidence: Path) -> dict:
+def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / "subprocess.log").write_bytes(b"")
     for previous in evidence.glob("*.png"):
@@ -194,6 +265,24 @@ def check_bundle(bundle: Path, evidence: Path) -> dict:
             content = exe.read_bytes()
             pe = struct.unpack_from("<I", content, 0x3C)[0]
             require(struct.unpack_from("<H", content, pe + 24 + 68)[0] == 2, "windows-gui-subsystem")
+            require(struct.unpack_from("<H", content, pe + 4)[0] == 0x8664, "windows-x64-machine")
+            identity = report["identity"] = exe_identity(exe)
+            require(all(identity["strings"][field] == "Shion" for field in (
+                "ProductName", "FileDescription", "InternalName")), "shion-product-name")
+            require(identity["strings"]["CompanyName"] == "iLLyaaaaaa", "release-company-name")
+            require(all(identity["strings"][field] == expected_version for field in (
+                "FileVersion", "ProductVersion")), "release-string-version")
+            fixed = [int(part) for part in expected_version.split(".")] + [0]
+            require(identity["file_version"] == identity["product_version"] == fixed, "release-fixed-version")
+            sizes = (256, 64, 48, 32, 16)
+            require(sorted(item["size"][0] for item in identity["icons"]) == sorted(sizes)
+                    and all(item["size"][0] == item["size"][1] and item["bits"] == 32
+                            for item in identity["icons"]), "embedded-five-size-icon")
+            for size in sizes:
+                name = "shion.png" if size == 256 else f"shion-{size}.png"
+                png = (relocated / "_internal/assets/icon" / name).read_bytes()
+                require(png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack_from(">II", png, 16) == (size, size),
+                        f"window-icon-{size}")
             connection = json.loads(run(["--self-check-connection", env["HOME"]]).stdout)
             require(connection["ok"], "frozen-HookConnection")
             require(all(not str(p).lower().startswith(str(Path(__file__).resolve().parent.parent).lower())
@@ -212,6 +301,8 @@ def check_bundle(bundle: Path, evidence: Path) -> dict:
                 ("snacks", ["--panel", "snacks", "--lang", "ja"]),
                 *[(f"connection-{lang}", ["--panel", "connection", "--with-pet", "--lang", lang])
                   for lang in ("zh", "en", "ja")],
+                ("icons", ["--icon-preview"]),
+                *[(f"about-{lang}", ["--panel", "about", "--lang", lang]) for lang in ("zh", "en", "ja")],
             ]
             for name, args in snapshots:
                 output = base / f"{name}.png"

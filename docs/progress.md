@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-23 v1.0 发布准备：名称、图标、版本与 ZIP**：按用户确认方案完成品牌措辞检查、idle 头部五尺寸 ICO/PNG、窗口图标、1.0.0 与 exe 版本资源、三语 README 文件名和许可同步，以及手动卸载规格。重建 **105,657,400 字节、226 文件**；复制目录 **97 项自检通过**，ZIP **46,572,116 字节（44.41 MiB）**。新增发布专项 **4 passed**，原生 Windows 150% 专项 **5 passed**；全量 **1575 passed、9 skipped、2 warnings**。图标观感及此前真机清单继续 **待用户验收**。本轮仅本地 commit，不 push；构建产物不入 Git。
 - **2026-10-22 README 入根目录与许可证准备**：用户确认方案后，将三份 README 草稿迁入根目录，接入既有 GIF 与 2×2 截图表格；逐条核对三语菜单、按钮与功能说明，补充焦点、中断、日志和窗口跟随边界。按用户文档验收意见，诗音角色图片（目前包括 `assets/sprites/`、`docs/images/`，以及未来诗音角色图标）使用 CC BY-NC 4.0；其余内容用 MIT。根许可证前置英文范围说明、MIT 正文不变；安装部分保留直接下载步骤。用户其余内容验收通过，三项修订后文档检查通过；全量 **1571 passed、9 skipped、2 warnings**，未重复全量测试。此前真机清单继续 **待用户验收**。本轮仅六个文档文件，本地 commit，不 push，不制作 ZIP。
 - **2026-10-22 README 媒体离屏生成**：按确认方案新增 `tools/make_media.py`，复用 snapshot 渲染并在同一进程连续取帧，输出 4 秒循环 GIF 与 6 张 PNG，共 **1,863,957 字节**。种子/时钟/字体/DPI 固定、2 倍渲染再缩小；两次独立运行逐文件字节一致，同进程重复生成也通过；13 张旧截图重构前后逐字节相同。专项 **296 passed、3 skipped、2 warnings**，全量 **1571 passed、9 skipped、2 warnings**。成品观感 **待用户验收**。原素材与 README 草稿未改，`docs/drafts/` 不暂存；仅本地 commit，不 push。
 - **2026-10-22 立即中断只有文字时的 Stop 收尾**：补齐待确认中断会话直接收到 Stop 时的三语 `interrupt_done_after_text`，stop 表情、遵守当前静音，每会话一次；不计完成任务、不说完成台词，保留“继续”入口。专项 **179 passed、1 skipped**；全量 **1561 passed、9 skipped、2 warnings**。真实 CC 文字写完直接 Stop 的表现 **待用户验收**。只本地 commit，不 push；`docs/drafts/` 不暂存，本轮不重建 exe。
@@ -38,6 +39,37 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## 2026-10-23：v1.0 发布准备——名称、图标、版本与 ZIP（待用户验收）
+- **范围**：先读 AGENTS/CLAUDE、progress 及 spec 的相关章节，给方案并由用户明确确认后实施。开始时 master 工作区干净、提交邮箱为指定 GitHub noreply；无新依赖。未修改 `reference/`、精灵或 raw；75 个既有跟踪角色图片（含 README 媒体）与 HEAD 逐字节一致。不读取真实 Claude 配置、不运行 claude、不创建真实自启项；只做本地 commit，不 push、打标签或发 Release。
+- **名称检查**：`CLAUDE.md` 标题改为“Shion（诗音）—— 能和 Claude Code 联动的桌宠”，spec 目录示例改为 `shion/`；三语 README 的编程工具致谢改用通用表述。对全仓库文字检索并核对中英日介绍、窗口标题、关于页、连接 UI 和 exe 资源，带归属意味的旧名称检索为 0。Claude 的显示仅用于兼容性/联动说明，技术协议键、环境变量、进程名和历史实现记录保留；关于页继续保留非官方及与 Anthropic 无关的声明。
+- **图标**：`tools/make_icon.py` 使用已有 Pillow，从当前 448×512 的 `assets/sprites/idle.png` 裁取 `(44, 22, 395, 286)` 头部；不改原精灵。保持透明与比例，输出五档 PNG 及同帧 ICO；16/32 单独做颜色锐化与一像素外描边，ICO 保留这些独立帧。连续两次生成逐字节相同，ICO 解码后的每帧与对应 PNG 像素一致。未使用 Anthropic / Claude 标志。
+  - `shion/icons.py` 共用同一组尺寸与源码/冻结资源路径；QApplication 默认图标由五张 PNG 组成，主窗口及独立关于框继承。exe 嵌入 ICO，运行时只用 Qt 内置 PNG 支持；当前没有托盘，不新增托盘。
+  - 浅色/深色背景对照（含 16/32 的 4 倍像素预览）：`docs/images/icon-preview.png`。生成命令：`.venv\Scripts\python -m shion --snapshot docs/images/icon-preview.png --icon-preview`。源码与打包版此截图 SHA-256 完全相同，三语打包版关于页截图也已自查。
+
+  | 尺寸 | 单尺寸预览路径 |
+  |---|---|
+  | 256×256 | `assets/icon/shion.png` |
+  | 64×64 | `assets/icon/shion-64.png` |
+  | 48×48 | `assets/icon/shion-48.png` |
+  | 32×32 | `assets/icon/shion-32.png` |
+  | 16×16 | `assets/icon/shion-16.png` |
+
+- **版本与构建**：`shion.__version__ = "1.0.0"` 是唯一程序版本源；关于页、QApplication、ZIP 命名和 `Shion.spec` 的版本资源均从此读取。实际 exe 的 FileVersion/ProductVersion 字符串为 `1.0.0`，固定数值为 `1.0.0.0`，ProductName/FileDescription/InternalName 均为 `Shion`，CompanyName 为 `iLLyaaaaaa`，OriginalFilename 为 `Shion.exe`。读取实际 PE 核对 x64、GUI 子系统及五个 32 位透明图标；嵌入图标的 PNG 帧哈希逐个与源 ICO 一致。
+- **ZIP**：`.venv\Scripts\python tools\build.py` 完成构建 → 复制目录自检 → 生成 ZIP → CRC/清单/逐文件 SHA-256 验证，成功后原子替换；`--check-only` 只重查既有目录，不重建 ZIP。ZIP 使用固定时间戳与文件权限，同一输入目录重复打包字节一致；缺失许可证时拒绝覆盖已有包。三语 README 下载文件名统一为 `Shion-1.0.0-win64.zip`。
+  - 产物：`dist/Shion-1.0.0-win64.zip`，**46,572,116 字节（46.57 MB / 44.41 MiB），228 文件**。
+  - SHA-256：`cf0798d01b5a56a301e0e8cd5f24016e672a0fa5c49e60eb689866aaa1493bf4`。
+  - 根目录只含 `Shion/`（完整 226 文件运行目录）、`LICENSE`、`assets/LICENSE`；无源码测试、raw、reference、`.venv`、`.claude` 或用户存档。程序目录 **105,657,400 字节（105.66 MB / 100.76 MiB）**。构建产物与日志留在忽略目录，不提交 Git。
+- **规格与许可**：spec 明确不做右键“卸载准备”，改用三语 README 已有的断开连接 → 关闭自启 → 退出 → 删除目录和存档/日志步骤。spec、两份 LICENSE 和三语 README 均明确：诗音角色图片（`assets/sprites/`、`docs/images/`、`assets/icon/` 及未来诗音角色图标）适用 CC BY-NC 4.0；其余内容（含代码、台词、菜单数据）适用 MIT。MIT 正文与原版逐字符一致，未改许可政策。
+- **验证**：
+  - 新增发布专项 **4 passed**，原生 Windows、`QT_SCALE_FACTOR=1.5` 的发布/关于专项 **5 passed**；日志 `.venv/preview-run/v1-release/release-regression.log`、`native.log`。
+  - 重建后复制到无外部 Python、中文/空格路径，原有 hooks、连接、自启替身、存档与日志落点检查继续通过；增加实际 PE 身份、五档图标及三语关于/图标截图，合计 **97 项自检通过**。全部使用临时 HOME/USERPROFILE/APPDATA 与隔离端口。证据 `build/bundle-check/report.json`、`subprocess.log`、13 张截图。
+  - 完整 `.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/v1-release/full` → **1575 passed、9 skipped、2 warnings（526.88 秒）**，日志 `.venv/preview-run/v1-release/full.log`。八项原生 Qt 条件与一项 CC 父进程链环境限制跳过；两条为既有 Pillow getdata 弃用警告。`git diff --check` 通过。
+  - README 文件名、三语许可范围、原 MIT 正文、旧名称检索、受保护图片哈希、实际嵌入 ICO 帧和 ZIP 清单/CRC/哈希检查通过。构建日志 `.venv/preview-run/v1-release/build.log`，体积与 ZIP 报告 `build/size-report.json`、`build/release-report.json`。
+- **待用户验收**：
+  - [ ] 在资源管理器及窗口中查看图标，特别是 16/32 像素、深浅背景及高分屏的可辨识度；尺寸对照图仅提供静态检查。
+  - [ ] ZIP 解压后双击启动的实际桌面观感、干净无 Python Windows、杀毒软件表现，以及此前真实 Claude Code 联动/焦点/多屏验收项。复制目录隔离自检不等于干净机器验收。
+- **下一步**：用户审查图标与 ZIP 并集中真机验收；远端推送与 Release 仍需另行授权。
 
 ## 2026-10-22：README 入根目录与许可证准备（用户定点修订与检查完成）
 - **范围**：已读取 AGENTS/CLAUDE、当前进度与相关规格；用户明确确认实施方案及“按现状修正文档”，随后给出文档验收修订：角色图片许可覆盖 README 媒体和未来角色图标，根 MIT 前加范围说明，安装部分不留首次 Release 提示。开始时仅三份未跟踪 README 草稿，提交身份为指定 GitHub noreply。迁入 `README.md`（英文默认）、`README.zh.md`、`README.ja.md`；不改程序、测试、资源 JSON 或图片，不重建媒体、exe 或 ZIP，不改版本、不发布远端。

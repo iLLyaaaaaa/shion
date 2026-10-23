@@ -2,6 +2,7 @@ r"""Windows: .venv\Scripts\python tools\build.py（构建、统计并隔离自�
 from __future__ import annotations
 
 import argparse
+import hashlib
 from importlib.metadata import PackageNotFoundError, version
 import json
 import os
@@ -9,8 +10,73 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import tempfile
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+def windows_version_info():
+    """直接读取唯一应用版本源，交给 PyInstaller 写入 exe 的版本资源。"""
+    from shion import __version__
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo)
+
+    fixed = tuple(int(part) for part in __version__.split(".")) + (0,)
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=fixed, prodvers=fixed, mask=0x3f, flags=0,
+                          OS=0x40004, fileType=1, subtype=0, date=(0, 0)),
+        kids=[StringFileInfo([StringTable("040904B0", [
+            StringStruct("CompanyName", "iLLyaaaaaa"),
+            StringStruct("FileDescription", "Shion"),
+            StringStruct("FileVersion", __version__),
+            StringStruct("InternalName", "Shion"),
+            StringStruct("LegalCopyright", "Copyright (c) 2026 iLLyaaaaaa"),
+            StringStruct("OriginalFilename", "Shion.exe"),
+            StringStruct("ProductName", "Shion"),
+            StringStruct("ProductVersion", __version__),
+        ])]), VarFileInfo([VarStruct("Translation", [0x0409, 1200])])])
+
+
+def release_filename() -> str:
+    from shion import __version__
+    return f"Shion-{__version__}-win64.zip"
+
+
+def create_release_zip(bundle: Path, output: Path, license_root: Path = ROOT) -> dict:
+    """只收完整运行目录及两份许可；验证后原子替换 ZIP，固定时间戳便于复核。"""
+    if not (bundle / "Shion.exe").is_file():
+        raise FileNotFoundError(bundle / "Shion.exe")
+    sources = [(p, "Shion/" + p.relative_to(bundle).as_posix())
+               for p in sorted(bundle.rglob("*")) if p.is_file()]
+    sources += [(license_root / "LICENSE", "LICENSE"), (license_root / "assets/LICENSE", "assets/LICENSE")]
+    for path, _ in sources:
+        if not path.is_file() or path.is_symlink():
+            raise ValueError(f"缺失或不支持的打包文件：{path}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".zip.tmp", delete=False) as temporary:
+        staging = Path(temporary.name)
+    try:
+        with zipfile.ZipFile(staging, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            for path, name in sources:
+                info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 3
+                info.external_attr = 0o100644 << 16
+                archive.writestr(info, path.read_bytes())
+        with zipfile.ZipFile(staging) as archive:
+            if archive.testzip() is not None or archive.namelist() != [name for _, name in sources]:
+                raise ValueError("ZIP 完整性检查失败")
+            for path, name in sources:
+                if hashlib.sha256(archive.read(name)).digest() != hashlib.sha256(path.read_bytes()).digest():
+                    raise ValueError(f"ZIP 文件内容不一致：{name}")
+        staging.replace(output)
+    finally:
+        staging.unlink(missing_ok=True)
+    return {"file": output.name, "bytes": output.stat().st_size,
+            "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "files": len(sources)}
 
 
 def build_environment() -> dict[str, str]:
@@ -78,8 +144,13 @@ def main() -> int:
         sys.path.insert(0, str(ROOT))
         from tools.bundle_smoke import check_bundle
         print("Checking relocated bundle ...", flush=True)
-        result = check_bundle(bundle, build / "bundle-check")
+        from shion import __version__
+        result = check_bundle(bundle, build / "bundle-check", __version__)
         print(f"PASS: {len(result['checks'])} checks; evidence: build/bundle-check", flush=True)
+        if not args.check_only:
+            release = create_release_zip(bundle, ROOT / "dist" / release_filename())
+            (build / "release-report.json").write_text(json.dumps(release, indent=2), encoding="utf-8")
+            print(f"ZIP: dist/{release['file']} ({release['bytes']} bytes)\nSHA-256: {release['sha256']}", flush=True)
         return 0
     except Exception as exc:
         print(f"Build/check failed: {exc}\nSee build/*.log and build/bundle-check.", file=sys.stderr)

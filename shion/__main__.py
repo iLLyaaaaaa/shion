@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = argparse.ArgumentParser(prog="shion", description="Shion 桌宠")
     p.add_argument("--snapshot", metavar="OUT.png", help="离屏渲染一帧存成 PNG 后退出")
+    p.add_argument("--icon-preview", action="store_true", help="配合 --snapshot：各尺寸图标的浅色/深色预览")
     p.add_argument("--state", default="idle", choices=STATES + list(PROP_STATES), help="截图用的精灵（默认 idle）")
     p.add_argument("--from-state", choices=STATES + list(PROP_STATES), help="截图用：从这张精灵交叉淡化到 --state")
     p.add_argument("--bubble", default=None, help="截图里头顶的气泡文字（--at 是打字进度，不给则显示完整）")
@@ -57,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
 
     from shion import app
 
+    if args.snapshot and args.icon_preview:
+        return app.snapshot_icon_preview(args.snapshot)
     if args.snapshot and args.panel:
         return app.snapshot_panel(args.snapshot, args.panel, args.panel_text, args.lang,
                                   args.panel_more, args.panel_expand, args.with_pet)

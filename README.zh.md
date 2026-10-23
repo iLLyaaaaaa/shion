@@ -64,7 +64,7 @@
 
 ## 安装
 
-1. 到 [Releases](../../releases) 下载最新的 `Shion-x.y.z-win64.zip`
+1. 到 [Releases](../../releases) 下载 `Shion-1.0.0-win64.zip`
 2. 解压到一个**固定的位置**，例如 `D:\Apps\Shion`（挪动后可右键 → “重新连接 Claude Code”）
 3. 双击 `Shion.exe`
 4. 第一次启动时，诗音会问你要不要连接 Claude Code，点 **连接**
@@ -141,14 +141,14 @@ start.bat
 | 内容 | 许可 | 可以做什么 |
 |---|---|---|
 | 代码及其他内容（诗音角色图片除外，包括台词和菜单数据） | [MIT](LICENSE) | 几乎随意使用，包括商用，须保留版权及许可声明 |
-| 诗音的角色图片（目前包括 `assets/sprites/`、`docs/images/`） | [CC BY-NC 4.0](assets/LICENSE) | 可转载、修改，须署名、附许可证链接并注明修改，且**不能商用** |
+| 诗音的角色图片（目前包括 `assets/sprites/`、`docs/images/`、`assets/icon/`） | [CC BY-NC 4.0](assets/LICENSE) | 可转载、修改，须署名、附许可证链接并注明修改，且**不能商用** |
 
-Shion / 诗音为 iLLyaaaaaa 原创角色。诗音的角色图片，目前包括 `assets/sprites/`、`docs/images/`（README 截图和 `hero.gif`），使用 CC BY-NC 4.0；以后新增的诗音角色图标（`.ico` / `.png`）也适用。台词、菜单数据等其他内容与代码一样使用 MIT。你可以拿代码做自己的桌宠，诗音的角色图片仅限非商业使用。
+Shion / 诗音为 iLLyaaaaaa 原创角色。诗音的角色图片，目前包括 `assets/sprites/`、`docs/images/`（截图、`hero.gif` 和图标预览）、`assets/icon/`，使用 CC BY-NC 4.0；以后新增的诗音角色图标（`.ico` / `.png`）也适用。台词、菜单数据等其他内容与代码一样使用 MIT。你可以拿代码做自己的桌宠，诗音的角色图片仅限非商业使用。
 
 ## 致谢
 
 - 角色设计与美术：[iLLyaaaaaa](https://github.com/iLLyaaaaaa)（原创角色，借助 AI 绘图工具制作）
-- 开发过程中使用了 Claude Code 和 Codex 辅助编程
+- 开发过程中使用了 AI 辅助编程工具
 
 ---
 

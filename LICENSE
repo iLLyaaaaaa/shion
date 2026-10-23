@@ -1,7 +1,7 @@
 Licensing scope
 ---------------
 The MIT License applies to this repository except for Shion's character images,
-currently including assets/sprites/ and docs/images/, and any future Shion
+currently including assets/sprites/, docs/images/ and assets/icon/, and any future Shion
 character icons (.ico/.png). Those images are licensed under CC BY-NC 4.0;
 see assets/LICENSE.
 

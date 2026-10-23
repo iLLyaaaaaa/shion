@@ -12,7 +12,7 @@
 ## 目录结构
 
 ```
-claude pet/
+shion/
 ├── CLAUDE.md / AGENTS.md
 ├── docs/                      spec.md（本文件）、progress.md
 ├── tests/                     pytest 测试
@@ -71,7 +71,7 @@ sleep 在 alpha 清理后仅保留面积最大的连通块；bed 先分帧，每
 - Windows 原生平台关闭「置于最上层」时，分别用 `SetWinEventHook` 监听 `EVENT_SYSTEM_FOREGROUND` 和 `EVENT_SYSTEM_MINIMIZEEND`（`WINEVENT_OUTOFCONTEXT`）跟随前台：当前前台窗口所属可执行文件名为 `Claude.exe`（大小写无关、多窗口/多 PID 均可）时，仅把本体及可见气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停标签、FPS 按既有层级紧邻排到该窗口之上。查询其上方非本组的 Z 序邻居作为插入点；无普通邻居时使用 `HWND_TOP`，不借 topmost 邻居意外开启置顶。每次 `SetWindowPos` 带 `SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER`，不激活、不改变前台、不关联 Claude owner，Claude 最小化不连带隐藏诗音。回调只投递合并请求，延后查询 PID/程序名及重新确认当前前台；前台是 Claude 时即使仍最小化，也在约 150ms、500ms 各补查一次，同一轮重复事件合并、不延长已有补查，不轮询。每次操作前重新核对前台，非 Claude 时取消补查；无效/不可见/最小化的目标只跳过本次调整。诗音窗口若仍被 Qt 视为可见、却被 Win+D 等系统操作隐藏或最小化，则在跟随时用 `ShowWindow(SW_SHOWNOACTIVATE)` 恢复，再排 Z 序；显式隐藏/关闭的气泡及特效不恢复。启动/关闭置顶时检查一次，附属窗口显示或 HWND 重建时重查。开启置顶、退出、应用关闭及 dispose 取消补查并注销两个 hook；保留 ctypes 回调至全部注销成功。非 Windows/offscreen 跳过，API 失败记日志且不阻止运行。
 - 授权请求切换到新的队首、计划提醒、有效完成提醒，以及「停下」后首次真正到达检查点时，整个提示前移一次；静音不影响前移，被诗音结束的一轮随后发来的 Stop 不触发。Windows 使用 `SetWindowPos(HWND_TOP, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`，不激活、不改变前台窗口、不重开置顶开关；授权/反馈/对话/关于面板排在本体和特效前面。
 - 所有对话框（关于、反馈输入、对话选择、授权）始终独立置顶。按身体中心选择当前显示器，在可用区域内优先放右侧，放不下换左侧；两侧都不足时尝试上/下，并避免身体重叠。授权展开/折叠、对话换页后重新定位。用户主动打开的反馈输入与关于可以接收键盘；自动授权和对话选择原有不抢焦点规则不变。
-- 程序版本唯一声明为 `shion.__version__ = "0.4.1"`，关于内容与 QApplication 版本均从此读取；存档 schema 和内容 JSON schema 仍为各自协议版本。
+- 程序版本唯一声明为 `shion.__version__ = "1.0.0"`，关于内容、QApplication 版本、exe 版本资源和 ZIP 文件名均从此读取；存档 schema 和内容 JSON schema 仍为各自协议版本。
 - 默认显示高度 **200px**（图片按比例缩放，用平滑缩放）。右键菜单可以调成 160 / 200 / 260 / 320。
 - 默认位置：主屏幕可用区域（`availableGeometry`，不含任务栏）的右下角，脚底贴着底边。
 - 动作画布按原比例缩放至指定高度，宽度随动作变化，脚底中心保持不动；贴边时优先把本体夹进屏内。交叉淡化按各图自己的宽度、脚底中心对齐，不拉伸；过渡结束才收窄画布。绘制、遮罩、气泡/面板跟随共用当前本体尺寸。
@@ -523,8 +523,9 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
 1. **打包成 exe**（建议交给 Codex）
    - 用 PyInstaller 的 onedir 模式（启动比 onefile 快，也不容易被杀毒软件误报），输出 `dist/Shion/Shion.exe`
    - `assets/` 跟随打包；代码里查找资源路径要同时兼容源码运行和打包运行（`sys._MEIPASS` / exe 所在目录）
-   - 加上程序图标（从 idle 图生成 `.ico`）和版本信息
-   - 写 `tools/build.py`：一条命令完成打包，并把结果压缩成 `Shion-v1.0.0-windows.zip`
+   - `tools/make_icon.py` 从现有 idle 精灵裁出头部，生成 `assets/icon/shion.ico`（256/64/48/32/16）及对应 PNG；16/32 单独锐化和描边。exe 使用 ICO，窗口使用同组多尺寸 PNG，不使用 Anthropic / Claude 标志；图标预览用 `python -m shion --snapshot docs/images/icon-preview.png --icon-preview`
+   - exe 版本资源从 `shion.__version__` 生成；ProductName / FileDescription 为 Shion，CompanyName 为 iLLyaaaaaa
+   - `tools/build.py` 一条命令完成构建、复制目录自检及 ZIP 完整性验证，生成 `dist/Shion-1.0.0-win64.zip`；ZIP 根目录包含 `Shion/` 完整运行目录、`LICENSE` 和 `assets/LICENSE`。大小与 SHA-256 写入 `build/release-report.json`，并记录到 progress
    - 现已预留 `sys.frozen` → 当前 `Shion.exe --hook <事件名>`，入口在加载 GUI 前分派到原 hook 的标准库逻辑，SessionStart 拉起当前 exe；源码命令仍沿用 `.venv/Scripts/python.exe` + 绝对 hook 路径。实际打包后还需验证标准流、资源路径、启动耗时；如需独立 `shion-hook.exe`，再按实测决定
 
 2. **一键连接 Claude Code**
@@ -548,18 +549,18 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
 5. **README 与许可**
    - `README.md`（英文为主）+ `README.zh.md` + `README.ja.md`：截图和 GIF 演示、下载与使用方法、连接 Claude 的说明、常见问题（端口被占用、杀毒软件误报、如何卸载）
    - 醒目写明：**非官方粉丝作品，与 Anthropic 无关**；不使用 Anthropic / Claude 的 logo
-   - 许可：**代码用 MIT**（`LICENSE`）；**美术素材（`assets/sprites/`）用 CC BY-NC 4.0**（`assets/LICENSE`），README 里写清楚两者的区别
+   - 许可：除诗音角色图片外的内容（包括代码、台词与菜单数据）用 MIT（`LICENSE`）；诗音角色图片用 CC BY-NC 4.0（`assets/LICENSE`），目前包括 `assets/sprites/`、`docs/images/`（截图、GIF 与图标预览）、`assets/icon/`，也涵盖未来诗音角色图标。不能把整个 assets 或所有 PNG/ICO 一概改为 CC；README 三语范围与两份许可证一致
    - 仓库不包含 `reference/` 和 `raw/` 里的旧图、草稿
 
-6. **卸载**
-   - 右键菜单“卸载准备”：自动断开 Claude 连接、关闭开机自启、询问是否删除存档，然后退出；之后用户直接删除文件夹即可
+6. **卸载**（不做右键“卸载准备”功能）
+   - 使用三语 README 的手动卸载步骤：右键断开连接 → 关闭已开启的开机自启 → 右键退出 → 删除程序文件夹，以及 `%APPDATA%\Shion` 下的存档和日志
 
-7. **名称与品牌**（参考 badclaude 收到 Anthropic 停止侵权函的事件：问题出在名称里用了“Claude”、宣传围绕 Claude 展开，容易让人以为是官方合作）
+7. **名称与品牌**
    - 仓库名用 `shion`；程序名、窗口标题、exe 名、“关于”页面都只用 Shion / 诗音
    - 介绍写成“一个能和 Claude Code 联动的桌宠”：只在说明兼容性时提到 Claude，不放进名称和标题
    - README 开头写明：非官方作品，与 Anthropic 无关，未获其认可或赞助
    - 不使用 Anthropic / Claude 的 logo，宣传图不模仿其品牌配色
-   - 代码和文档里的“Claude 的桌宠”等说法改掉（包括 CLAUDE.md、spec.md 的标题）
+   - 代码和文档不使用带有官方归属意味的名称；`CLAUDE.md` 用“能和 Claude Code 联动的桌宠”说明兼容性，spec 标题只用 Shion（诗音）
 
 8. **发布**（发布前必须经用户确认，未经同意不 push）
    - 推送到 GitHub，在 Releases 上传 zip，附更新说明

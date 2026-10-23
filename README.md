@@ -64,7 +64,7 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 
 ## Install
 
-1. Download the latest `Shion-x.y.z-win64.zip` from [Releases](../../releases)
+1. Download `Shion-1.0.0-win64.zip` from [Releases](../../releases)
 2. Extract it to a **permanent location**, e.g. `D:\Apps\Shion` (if you move it later, right-click → **Reconnect to Claude Code**)
 3. Run `Shion.exe`
 4. On first launch Shion asks whether to connect to Claude Code — click **Connect**
@@ -141,14 +141,14 @@ This project is licensed in two parts:
 | Content | License | What you can do |
 |---|---|---|
 | Code and other content (except Shion's character images; includes dialogue and menu data) | [MIT](LICENSE) | Almost anything, including commercial use, while retaining copyright and license notices |
-| Shion's character images (currently including `assets/sprites/` and `docs/images/`) | [CC BY-NC 4.0](assets/LICENSE) | Share and adapt with attribution, a license link and change notices; **non-commercial only** |
+| Shion's character images (currently including `assets/sprites/`, `docs/images/` and `assets/icon/`) | [CC BY-NC 4.0](assets/LICENSE) | Share and adapt with attribution, a license link and change notices; **non-commercial only** |
 
-Shion / 诗音 is an original character by iLLyaaaaaa. Shion's character images, currently including `assets/sprites/` and `docs/images/` (README screenshots and `hero.gif`), use CC BY-NC 4.0. This also covers future Shion character icons (`.ico` / `.png`). Other content, including dialogue and menu data, uses MIT like the code. You may build your own desktop pet from the code; Shion's artwork is for non-commercial use only.
+Shion / 诗音 is an original character by iLLyaaaaaa. Shion's character images, currently including `assets/sprites/`, `docs/images/` (screenshots, `hero.gif` and icon previews) and `assets/icon/`, use CC BY-NC 4.0. This also covers future Shion character icons (`.ico` / `.png`). Other content, including dialogue and menu data, uses MIT like the code. You may build your own desktop pet from the code; Shion's artwork is for non-commercial use only.
 
 ## Credits
 
 - Character design & art: [iLLyaaaaaa](https://github.com/iLLyaaaaaa) (original character, made with the help of AI image tools)
-- Developed with the help of Claude Code and Codex
+- Developed with the help of AI coding tools
 
 ---
 

@@ -10,13 +10,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QStandardPaths, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QSize, QStandardPaths, Qt
+from PySide6.QtGui import QColor, QFont, QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from shion import state as state_mod
 from shion import __version__
+from shion.icons import ICON_SIZES, application_icon
 from shion.bridge import ServerBridge
 from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController
@@ -90,6 +91,7 @@ def run() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Shion")
     app.setApplicationVersion(__version__)
+    app.setWindowIcon(application_icon())
     app.setQuitOnLastWindowClosed(False)
 
     guard = SingleInstance(os.environ.get("SHION_INSTANCE_NAME") or INSTANCE_NAME, parent=app)
@@ -346,6 +348,35 @@ def snapshot(
     ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)
+        return 1
+    print(f"saved {out} ({img.width()}x{img.height()})")
+    return 0
+
+
+def snapshot_icon_preview(out: str) -> int:
+    """用真实 Qt 图标入口生成各尺寸在浅色/深色背景上的截图。"""
+    app = QApplication.instance() or QApplication(sys.argv)
+    icon = application_icon()
+    img = QImage(760, 810, QImage.Format_ARGB32_Premultiplied)
+    painter = QPainter(img)
+    painter.setFont(QFont("Segoe UI", 10))
+    for column, (background, foreground) in enumerate((("#f4f0eb", "#35221b"), ("#25211f", "#f4f0eb"))):
+        left = column * 380
+        painter.fillRect(left, 0, 380, img.height(), QColor(background))
+        painter.setPen(QColor(foreground))
+        painter.drawText(left + 16, 24, f"Shion {__version__} / {'Light' if column == 0 else 'Dark'}")
+        top = 40
+        for size in ICON_SIZES:
+            painter.drawText(left + 16, top + 15, f"{size} x {size} / 1:1")
+            frame = icon.pixmap(QSize(size, size), 1.0).toImage()
+            painter.drawImage(left + 20, top + 24, frame)
+            if size <= 32:
+                painter.drawImage(left + 140, top + 24, frame.scaled(size * 4, size * 4,
+                                  Qt.IgnoreAspectRatio, Qt.FastTransformation))
+                painter.drawText(left + 140, top + 18, "4x pixels")
+            top += max(size, size * 4 if size <= 32 else size) + 40
+    painter.end()
+    if not img.save(out, "PNG"):
         return 1
     print(f"saved {out} ({img.width()}x{img.height()})")
     return 0

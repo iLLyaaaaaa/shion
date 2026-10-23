@@ -64,7 +64,7 @@ Claude Code で作業しているときは**そばで見守ってくれます**�
 
 ## インストール
 
-1. [Releases](../../releases) から最新の `Shion-x.y.z-win64.zip` をダウンロード
+1. [Releases](../../releases) から `Shion-1.0.0-win64.zip` をダウンロード
 2. **固定の場所**に展開します（例：`D:\Apps\Shion`）。あとで移動した場合は右クリック →「Claude Code に再接続」を選んでください
 3. `Shion.exe` をダブルクリック
 4. 初回起動時に Claude Code と接続するか聞かれるので、**接続** を押します
@@ -141,14 +141,14 @@ Python 3.10 以上が必要です。ビルド：`.venv\Scripts\python tools\buil
 | 内容 | ライセンス | できること |
 |---|---|---|
 | コードとその他の内容（詩音のキャラクター画像を除く。セリフとメニューデータを含む） | [MIT](LICENSE) | 著作権表示とライセンス表示を残せば、商用を含めほぼ自由に使えます |
-| 詩音のキャラクター画像（現在は `assets/sprites/` と `docs/images/` を含む） | [CC BY-NC 4.0](assets/LICENSE) | 作者表記・ライセンスリンク・変更表示のうえ共有・改変可、**商用利用は不可** |
+| 詩音のキャラクター画像（現在は `assets/sprites/`、`docs/images/`、`assets/icon/` を含む） | [CC BY-NC 4.0](assets/LICENSE) | 作者表記・ライセンスリンク・変更表示のうえ共有・改変可、**商用利用は不可** |
 
-Shion / 诗音（詩音）は iLLyaaaaaa のオリジナルキャラクターです。詩音のキャラクター画像は CC BY-NC 4.0 です。現在は `assets/sprites/` と `docs/images/`（README のスクリーンショットと `hero.gif`）を含み、今後追加する詩音のキャラクターアイコン（`.ico` / `.png`）にも適用されます。セリフやメニューデータなど、その他の内容はコードと同じ MIT です。コードから自分のマスコットを作れますが、詩音の画像は非商用に限ります。
+Shion / 诗音（詩音）は iLLyaaaaaa のオリジナルキャラクターです。詩音のキャラクター画像は CC BY-NC 4.0 です。現在は `assets/sprites/`、`docs/images/`（スクリーンショット、`hero.gif`、アイコンプレビュー）、`assets/icon/` を含み、今後追加する詩音のキャラクターアイコン（`.ico` / `.png`）にも適用されます。セリフやメニューデータなど、その他の内容はコードと同じ MIT です。コードから自分のマスコットを作れますが、詩音の画像は非商用に限ります。
 
 ## クレジット
 
 - キャラクターデザイン・アート：[iLLyaaaaaa](https://github.com/iLLyaaaaaa)（オリジナルキャラクター、AI 画像ツールを使って制作）
-- 開発には Claude Code と Codex を利用しました
+- 開発には AI コーディングツールを利用しました
 
 ---
 

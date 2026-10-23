@@ -1,13 +1,18 @@
 # Windows onedir；执行 .venv\Scripts\python tools\build.py。
 from pathlib import Path
+import sys
 
 root = Path(SPECPATH)
+sys.path.insert(0, str(root))
+from tools.build import windows_version_info
+
 assets = root / "assets"
 datas = [(str(assets / "affection.json"), "assets")]
 for directory in ("lines", "menu"):
     datas += [(str(p), f"assets/{directory}") for p in sorted((assets / directory).glob("*.json"))]
 # 只带运行图；不递归收集 raw、草稿、备份等素材源文件。
 datas += [(str(p), "assets/sprites") for p in sorted((assets / "sprites").glob("*.png"))]
+datas += [(str(p), "assets/icon") for p in sorted((assets / "icon").glob("*.png"))]
 
 a = Analysis(
     [str(root / "shion" / "__main__.py")],
@@ -48,5 +53,6 @@ exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True, name="Shion",
     debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
     console=False, contents_directory="_internal",
+    icon=str(assets / "icon" / "shion.ico"), version=windows_version_info(),
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Shion")

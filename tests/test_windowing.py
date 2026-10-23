@@ -196,7 +196,7 @@ def test_real_panels_and_expansion_avoid_body_and_stay_on_current_screen(env):
 
 
 def test_about_uses_version_and_is_topmost_beside_pet(env):
-    assert __version__ == "0.4.1"
+    assert __version__ == "1.0.0"
     env.win.place_default()
     checked = []
     def inspect():
