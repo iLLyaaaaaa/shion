@@ -13,3 +13,37 @@ assets/sprites/raw/drafts/
 /.claude/settings.local.json
 *.shion-backup-*
 /assets/sprites/raw/old_arms_open/
+
+# Local secrets and credentials (keep shareable templates).
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+/.aws/
+/.ssh/
+/secrets/
+/credentials/
+
+# Additional virtual environments, caches, and runtime data.
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Machine-specific editor and OS files.
+/.idea/
+/.vscode/
+Thumbs.db
+.DS_Store
