@@ -3,7 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
-- **2026-10-25 当前版本 GitHub 备份准备**：仅补充 `.gitignore` 与本检查记录，保留全部已跟踪源码、资源、配置模板和文档，不改业务功能、不开始多 AI 接入。全量 **1575 passed、9 skipped、2 warnings（520.08 秒）**；62 个既有提交身份与提交消息邮箱、200 个历史路径和 786 个文件版本检查通过，无超过 50 MB 的文件。准备本地备份提交及 `v1.0.0-claude` 标签；当前没有 remote，GitHub CLI 凭据无效（HTTP 401），远端创建与推送 **尚未完成**。下一步仅恢复登录、核实目标，并按首次发布规范确认后备份。
+- **2026-10-25 当前版本 GitHub 备份完成**：经用户首次发布确认，已创建私有仓库 `https://github.com/iLLyaaaaaa/shion`，推送完整历史至 `master`，并推送 `v1.0.0-claude` 基线标签（`8721075aeac1535c99e0bd946b5088f7799888cb`）。全量 **1575 passed、9 skipped、2 warnings（520.08 秒）**；历史文件、敏感信息、提交及标签身份检查通过，无超过 50 MB 的文件；远端 200 个文件与本地 Git 对象一致。仅补充 `.gitignore` 与备份记录，不改源码、资源、配置模板或业务功能，不开始多 AI 接入。标签不移动，完成记录另作文档提交；此前真机验收项继续保留。
 - **2026-10-23 v1.0 发布准备：名称、图标、版本与 ZIP**：按用户确认方案完成品牌措辞检查、idle 头部五尺寸 ICO/PNG、窗口图标、1.0.0 与 exe 版本资源、三语 README 文件名和许可同步，以及手动卸载规格。重建 **105,657,400 字节、226 文件**；复制目录 **97 项自检通过**，ZIP **46,572,116 字节（44.41 MiB）**。新增发布专项 **4 passed**，原生 Windows 150% 专项 **5 passed**；全量 **1575 passed、9 skipped、2 warnings**。图标观感及此前真机清单继续 **待用户验收**。本轮仅本地 commit，不 push；构建产物不入 Git。
 - **2026-10-22 README 入根目录与许可证准备**：用户确认方案后，将三份 README 草稿迁入根目录，接入既有 GIF 与 2×2 截图表格；逐条核对三语菜单、按钮与功能说明，补充焦点、中断、日志和窗口跟随边界。按用户文档验收意见，诗音角色图片（目前包括 `assets/sprites/`、`docs/images/`，以及未来诗音角色图标）使用 CC BY-NC 4.0；其余内容用 MIT。根许可证前置英文范围说明、MIT 正文不变；安装部分保留直接下载步骤。用户其余内容验收通过，三项修订后文档检查通过；全量 **1571 passed、9 skipped、2 warnings**，未重复全量测试。此前真机清单继续 **待用户验收**。本轮仅六个文档文件，本地 commit，不 push，不制作 ZIP。
 - **2026-10-22 README 媒体离屏生成**：按确认方案新增 `tools/make_media.py`，复用 snapshot 渲染并在同一进程连续取帧，输出 4 秒循环 GIF 与 6 张 PNG，共 **1,863,957 字节**。种子/时钟/字体/DPI 固定、2 倍渲染再缩小；两次独立运行逐文件字节一致，同进程重复生成也通过；13 张旧截图重构前后逐字节相同。专项 **296 passed、3 skipped、2 warnings**，全量 **1571 passed、9 skipped、2 warnings**。成品观感 **待用户验收**。原素材与 README 草稿未改，`docs/drafts/` 不暂存；仅本地 commit，不 push。
@@ -41,13 +41,14 @@
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
 
-## 2026-10-25：当前版本备份检查（远端待完成）
+## 2026-10-25：当前版本 GitHub 备份完成
 - **范围**：用户授权保存当前版本到 GitHub，并指定无既有仓库时优先新建私有 `shion`，基线标签为 `v1.0.0-claude`；不改功能、不接入 Codex/Work、不覆盖历史、不强推。开始时 `master` 工作区干净，HEAD 为 `39e0c77b473c0d8d958936e1d697d64181f59be2`，无 remote、无标签。已读 CLAUDE、AGENTS、当前进度及规格中测试/发布相关章节。
 - **保留与排除**：全部现有跟踪文件保留，含源码、测试、角色精灵及有效 raw 源图、图标、README 媒体、JSON 配置和必要文档。沿用现有 MIT / 角色图片 CC BY-NC 4.0 的许可范围。`.venv/`、`build/`、`dist/`、`reference/`、旧素材/草稿、本机 Claude 设置及其备份继续忽略；补充 `.env`、密钥、凭据目录、缓存、日志、本地数据库、编辑器和系统文件规则，显式保留 `.env.example/.template/.sample` 模板。33 项代表路径检查通过，`git ls-files -ci --exclude-standard` 无输出；无已跟踪文件被新增规则误排除。
 - **历史审查**：因无 remote，检查范围为整个 `HEAD --not --remotes=origin`，共 62 个提交、200 个历史文件路径、786 个独立 blob。Author/Committer 均为指定 GitHub noreply 邮箱，提交消息中没有非 noreply 邮箱。全量 `git log -p` 与所有文件版本扫描未发现凭据、非 noreply 邮箱、手机号或证件号；唯一用户目录匹配为测试中的虚构 `C:/Users/x/...`。128 个历史图片版本无个人信息文本元数据；最大文件 1,831,735 字节，无超过 50 MB 的文件，无音频/视频/字幕/字体、虚拟环境、缓存或构建产物进入历史。未安装 gitleaks，采用本地规则扫描及逐项审查；原始报告留在已忽略目录，不上传。
 - **测试**：`QT_QPA_PLATFORM=offscreen`，`.venv\Scripts\python -m pytest -q -rs --basetemp=.venv/preview-run/github-backup-20261025/pytest-temp` → **1575 passed、9 skipped、2 warnings（520.08 秒）**。八项原生 Qt 条件与一项 CC 父进程链环境限制跳过；两条为既有 Pillow getdata 弃用警告。日志 `.venv/preview-run/github-backup-20261025/pytest.log`。此前真实桌面/高分屏/焦点/CC 联动验收状态不变。
-- **远端状态**：未创建仓库、未推送、未发 Release；GitHub CLI 验证返回 HTTP 401，当前凭据无效，设备登录请求另遇网络超时。用户提供的 Windows PowerShell 验证结果也确认凭据无效。连接器可识别账号但不提供创建仓库及本地 Git 历史推送能力，仍需 CLI 登录恢复后核实仓库。首次发布按 AGENTS 第 4 节在检查结果提供给用户并确认后执行；优先目标为私有 `iLLyaaaaaa/shion`，保留 `master` 与完整现有历史。
-- **下一步**：只完成登录恢复、目标核验、首次发布确认、分支与基线标签推送及远端 SHA/可见性核验；本轮不开发新功能。
+- **远端与标签**：GitHub CLI 登录恢复后确认账号为 `iLLyaaaaaa`，账号下没有既有 Shion 仓库。按 AGENTS 第 4 节汇报检查结果并收到用户明确确认后，创建私有 `https://github.com/iLLyaaaaaa/shion`、绑定 `origin`，先 `git fetch origin` 确认远端为空，再推送 `master` 与单独的 `v1.0.0-claude`。首次推送共 63 个提交，最终范围身份与提交消息邮箱检查均通过；完整补丁扫描中的数字匹配已核实为 Git 提交 SHA 的片段，文件内容无手机号命中。无强推、无历史改写、无已有标签覆盖、无 Release 或构建产物上传。
+- **核验**：仓库所有者 `iLLyaaaaaa`、可见性 **PRIVATE**、默认分支 `master`。`git ls-remote` 的分支 SHA 与本地基线提交一致：`8721075aeac1535c99e0bd946b5088f7799888cb`；注解标签对象为 `76d287337c6ed0c0b6237f244945d74b76888606`，解析到同一提交，标签作者邮箱为指定 GitHub noreply。通过 GitHub API 逐文件比较全部 200 个远端文件与本地 blob SHA，无缺失、额外文件或内容差异。回退标签固定在此基线，本完成记录另作纯文档提交，不移动标签。
+- **下一步**：本次仅保存和备份当前版本，已完成；后续开发另行确定范围，此前真机验收清单不因备份推送而视为通过。
 
 ## 2026-10-23：v1.0 发布准备——名称、图标、版本与 ZIP（待用户验收）
 - **范围**：先读 AGENTS/CLAUDE、progress 及 spec 的相关章节，给方案并由用户明确确认后实施。开始时 master 工作区干净、提交邮箱为指定 GitHub noreply；无新依赖。未修改 `reference/`、精灵或 raw；75 个既有跟踪角色图片（含 README 媒体）与 HEAD 逐字节一致。不读取真实 Claude 配置、不运行 claude、不创建真实自启项；只做本地 commit，不 push、打标签或发 Release。
