@@ -132,7 +132,7 @@ python -m venv .venv
 start.bat
 ```
 
-Python 3.10 以上が必要です。ビルド：`.venv\Scripts\python tools\build.py`（出力先 `dist\Shion\`）。テスト：`.venv\Scripts\python -m pytest -q`。
+Python 3.10 以上が必要です。スプライト画像は処理済みです。`tools/process_sprites.py` は非公開の元画像が必要なため、通常のユーザーは実行する必要はありません。ビルド：`.venv\Scripts\python tools\build.py`（出力先 `dist\Shion\`）。テスト：`.venv\Scripts\python -m pytest -q`。
 
 ## ライセンス
 

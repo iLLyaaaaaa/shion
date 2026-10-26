@@ -132,7 +132,7 @@ python -m venv .venv
 start.bat
 ```
 
-需要 Python 3.10+。打包：`.venv\Scripts\python tools\build.py`，产物在 `dist\Shion\`。运行测试：`.venv\Scripts\python -m pytest -q`。
+需要 Python 3.10+。精灵图已处理好；`tools/process_sprites.py` 需要未公开的原图，普通用户不需要运行。打包：`.venv\Scripts\python tools\build.py`，产物在 `dist\Shion\`。运行测试：`.venv\Scripts\python -m pytest -q`。
 
 ## 许可
 
