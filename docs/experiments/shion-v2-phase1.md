@@ -42,6 +42,10 @@
 
 只读实机检查：当前进程未设置 CODEX_HOME，有效用户目录为 `C:\Users\<user>\.codex`。用户 `config.toml` SHA-256 为 `3f28fe3303bc2c23aa7cafde56ba76c06d50a0dc4d0f392c3ef08b2c68d91ea2`，与阶段 0 清理记录相同。现有 `node_repl` MCP、notify 与七项已禁用信任记录保留；用户 hooks.json 不存在。本项目及祖先可发现磁盘配置层未发现其他 Hooks 文件。
 
+**10 月 27 日提交后复核更新**：实际用户配置已被外部操作改变，当前 SHA-256 为 `d17efa0d3177e1dbd556a7c9941b119e099418f309972c8f2aa5286d0678bc26`。本轮未写入该文件，也不推断外部修改原因。重新检查仍有原 MCP、notify 和七项禁用信任记录，没有 Shion 正式注册；安装预览与审计已按当前配置重新生成。旧基线不再可用于应用安装计划，正式执行时还会再次检查冲突。
+
+实现提交：`fee6a1ed583a07c5f6e6b65744e2b64d59bad5d6`；Author 与 Committer 均为指定 noreply 邮箱。其后的本报告更新仅记录上述外部配置变动。尚未安装时可以 `git switch master` 返回基线；应保留原有阶段 0 工作区内容，不执行 reset --hard 或 clean。
+
 安装前精确差异与无密钥审计保存到本地忽略目录：
 
 - `.venv/preview-run/phase1-review/global-install.diff`
