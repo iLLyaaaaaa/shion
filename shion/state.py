@@ -405,6 +405,7 @@ class PetState:
         self._dragging = False
         self._temp: Optional[tuple[str, datetime]] = None  # (状态名, 到期时间)
         self._sessions: dict[str, WorkSession] = {}  # 正在工作的会话（session_id → 状态；旧 hook 没带 id 时用 ""）
+        self.observed_working = False  # Read-only activity; never enters Claude controls or rewards.
         self._stopped_at: Optional[datetime] = None  # Claude 停下的时间（催你回来用）
         self._nudges = 0
         self._last_activity = now  # 最近一次鼠标交互或 Claude 事件（用于睡眠）
@@ -459,7 +460,7 @@ class PetState:
             return self._temp[0]
         if self.paused:
             return "stop"
-        if self.is_working(now):
+        if self.is_working(now) or self.observed_working:
             return "working"
         if self._is_asleep(now):
             return "sleep"
@@ -487,7 +488,7 @@ class PetState:
 
     def can_idle(self, now: datetime) -> bool:
         return (
-            not self._dragging and not self.is_working(now)
+            not self._dragging and not self.is_working(now) and not self.observed_working
             and not self.paused and self.current(now) != "desk"
             and self._eating_until is None
             and not self.save.fixed_expression and not self._is_asleep(now)

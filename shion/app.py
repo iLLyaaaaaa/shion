@@ -128,6 +128,10 @@ def run() -> int:
         data.language = lines.lang
         scheduler.mark_dirty(now)
     controller.quit_requested.connect(app.quit)
+    from shion.chatgpt import ChatGPTConnection
+    controller.chatgpt = ChatGPTConnection(directory)
+    controller.chatgpt.start()
+    app.aboutToQuit.connect(controller.chatgpt.stop)
 
     # 本地 HTTP 服务：回调在服务线程里，经 ServerBridge 切回 GUI 线程
     bridge = ServerBridge(controller, parent=app)

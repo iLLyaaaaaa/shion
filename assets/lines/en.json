@@ -416,5 +416,21 @@
     "affection_status": "{name} · Lv.{level} · {progress}\nAffection still available today: {remaining}",
     "affection_progress": "Next level: {current}/{target}",
     "affection_max": "Max level"
+  ,
+    "chatgpt_manage": "ChatGPT connection",
+    "chatgpt_install": "Install globally / inspect configuration",
+    "chatgpt_disable": "Disable observation temporarily",
+    "chatgpt_enable": "Enable observation",
+    "chatgpt_uninstall": "Uninstall global configuration",
+    "chatgpt_status": "ChatGPT: {count} observed active turns; {received} events received this run",
+    "chatgpt_uncertain": "ChatGPT: status uncertain (current observations only; no activity snapshot)",
+    "chatgpt_observation": "ChatGPT: observation only",
+    "chatgpt_disabled": "ChatGPT: observation disabled",
+    "chatgpt_ended": "ChatGPT turn ended; outcome unknown.",
+    "chatgpt_interrupted": "ChatGPT turn interrupted.",
+    "chatgpt_review": "Review the exact diff in Details. Confirmation changes only Shion entries. Files are backed up and verified; conflicts stop the transaction. Failure rolls back files only if unchanged by others. Review each hook in the client afterward.",
+    "chatgpt_trust": "Configuration installed. Review each Shion hook in Codex /hooks and check /mcp. Restart the client for first installation, then create or reopen a session; hot reload of existing sessions is unverified.",
+    "chatgpt_removed": "Owned Shion configuration removed; backups and trust records retained.",
+    "chatgpt_config_error": "ChatGPT configuration operation incomplete: {error}"
   }
 }

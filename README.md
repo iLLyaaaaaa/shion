@@ -155,3 +155,5 @@ Shion / 诗音 is an original character by iLLyaaaaaa. Shion's character images,
 <div align="center">
 <sub>Shion is an unofficial personal project and is not affiliated with Anthropic.</sub>
 </div>
+
+The development ChatGPT adapter uses tomlkit (MIT); see [third-party notices](THIRD_PARTY_NOTICES.md).

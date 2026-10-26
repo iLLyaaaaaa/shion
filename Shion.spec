@@ -8,6 +8,7 @@ from tools.build import windows_version_info
 
 assets = root / "assets"
 datas = [(str(assets / "affection.json"), "assets")]
+datas.append((str(root / "THIRD_PARTY_NOTICES.md"), "."))
 for directory in ("lines", "menu"):
     datas += [(str(p), f"assets/{directory}") for p in sorted((assets / directory).glob("*.json"))]
 # 只带运行图；不递归收集 raw、草稿、备份等素材源文件。

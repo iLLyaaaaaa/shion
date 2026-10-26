@@ -155,3 +155,5 @@ Shion / 诗音（詩音）は iLLyaaaaaa のオリジナルキャラクターで
 <div align="center">
 <sub>Shion は非公式の個人作品であり、Anthropic とは関係ありません。</sub>
 </div>
+
+開発中の ChatGPT アダプターは tomlkit（MIT）を使用します。[サードパーティのライセンス](THIRD_PARTY_NOTICES.md)を参照してください。

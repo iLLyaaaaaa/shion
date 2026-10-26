@@ -14,6 +14,9 @@ def main(argv: list[str] | None = None) -> int:
     from shion.runtime import prepare_standard_streams
     prepare_standard_streams()
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--codex-observer"]:
+        from shion.codex_mcp import main as observe
+        return observe(argv[1:])
     if argv[:1] == ["--hook"]:
         from hooks.shion_hook import run_hook
         return run_hook(argv[1:])

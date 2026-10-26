@@ -48,6 +48,7 @@ def isolated_user(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOMEPATH", tail)
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("SHION_DATA_DIR", str(home / "Shion"))
+    monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     from shion.startup import Startup
     registry = FakeRegistry()
     monkeypatch.setattr(Startup, "registry", property(lambda self: self._registry or registry))

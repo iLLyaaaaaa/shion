@@ -155,3 +155,5 @@ Shion / 诗音为 iLLyaaaaaa 原创角色。诗音的角色图片，目前包括
 <div align="center">
 <sub>Shion 是非官方的个人作品，与 Anthropic 无关。</sub>
 </div>
+
+开发中的 ChatGPT 适配使用 tomlkit（MIT），见[第三方许可声明](THIRD_PARTY_NOTICES.md)。

@@ -108,6 +108,7 @@ class PetController(QObject):
         self._crumbs: Optional[CrumbOverlay] = None
         self._about: Optional[QMessageBox] = None
         self.connection = HookConnection()
+        self.chatgpt = None  # Started by app; isolated from Claude RemoteHub.
         self.startup = Startup()
         self._connection_panel: Optional[ConnectionPanel] = None
         self._connection_onboarding = False
@@ -191,6 +192,11 @@ class PetController(QObject):
 
     def tick(self) -> None:
         now = self._now()
+        if self.chatgpt is not None:
+            notice = self.chatgpt.poll()
+            self.state.observed_working = bool(self.chatgpt.enabled and self.chatgpt.ledger.working)
+            if notice:
+                self.say(self.lines.ui(notice), category="chatgpt_observation")
         self._sync_pause()
         self._sync_permission()
         self.react(self.state.tick(now))
@@ -1008,6 +1014,8 @@ class PetController(QObject):
         if save.fixed_expression:
             text += "\n" + ui("expression_fixed")
         text += "\n" + self.connection_status_text()
+        if self.chatgpt is not None:
+            text += "\n" + self.chatgpt.status(ui)
         return text
 
     def _show_status(self) -> None:
@@ -1230,6 +1238,13 @@ class PetController(QObject):
 
         menu.addSeparator()
         connection = self.connection.inspect()
+        if self.chatgpt is not None:
+            from shion.chatgpt import review_connection
+            chat = menu.addMenu(ui("chatgpt_manage"))
+            chat.addAction(self.chatgpt.status(ui)).setEnabled(False)
+            chat.addAction(ui("chatgpt_install")).triggered.connect(lambda: review_connection(self))
+            chat.addAction(ui("chatgpt_disable" if self.chatgpt.enabled else "chatgpt_enable")).triggered.connect(self.toggle_chatgpt)
+            chat.addAction(ui("chatgpt_uninstall")).triggered.connect(lambda: review_connection(self, True))
         menu.addAction(ui("connection_status", state=ui("connection_" + connection.state))).setEnabled(False)
         if connection.state != "connected":
             label = "menu_reconnect" if connection.state == "stale" else "menu_connect"
@@ -1255,6 +1270,15 @@ class PetController(QObject):
         menu.addAction(ui("menu_about")).triggered.connect(self.show_about)
         menu.addAction(ui("menu_quit")).triggered.connect(self.quit)
         return menu
+
+    def toggle_chatgpt(self):
+        if self.chatgpt is not None:
+            try:
+                self.chatgpt.toggle()
+                self.state.observed_working = False
+                self.sync()
+            except (OSError, ValueError) as exc:
+                self.say(self.lines.ui("chatgpt_config_error", error=str(exc)))
 
     def show_menu(self, pos: QPoint) -> None:
         self._idle.next_at = None

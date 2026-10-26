@@ -3,3 +3,4 @@ numpy
 scipy
 pillow
 pytest
+tomlkit==0.13.3

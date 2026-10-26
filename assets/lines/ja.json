@@ -418,5 +418,21 @@
     "affection_status": "{name} · Lv.{level} · {progress}\n今日あと {remaining} 好感度を獲得できるよ",
     "affection_progress": "次のレベルまで {current}/{target}",
     "affection_max": "最高レベル"
+  ,
+    "chatgpt_manage": "ChatGPT 連携",
+    "chatgpt_install": "グローバル連携を設定 / 設定を確認",
+    "chatgpt_disable": "連携を一時停止",
+    "chatgpt_enable": "連携を有効化",
+    "chatgpt_uninstall": "グローバル設定を削除",
+    "chatgpt_status": "ChatGPT：観測中の活動ターン {count} 件、今回受信 {received} 件",
+    "chatgpt_uncertain": "ChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+    "chatgpt_observation": "ChatGPT：観測のみ",
+    "chatgpt_disabled": "ChatGPT：連携停止中",
+    "chatgpt_ended": "ChatGPT のターンが終了しました。結果は不明です。",
+    "chatgpt_interrupted": "ChatGPT のターンが中断されました。",
+    "chatgpt_review": "詳細で設定差分を確認してください。確認後は Shion の項目のみ変更します。バックアップと検証を行い、競合時は停止します。失敗時は他から変更されていないファイルのみ復元します。Hook の信頼はクライアントで個別に確認してください。",
+    "chatgpt_trust": "設定を追加しました。Codex の /hooks で各 Shion Hook を確認し、/mcp で接続を確認してください。初回はクライアントを再起動して会話を新規作成または再度開いてください。既存会話の即時反映は未検証です。",
+    "chatgpt_removed": "Shion 所有と確認できた設定を削除しました。バックアップと信頼記録は残しています。",
+    "chatgpt_config_error": "ChatGPT 設定操作は未完了です：{error}"
   }
 }
