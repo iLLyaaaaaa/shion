@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-26 Shion 1.0.0 已公开发布**：新建公开仓库 https://github.com/iLLyaaaaaa/shion （PUBLIC，默认分支 `master`；旧名字 `shion` 原指向改名后的私有备份，现重定向已失效），推送 `master` 与 `v1.0.0`（均为 `5c268e5`，不推其他标签、不推 backup）。Release：https://github.com/iLLyaaaaaa/shion/releases/tag/v1.0.0 ，附 `Shion-1.0.0-win64.zip`（46,568,710 字节），SHA-256 `16ef409d6be8ca76797b390795ee7a06d1abf7a4171c30668c57be7678fea0ac`；下载回来哈希与本地一致，README 的 GIF 和 4 张截图在 GitHub 上返回 200。Release 说明按英/中/日三语写在本地 `build/release-notes.md`（`build/` 被忽略，不入库）。推送前检查：68 个提交的邮箱均为 noreply，无大文件/密钥/版权素材/raw；本机无 gitleaks，秘密扫描用正则代替。已加仓库话题 `desktop-pet`、`claude-code`、`pyside6`、`windows`。下一步见下方「v1.1 待办」。
 - **2026-10-26 公开发布准备：本地历史已改写（未 push）**：为让公开仓库不含 `assets/sprites/raw/`（GPT 原始高清图），用 git filter-repo 删除全部提交中的 raw/（本地文件保留，`.gitignore` 整目录忽略），并清掉 Codex 留下的 `refs/codex/*` 检查点引用。**历史已改写，新旧提交哈希不对应**；旧完整历史见私有备份仓库 `iLLyaaaaaa/shion-backup`（原 shion 已改名，只作记录，以后不往里推）和本地副本 `D:\desktop\work\claude-pet-backup-20261026`。已设 `backup` 远端、**未设 origin**；三份 README 补充精灵图已处理好的说明；旧标签 `v1.0.0-claude` 已删（备份仓库里仍有），新打 `v1.0.0`。不 push、不建公开仓库、不发 Release；首次公开推送前仍须按规范做完整检查并等用户确认。
 - **2026-10-25 当前版本 GitHub 备份完成**：经用户首次发布确认，已创建私有仓库 `https://github.com/iLLyaaaaaa/shion`，推送完整历史至 `master`，并推送 `v1.0.0-claude` 基线标签（`8721075aeac1535c99e0bd946b5088f7799888cb`）。全量 **1575 passed、9 skipped、2 warnings（520.08 秒）**；历史文件、敏感信息、提交及标签身份检查通过，无超过 50 MB 的文件；远端 200 个文件与本地 Git 对象一致。仅补充 `.gitignore` 与备份记录，不改源码、资源、配置模板或业务功能，不开始多 AI 接入。标签不移动，完成记录另作文档提交；此前真机验收项继续保留。
 - **2026-10-23 v1.0 发布准备：名称、图标、版本与 ZIP**：按用户确认方案完成品牌措辞检查、idle 头部五尺寸 ICO/PNG、窗口图标、1.0.0 与 exe 版本资源、三语 README 文件名和许可同步，以及手动卸载规格。重建 **105,657,400 字节、226 文件**；复制目录 **97 项自检通过**，ZIP **46,572,116 字节（44.41 MiB）**。新增发布专项 **4 passed**，原生 Windows 150% 专项 **5 passed**；全量 **1575 passed、9 skipped、2 warnings**。图标观感及此前真机清单继续 **待用户验收**。本轮仅本地 commit，不 push；构建产物不入 Git。
@@ -41,6 +42,12 @@
 - 当前 hooks 仍只装在项目级 `.claude/settings.local.json`（已 gitignore）；用户级 `~/.claude/settings.json` 没动过。2026-10-20 暂停可见性一轮**重装了项目级**（加 statusMessage，自动备份）。以后装用户级之前，先卸载项目级那份，避免重复事件。
 - **v0.3 两部分都已实现**（暂停/继续 + 反馈队列、同意/否决），自动测试和真实 `claude -p` 联调通过；等待审查和用户真机验收，见下方两节的“待用户验收”。v0.4 实现见本轮记录。
 - 环境：`.venv`（Python 3.10.11），测试用 `.venv\Scripts\python -m pytest -q`。本仓库提交邮箱为 GitHub noreply。
+
+## v1.1 待办
+- [ ] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）
+- [ ] hook 耗时分析：目前 PreToolUse 启动到退出中位数 exe 约 393 ms / 源码约 330 ms，看能不能降
+- [ ] 实验：桌面端能否拿到 statusLine 的 `rate_limits.seven_day`（每任务额度上限的前提）
+- [ ] 接入 GPT / Codex
 
 ## 2026-10-25：当前版本 GitHub 备份完成
 - **范围**：用户授权保存当前版本到 GitHub，并指定无既有仓库时优先新建私有 `shion`，基线标签为 `v1.0.0-claude`；不改功能、不接入 Codex/Work、不覆盖历史、不强推。开始时 `master` 工作区干净，HEAD 为 `39e0c77b473c0d8d958936e1d697d64181f59be2`，无 remote、无标签。已读 CLAUDE、AGENTS、当前进度及规格中测试/发布相关章节。
