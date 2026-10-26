@@ -759,3 +759,13 @@ def test_settled_request_closes_the_panel_and_shows_the_next(env):
     env.ctl.hub.permissions.settle("s2")
     env.advance(0.15)
     assert not env.ctl._perm_panel.isVisible()
+
+
+def test_panel_title_is_plain_text(qapp):  # noqa: F811
+    panel = PermissionPanel()
+    texts = {"title": "要执行", "allow": "同意", "deny": "否决", "more": "还有 {n} 条",
+             "expand": "展开", "collapse": "收起"}
+    panel.show_request("r1", "<b>x</b>", "ls", 0, texts, (0, 0, 100, 100))
+    assert panel._title.textFormat() == Qt.PlainText
+    assert "<b>x</b>" in panel._title.text()
+    panel.close()

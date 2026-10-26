@@ -44,6 +44,7 @@ class InputPanel(QWidget):
         self.setStyleSheet(STYLE + f"* {{ font-family: '{font_family}'; }}")
 
         self._title = QLabel()
+        self._title.setTextFormat(Qt.PlainText)
         self._title.setWordWrap(True)
         self._edit = QLineEdit()
         self._edit.setMaxLength(200)
@@ -212,6 +213,7 @@ class PermissionPanel(QWidget):
         self._more = 0
 
         self._title = QLabel()
+        self._title.setTextFormat(Qt.PlainText)  # 标题含工具名等外部文字，不能按富文本解析
         self._title.setWordWrap(True)
         self._detail = QPlainTextEdit()
         self._detail.setReadOnly(True)
