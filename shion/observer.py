@@ -115,16 +115,16 @@ class ObservationServer:
 
 def credentials(directory: Path):
     """User-local secret, separate from Claude. Never stored in Codex config."""
-    directory.mkdir(parents=True, exist_ok=True)
+    from . import observer_files as secure
+    secure.ensure_directory(directory)
     path = directory / "chatgpt-observer.json"
     if not path.exists():
         value = {"token": secrets.token_hex(32), "port": 47614, "enabled": True}
         try:
-            with path.open("x", encoding="utf-8") as stream:
-                json.dump(value, stream)
+            secure.write_new(path, json.dumps(value).encode("utf-8"))
         except FileExistsError:
             pass
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(secure.read_private(path))
     if (not isinstance(value.get("token"), str) or len(value["token"]) != 64
             or type(value.get("port")) is not int or not 1024 <= value["port"] <= 65535
             or type(value.get("enabled")) is not bool):

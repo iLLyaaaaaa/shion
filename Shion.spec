@@ -49,6 +49,20 @@ def needed(entry):
     return True
 
 a.binaries = [entry for entry in a.binaries if needed(entry)]
+# PyInstaller's PySide6 runtime hook imports QtCore before our entry point.
+# Keep the upstream hook unchanged for GUI/hook modes, skip it only for the
+# stdlib-only observer. Generate the wrapper from the pinned installed hook.
+import textwrap
+for index, (name, source, kind) in enumerate(a.scripts):
+    if name == "pyi_rth_pyside6":
+        wrapper = root / "build" / "observer_lazy_qt.py"
+        wrapper.parent.mkdir(exist_ok=True)
+        wrapper.write_text("import sys\nif sys.argv[1:2] != ['--codex-observer']:\n" +
+                           textwrap.indent(Path(source).read_text(encoding="utf-8"), "    "), encoding="utf-8")
+        a.scripts[index] = (name, str(wrapper), kind)
+        break
+else:
+    raise RuntimeError("Expected pinned PySide6 runtime hook was not found")
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [], exclude_binaries=True, name="Shion",

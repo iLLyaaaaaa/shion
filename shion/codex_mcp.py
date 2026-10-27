@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from .events import EVENTS, parse_observation
+from .observer_files import read_private
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 SCHEMA = {"type": "object", "additionalProperties": False,
@@ -21,8 +22,11 @@ SCHEMA = {"type": "object", "additionalProperties": False,
 def forward(data, directory: Path):
     # Read only our small credential file; never client config, history, or tool data.
     try:
-        config = json.loads((directory / "chatgpt-observer.json").read_text(encoding="utf-8"))
-        if not config["enabled"]:
+        config = json.loads(read_private(directory / "chatgpt-observer.json"))
+        if (not isinstance(config, dict) or config.get("enabled") is not True
+                or type(config.get("port")) is not int or not 1024 <= config["port"] <= 65535
+                or not isinstance(config.get("token"), str) or len(config["token"]) != 64
+                or any(c not in "0123456789abcdef" for c in config["token"])):
             return
         connection = http.client.HTTPConnection("127.0.0.1", config["port"], timeout=0.15)
         try:
@@ -32,7 +36,7 @@ def forward(data, directory: Path):
             connection.getresponse().close()
         finally:
             connection.close()
-    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
+    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException, RecursionError):
         pass
 
 
@@ -89,7 +93,7 @@ def main(argv=None):
                 continue
             result = dispatch(request, args.data_dir, observer)
             response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
-        except (ValueError, TypeError, LookupError):
+        except (ValueError, TypeError, LookupError, RecursionError):
             response = {"jsonrpc": "2.0", "id": request.get("id") if isinstance(request, dict) else None,
                         "error": {"code": -32602, "message": "Invalid metadata request"}}
         try:

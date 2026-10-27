@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .observer import ObservationServer, credentials
 from .tasks import TaskLedger
+from . import observer_files as secure
 from tools import codex_config as config
 
 
@@ -22,6 +23,7 @@ def observer_command():
 class ChatGPTConnection:
     def __init__(self, directory, home=None):
         self.directory = Path(directory)
+        self.private_directory = self.directory
         self.home = home or config.codex_home()
         self.ledger = TaskLedger()
         self.server = None
@@ -32,7 +34,8 @@ class ChatGPTConnection:
 
     def start(self):
         try:
-            secret = credentials(self.directory)
+            self.directory.mkdir(parents=True, exist_ok=True)
+            secret = credentials(self.private_directory)
             self.enabled = secret["enabled"]
             self.server = ObservationServer(secret["token"], secret["port"])
             self.server.inbox.enabled = self.enabled
@@ -46,9 +49,10 @@ class ChatGPTConnection:
             self.server = None
 
     def toggle(self):
-        secret = credentials(self.directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        secret = credentials(self.private_directory)
         secret["enabled"] = not self.enabled
-        config.atomic(self.directory / "chatgpt-observer.json", json.dumps(secret).encode("utf-8"))
+        secure.replace_private(self.private_directory / "chatgpt-observer.json", json.dumps(secret).encode("utf-8"))
         self.enabled = secret["enabled"]
         if self.server:
             self.server.inbox.enabled = self.enabled
@@ -80,8 +84,8 @@ class ChatGPTConnection:
             "chatgpt_uncertain" if self.error or self.ledger.pending or self._unobserved_start else "chatgpt_observation")
 
     def plan(self, uninstall=False):
-        return config.uninstall_plan(self.home) if uninstall else config.install_plan(
-            self.home, observer_command(), self.directory)
+        return config.uninstall_plan(self.home, self.private_directory) if uninstall else config.install_plan(
+            self.home, observer_command(), self.private_directory, self.private_directory)
 
 
 def review_connection(controller, uninstall=False):
@@ -93,7 +97,7 @@ def review_connection(controller, uninstall=False):
     connection = controller.chatgpt
     try:
         plan = connection.plan(uninstall)
-        summary = config.inspect(connection.home)
+        summary = config.inspect(connection.home, connection.private_directory)
         box = QMessageBox(controller.window)
         box.setWindowTitle(ui("chatgpt_manage"))
         box.setTextFormat(Qt.PlainText)

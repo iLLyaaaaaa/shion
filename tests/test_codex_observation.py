@@ -78,7 +78,9 @@ def test_http_isolation_and_mcp_transport(tmp_path):
     server = ObservationServer("a" * 64, port=0)
     server.start()
     config = {"token": "a" * 64, "port": server.server.server_port, "enabled": True}
-    (tmp_path / "chatgpt-observer.json").write_text(json.dumps(config))
+    from shion import observer_files as secure
+    tmp_path = secure.ensure_directory(tmp_path / "private")
+    secure.write_new(tmp_path / "chatgpt-observer.json", json.dumps(config).encode())
     try:
         result = dispatch({"method": "tools/call", "params": {"name": "observe_lifecycle",
             "arguments": {"event": "Stop", "source": "global", "session_id": "s", "turn_id": "t"}}}, tmp_path, "o")
@@ -111,3 +113,27 @@ def test_stdio_mcp_roundtrip_from_unrelated_directory(tmp_path):
     assert len(replies) == 3
     assert replies[0]["result"]["protocolVersion"] == "2025-06-18"
     assert replies[2]["result"]["content"] == [{"type": "text", "text": "{}"}]
+
+
+def test_observer_entry_does_not_import_gui(tmp_path):
+    code = "from shion.__main__ import main; import sys; main(['--codex-observer','--data-dir',sys.argv[1]]); assert not any(x.startswith('PySide6') for x in sys.modules); assert 'shion.pet_window' not in sys.modules"
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path)], input="", text=True,
+                            capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+def test_rate_limit_and_queue_limits_are_independent():
+    inbox = ObservationInbox("secret", capacity=512)
+    for _ in range(200):
+        assert inbox.submit("secret", {"event": "Stop"}) == 204
+    assert inbox.submit("secret", {"event": "Stop"}) == 429
+    assert len(inbox.drain()) == 200
+    assert inbox.degraded.is_set()
+
+
+@pytest.mark.parametrize("config", [[], None, {"enabled": True, "port": 99999, "token": "a"*64},
+                                     {"enabled": True, "port": 47614, "token": "\\r\\ninject"}])
+def test_corrupt_credentials_remain_neutral(tmp_path, config):
+    (tmp_path / "chatgpt-observer.json").write_text(json.dumps(config))
+    result = dispatch({"method": "tools/call", "params": {"name": "observe_lifecycle", "arguments": {"event": "Stop"}}}, tmp_path, "o")
+    assert result == {"content": [{"type": "text", "text": "{}"}], "isError": False}

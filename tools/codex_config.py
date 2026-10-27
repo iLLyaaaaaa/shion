@@ -6,13 +6,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import tempfile
-import uuid
 from dataclasses import dataclass
 
 import tomlkit
 
 from shion.events import EVENTS
+from shion import observer_files as secure
 
 NAME = "shion_lifecycle_v1"
 MANIFEST = ".shion-lifecycle-v1.json"
@@ -45,19 +44,27 @@ def digest(value):
     return hashlib.sha256(value).hexdigest() if value is not None else None
 
 
-def atomic(path, data):
-    if data is None:
-        path.unlink(missing_ok=True)
-        return
-    fd, name = tempfile.mkstemp(prefix=".shion-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
+def atomic(path, data, staging):
+    secure.replace_private(path, data, preserve_security=path.name in ("config.toml", "hooks.json"))
+
+
+def private_location(home, private_dir=None):
+    root = Path(private_dir) if private_dir is not None else Path(home) / ".shion-observer-v2"
+    secure.reject_reparse(root)
+    return root.absolute()
+
+
+def ownership_path(home, private_dir=None):
+    root = private_location(home, private_dir)
+    key = hashlib.sha256(str(Path(home).resolve()).casefold().encode()).hexdigest()[:24]
+    return root / (key + MANIFEST)
+
+
+def read_ownership(home, private_dir=None):
+    if (Path(home) / MANIFEST).exists():
+        raise Conflict("Legacy ownership record requires an explicitly reviewed migration")
+    path = ownership_path(home, private_dir)
+    return secure.read_private(path) if path.exists() else None
 
 
 def hook_groups():
@@ -70,8 +77,6 @@ def hook_groups():
             projection["tool_use_id"] = "${tool_use_id}"
         group = {"hooks": [{"type": "mcp_tool", "server": NAME, "tool": "observe_lifecycle",
                             "input": projection, "timeout": 1}]}
-        if event in ("PreToolUse", "PostToolUse", "PermissionRequest"):
-            group["matcher"] = "Bash|apply_patch"
         out[event] = [group]
     return out
 
@@ -171,32 +176,36 @@ class Plan:
     home: Path
     changes: list[Change]
     action: str
+    private_dir: Path
 
     def diff(self):
         return "\n".join("".join(difflib.unified_diff(
             (c.before or b"").decode("utf-8").splitlines(True),
             (c.after or b"").decode("utf-8").splitlines(True),
             fromfile=str(c.path), tofile=str(c.path) + " (proposed)", n=0))
-            for c in self.changes if c.path.name != MANIFEST)
+            for c in self.changes if not c.path.name.endswith(MANIFEST))
 
 
-def install_plan(home: Path, command: list[str], data_dir: Path):
+def install_plan(home: Path, command: list[str], data_dir: Path, private_dir=None):
+    secure.reject_reparse(home)
     home = home.resolve()
-    manifest = home / MANIFEST
-    if read(manifest) is not None:
-        owned = json.loads(read(manifest))
+    private_dir = private_location(home, private_dir)
+    manifest = ownership_path(home, private_dir)
+    owned_raw = read_ownership(home, private_dir)
+    if owned_raw is not None:
+        owned = json.loads(owned_raw)
         if owned.get("identity") != NAME or set(owned.get("files", {})) != {"config.toml", "hooks.json"}:
             raise Conflict("Invalid ownership manifest")
         # Normal trust review may append records. Validate owned fragments rather
         # than requiring unrelated user/trust configuration to remain unchanged.
-        uninstall_plan(home)
+        uninstall_plan(home, private_dir)
         for filename, item in owned["files"].items():
             if filename == "config.toml":
                 actual = tomlkit.parse(read(home / filename).decode("utf-8"))["mcp_servers"][NAME]
                 if (actual["command"] != command[0]
                         or actual["args"] != command[1:] + ["--data-dir", str(data_dir.resolve())]):
                     raise Conflict("Installed observer location differs; review migration first")
-        return Plan(home, [], "install")
+        return Plan(home, [], "install", private_dir)
     config_path, hooks_path = home / "config.toml", home / "hooks.json"
     before_config, before_hooks = read(config_path), read(hooks_path)
     original = (before_config or b"").decode("utf-8")
@@ -217,105 +226,229 @@ def install_plan(home: Path, command: list[str], data_dir: Path):
     hooks_text = add_hooks((before_hooks or b"{}\n").decode("utf-8"))
     changes = [Change(config_path, before_config, config_text.encode("utf-8")),
                Change(hooks_path, before_hooks, hooks_text.encode("utf-8"))]
-    files = {c.path.name: {"original": c.before.decode("utf-8") if c.before is not None else None,
-                           "installed": c.after.decode("utf-8"),
-                           "original_hash": digest(c.before), "installed_hash": digest(c.after)} for c in changes}
-    record = {"version": 1, "identity": NAME, "files": files}
+    files = {c.path.name: insertion_record(c.before, c.after) for c in changes}
+    record = {"version": 2, "identity": NAME, "files": files}
     changes.append(Change(manifest, None, json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8")))
-    return Plan(home, changes, "install")
+    return Plan(home, changes, "install", private_dir)
 
 
-def uninstall_plan(home):
-    """Conservative ownership: stop if changed; never remove ambiguous definitions."""
-    home = home.resolve()
-    raw = read(home / MANIFEST)
+def insertion_record(before, after):
+    # Exact offsets, never an original user-config snapshot. SequenceMatcher is
+    # used only on our just-generated insertion, never to infer ownership later.
+    edits = []
+    for tag, a, b, c, d in difflib.SequenceMatcher(None, before or b"", after, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "insert":
+            raise Conflict("Installation must only insert bytes")
+        text = after[c:d].decode("utf-8")
+        edits.append({"offset": a, "text": text, "sha256": digest(after[c:d])})
+    return {"before": digest(before), "after": digest(after), "length": len(before or b""), "edits": edits}
+
+
+def transform(current, item, reverse=False):
+    expected, target = ("after", "before") if reverse else ("before", "after")
+    if digest(current) != item[expected]:
+        raise Conflict("External modification; automatic recovery/removal stopped")
+    result = current or b""
+    delta = 0
+    edits = []
+    for edit in item["edits"]:
+        fragment = edit["text"].encode("utf-8")
+        if digest(fragment) != edit["sha256"]:
+            raise Conflict("Fragment evidence damaged")
+        offset = edit["offset"]
+        if type(offset) is not int or offset < 0 or offset > item["length"]:
+            raise Conflict("Invalid fragment offset")
+        edits.append((offset + delta if reverse else offset, fragment))
+        delta += len(fragment)
+    for offset, fragment in reversed(edits):
+        if reverse:
+            if result[offset:offset + len(fragment)] != fragment:
+                raise Conflict("Ambiguous fragment")
+            result = result[:offset] + result[offset + len(fragment):]
+        else:
+            result = result[:offset] + fragment + result[offset:]
+    if item[target] is None:
+        if result:
+            raise Conflict("Unexpected remaining bytes")
+        result = None
+    if digest(result) != item[target]:
+        raise Conflict("Result hash mismatch")
+    return result
+
+
+def validate_semantics(filename, before, after):
+    """Prove the only semantic difference is our exact MCP/hook definition."""
+    import copy
+    if filename == "config.toml":
+        original = tomlkit.parse((before or b"").decode("utf-8")).unwrap()
+        installed = tomlkit.parse((after or b"").decode("utf-8")).unwrap()
+        stripped = copy.deepcopy(installed)
+        server = stripped.get("mcp_servers", {}).pop(NAME, None)
+        if not isinstance(server, dict) or set(server) != {"command", "args", "startup_timeout_sec", "tool_timeout_sec"}:
+            raise Conflict("Invalid owned MCP table")
+        if "mcp_servers" not in original and not stripped.get("mcp_servers"):
+            stripped.pop("mcp_servers", None)
+    else:
+        original = json.loads(before or b"{}", object_pairs_hook=_unique_pairs)
+        installed = json.loads(after or b"{}", object_pairs_hook=_unique_pairs)
+        from tools.hooks_config import validate
+        validate(original)
+        validate(installed)
+        stripped = copy.deepcopy(installed)
+        for event, groups in hook_groups().items():
+            actual = stripped.get("hooks", {}).get(event, [])
+            if actual.count(groups[0]) != 1:
+                raise Conflict("Owned Hook missing or ambiguous")
+            actual.remove(groups[0])
+            if event not in original.get("hooks", {}) and not actual:
+                stripped["hooks"].pop(event)
+        if "hooks" not in original and not stripped.get("hooks"):
+            stripped.pop("hooks", None)
+    if stripped != original:
+        raise Conflict("Unrelated configuration semantics changed")
+
+
+def uninstall_plan(home, private_dir=None):
+    secure.reject_reparse(home)
+    home = Path(home).resolve()
+    private_dir = private_location(home, private_dir)
+    raw = read_ownership(home, private_dir)
     if raw is None:
-        return Plan(home, [], "uninstall")
-    record = json.loads(raw)
-    if record.get("identity") != NAME or set(record.get("files", {})) != {"config.toml", "hooks.json"}:
-        raise Conflict("Invalid ownership manifest")
+        if any(NAME.encode() in (read(home / f) or b"") for f in ("config.toml", "hooks.json")):
+            raise Conflict("Ownership evidence missing; manual review required")
+        return Plan(home, [], "uninstall", private_dir)
+    record = json.loads(raw, object_pairs_hook=_unique_pairs)
+    if record.get("version") != 2 or record.get("identity") != NAME or set(record.get("files", {})) != {"config.toml", "hooks.json"}:
+        raise Conflict("Invalid or legacy ownership manifest; manual review required")
     changes = []
     for filename, item in record["files"].items():
         current = read(home / filename)
-        installed = item["installed"].encode("utf-8")
-        original = item["original"].encode("utf-8") if item["original"] is not None else None
-        if digest(installed) != item["installed_hash"] or digest(original) != item["original_hash"]:
-            raise Conflict("Ownership integrity check failed")
-        # Codex trust review changes config.toml. Remove only exact installed text
-        # fragments, preserving subsequent user/trust additions outside them.
-        matcher = difflib.SequenceMatcher(None, (original or b""), installed, autojunk=False)
-        restored = current
-        if restored is None:
-            raise Conflict("Installed file missing")
-        for tag, a, b, c, d in reversed(matcher.get_opcodes()):
-            if tag == "equal":
-                continue
-            old, new = (original or b"")[a:b], installed[c:d]
-            if tag != "insert" or not new or restored.count(new) != 1:
-                raise Conflict("Owned fragment changed or ambiguous; manual review required")
-            restored = restored.replace(new, old, 1)
-        if filename.endswith("toml"):
-            tomlkit.parse(restored.decode("utf-8"))
-        elif restored.strip():
-            json.loads(restored)
-        if original is None and restored in (b"", b"{}\n"):
-            restored = None
+        restored = transform(current, item, reverse=True)
+        validate_semantics(filename, restored, current)
         changes.append(Change(home / filename, current, restored))
-    changes.append(Change(home / MANIFEST, raw, None))
-    return Plan(home, changes, "uninstall")
+    changes.append(Change(ownership_path(home, private_dir), raw, None))
+    return Plan(home, changes, "uninstall", private_dir)
+
+
+def transaction_path(home, private_dir=None):
+    return ownership_path(home, private_dir).with_suffix(".transaction.json")
+
+
+def recover(home, private_dir=None):
+    """Rollback a WAL, idempotently, including a crash during this recovery.
+
+    Preflight EVERY file before changing any. An absent WAL is not permission
+    to guess; an extant lock without a WAL always requires manual review.
+    """
+    secure.reject_reparse(home)
+    home = Path(home).resolve()
+    root = private_location(home, private_dir)
+    journal = transaction_path(home, root)
+    lock = journal.with_suffix(".lock")
+    if not journal.exists():
+        if lock.exists():
+            raise Conflict("Transaction evidence missing; manual review required")
+        return False
+    record = json.loads(read(journal), object_pairs_hook=_unique_pairs)
+    if record.get("version") != 2 or record.get("home") != str(home) or record.get("action") not in ("install", "uninstall"):
+        raise Conflict("Invalid transaction evidence")
+    files = record["files"]
+    if set(files) != {"config.toml", "hooks.json"}:
+        raise Conflict("Invalid transaction targets")
+    if record.get("ownership") != {"version": 2, "identity": NAME, "files": files}:
+        raise Conflict("Inconsistent transaction ownership")
+    reverse = record["action"] == "install"
+    changes = []
+    for filename, item in files.items():
+        current = read(home / filename)
+        target = item["before" if reverse else "after"]
+        source = item["after" if reverse else "before"]
+        if digest(current) == target:
+            continue
+        if digest(current) != source:
+            raise Conflict("External edit prevents recovery")
+        restored = transform(current, item, reverse=reverse)
+        validate_semantics(filename, restored if reverse else current, current if reverse else restored)
+        changes.append(Change(home / filename, current, restored))
+    manifest = ownership_path(home, root)
+    owned = json.dumps(record["ownership"], ensure_ascii=False, indent=2).encode("utf-8")
+    current_owned = read(manifest)
+    if current_owned not in (None, owned):
+        raise Conflict("Ownership evidence changed")
+    # An OS/process crash can leave a fully or partly written staging file.
+    # Only a complete known image is safe to discard; partial/foreign content
+    # is deliberately left for manual review, never guessed away.
+    staging = []
+    targets = [(home / name, (item["before"], item["after"])) for name, item in files.items()]
+    targets.append((manifest, (digest(owned),)))
+    for path, hashes in targets:
+        temporary = secure.staging_path(path)
+        content = read(temporary)
+        if content is not None:
+            if digest(content) not in hashes:
+                raise Conflict("Ambiguous staging file; manual review required")
+            staging.append((temporary, content))
+    for temporary, content in staging:
+        if read(temporary) != content:
+            raise Conflict("Staging file changed during recovery")
+        temporary.unlink()
+    for change in changes:
+        if read(change.path) != change.before:
+            raise Conflict("Concurrent edit during recovery")
+        atomic(change.path, change.after, root)
+    atomic(manifest, None if reverse else owned, root)
+    # WAL is the authority. Remove lock first so interrupted cleanup is repeatable.
+    lock.unlink(missing_ok=True)
+    journal.unlink()
+    return True
 
 
 def apply_plan(plan: Plan):
-    """Caller must first show plan.diff and obtain explicit review confirmation."""
     if not plan.changes:
         return None
     plan.home.mkdir(parents=True, exist_ok=True)
-    lock = plan.home / ".shion-lifecycle.lock"
+    root = secure.ensure_directory(plan.private_dir)
+    journal = transaction_path(plan.home, root)
+    lock = journal.with_suffix(".lock")
+    if journal.exists() or lock.exists():
+        raise Conflict("Pending transaction; explicitly recover before retry")
+    for change in plan.changes:
+        if read(change.path) != change.before:
+            raise Conflict("Configuration changed after preview")
+    manifest_change = plan.changes[-1]
+    owned = json.loads(manifest_change.after if plan.action == "install" else manifest_change.before)
+    for change in plan.changes[:-1]:
+        validate_semantics(change.path.name, change.before if plan.action == "install" else change.after,
+                           change.after if plan.action == "install" else change.before)
+    secure.write_new(lock, b"")
+    record = {"version": 2, "home": str(plan.home), "action": plan.action,
+              "files": owned["files"], "ownership": owned}
     try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError as exc:
-        raise Conflict("Another transaction or interrupted transaction exists") from exc
-    os.close(fd)
-    backup = plan.home / (".shion-backup-" + uuid.uuid4().hex)
-    completed = []
-    try:
-        for change in plan.changes:
-            if read(change.path) != change.before:
-                raise Conflict("Configuration changed after preview")
-        backup.mkdir(mode=0o700)
-        journal = []
-        for change in plan.changes:
-            if change.before is not None:
-                target = backup / change.path.name
-                target.write_bytes(change.before)
-                if digest(read(target)) != digest(change.before):
-                    raise Conflict("Backup hash mismatch")
-            journal.append({"file": change.path.name, "before": digest(change.before), "after": digest(change.after)})
-        (backup / "journal.json").write_text(json.dumps(journal, indent=2), encoding="utf-8")
+        # Flush the complete WAL before the first configuration mutation.
+        atomic(journal, json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"), root)
         for change in plan.changes:
             if read(change.path) != change.before:
                 raise Conflict("Concurrent configuration edit")
-            atomic(change.path, change.after)
-            completed.append(change)
+            atomic(change.path, change.after, root)
             if read(change.path) != change.after:
                 raise Conflict("Post-write verification failed")
-        return backup
+        # Commit marker is deleting WAL. A crash before this point rolls back.
+        lock.unlink()
+        journal.unlink()
     except Exception:
-        for change in reversed(completed):
-            if read(change.path) != change.after:
-                raise Conflict(f"Concurrent edit prevents rollback; retain backup {backup}")
-            atomic(change.path, change.before)
+        recover(plan.home, root)
         raise
-    finally:
-        lock.unlink(missing_ok=True)
+    return None
 
 
-def inspect(home):
+def inspect(home, private_dir=None):
     """Read-only structure summary; never disclose notify arguments or secrets."""
     config = tomlkit.parse((read(home / "config.toml") or b"").decode("utf-8"))
     hooks = json.loads(read(home / "hooks.json") or b"{}")
     state = config.get("hooks", {}).get("state", {})
-    return {"home": str(home), "installed": read(home / MANIFEST) is not None,
+    return {"home": str(home), "installed": read_ownership(home, private_dir) is not None,
             "mcp_registered": NAME in config.get("mcp_servers", {}),
             "mcp_names": list(config.get("mcp_servers", {})), "notify_present": "notify" in config,
             "hooks_file_present": (home / "hooks.json").exists(),
