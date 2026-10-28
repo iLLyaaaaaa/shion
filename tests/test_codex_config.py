@@ -51,11 +51,11 @@ def test_mid_transaction_failure_rolls_back(tmp_path, monkeypatch):
     proposal = plan(tmp_path)
     original_atomic = C.atomic
     calls = [0]
-    def fail(path, data, staging):
+    def fail(path, data, staging, **kwargs):
         calls[0] += 1
         if calls[0] == 2:
             raise OSError("simulated failure")
-        return original_atomic(path, data, staging)
+        return original_atomic(path, data, staging, **kwargs)
     monkeypatch.setattr(C, "atomic", fail)
     with pytest.raises(OSError):
         C.apply_plan(proposal)
@@ -68,9 +68,9 @@ def test_uninstall_preserves_new_trust_and_unrelated_config(tmp_path):
     path = tmp_path / "config.toml"
     addition = '\n[hooks.state.test]\nenabled = false\ntrusted_hash = "do-not-touch"\n'
     path.write_bytes(path.read_bytes() + addition.encode())
-    with pytest.raises(C.Conflict):
-        C.uninstall_plan(tmp_path)
-    assert path.read_bytes().endswith(addition.encode())
+    assert not plan(tmp_path).changes
+    C.apply_plan(C.uninstall_plan(tmp_path))
+    assert path.read_bytes() == addition.encode()
 
 
 def test_uninstall_refuses_modified_ownership(tmp_path):
@@ -112,8 +112,8 @@ def test_crash_and_crash_during_recovery(tmp_path, monkeypatch, action, crash_at
     proposal = plan(tmp_path) if action == "install" else C.uninstall_plan(tmp_path)
     real = C.atomic
     calls = [0]
-    def crash(path, data, staging):
-        real(path, data, staging)
+    def crash(path, data, staging, **kwargs):
+        real(path, data, staging, **kwargs)
         calls[0] += 1
         if calls[0] == crash_at:
             raise Crash()
@@ -133,8 +133,8 @@ def test_crash_and_crash_during_recovery(tmp_path, monkeypatch, action, crash_at
 
 def test_missing_wal_or_external_edit_never_guesses(tmp_path, monkeypatch):
     real = C.atomic
-    def crash(path, data, staging):
-        real(path, data, staging)
+    def crash(path, data, staging, **kwargs):
+        real(path, data, staging, **kwargs)
         if path.name == "config.toml":
             raise Crash()
     monkeypatch.setattr(C, "atomic", crash)
@@ -210,8 +210,8 @@ else:
 
 def test_partial_stage_requires_manual_review(tmp_path, monkeypatch):
     real = C.atomic
-    def crash(path, data, staging):
-        real(path, data, staging)
+    def crash(path, data, staging, **kwargs):
+        real(path, data, staging, **kwargs)
         if path.name.endswith("transaction.json"):
             raise Crash()
     monkeypatch.setattr(C, "atomic", crash)
@@ -232,6 +232,7 @@ def test_existing_windows_config_dacl_is_preserved(tmp_path):
         pytest.skip("Windows native replacement")
     path = tmp_path / "config.toml"
     path.write_bytes(b'# preserve file permissions\n')
+    inherited_security = C.secure._security_digest(path)
     env = dict(os.environ, SHION_TEST_CONFIG=str(path))
     def powershell(script):
         return subprocess.check_output(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -239,7 +240,10 @@ def test_existing_windows_config_dacl_is_preserved(tmp_path):
     powershell('$ErrorActionPreference="Stop"; $p=$env:SHION_TEST_CONFIG; $a=[System.IO.File]::GetAccessControl($p); $a.SetAccessRuleProtection($true,$true); [System.IO.File]::SetAccessControl($p,$a)')
     query = '[System.IO.File]::GetAccessControl($env:SHION_TEST_CONFIG).GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)'
     before = powershell(query)
+    protected_security = C.secure._security_digest(path)
+    assert protected_security != inherited_security
     C.apply_plan(plan(tmp_path))
     assert powershell(query) == before
+    assert C.secure._security_digest(path) == protected_security
     C.apply_plan(C.uninstall_plan(tmp_path))
     assert powershell(query) == before

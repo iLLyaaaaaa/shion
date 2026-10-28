@@ -3,6 +3,7 @@
 > 每个步骤结束时更新这份文件。新会话从这里接手。步骤定义见 `docs/spec.md`「开发步骤」。
 
 ## 当前状态
+- **2026-10-28 V2.0 阶段 1 安装事务可靠性专项（仅隔离）**：已补充状态/哈希/ACL 核验后的有界原生替换重试、1176/1177 证据保留、暂存期间外部变更检测；v3 归属/事务支持信任更新和第三方追加后的精确卸载，保留所有信任记录。最终专项 **77 passed**，全量 **1653 passed、9 skipped、2 既有警告**；最终四进程压力 **96 场景/192 次正常循环/96 次恢复再崩溃，0 失败**；新包 **97 项自检/13 组协议/30 次合成 MCP**。结果与限制见 [事务专项记录](experiments/shion-v2-phase1-transactions.md)。未修改真实 Codex 配置或信任；不 push/merge/release，不进入阶段 2。
 - **2026-10-28 V2.0 阶段 1 精简修订（仅隔离验证）**：移除独立 ACL 存储，使用精确插入记录、语义校验及预写日志；安装/卸载/恢复中断和恢复再次硬终止专项通过。便携 `Shion.exe --codex-observer` 位于指定 `Shion-dev`，不加载 Qt；协议与并发资源结果见 [精简修订记录](experiments/shion-v2-phase1-slim.md)。全量 **1618 passed、9 skipped**；最后权限修订专项 **43 passed**；最新包 **97 项自检、13 组协议验收、30/30 合成 MCP**。真实 matcher 工具覆盖因隔离账户未登录、Hooks 未信任而未验收，不得宣称阶段 1 完成。仅允许本地提交；真实全局安装、push、合并 master、发布均未执行。
 - **2026-10-27 V2.0 阶段 1 全局观察 MVP 开发（尚未正式安装）**：独立分支 `feature/v2-phase1-global-observer` 实现元数据逐轮追踪、独立观察端点/MCP、用户级配置预览与事务安装/卸载、三语管理菜单和 Claude 控制隔离。全量 **1597 passed、9 skipped、2 warnings**；最终修正专项 **38 passed**；合成 10 会话/6000 事件性能 p95 **78ms**。真实用户级配置未写入，七项禁用信任记录保留；全局安装、跨项目 CLI/桌面及恢复行为尚待确认后验收，不能视为阶段 1 完成。详见 `docs/experiments/shion-v2-phase1.md`。仅本地提交，不 push/merge/release。
 - **2026-10-26 Shion V2.0 阶段 0 第二次实测收尾（未进入阶段 1）**：CLI 与桌面插件创建的本地任务取得 39 条受控元数据，另 17 条同项目旁观记录排除统计。CLI 七类事件、独立会话及跨桌面并行有实证；桌面提交事件缺失，Work 本地、人工请求解除、快照及跨通道去重仍未验证。已逐项禁用七个 Hook、按哈希删除两个项目临时配置，用户级保留禁用 trusted_hash 记录。报告与方案见 `docs/experiments/shion-v2-phase0-final.md`、`docs/experiments/shion-v2-revised-plan.md`；不改业务代码，不 commit/push，等待用户审核。

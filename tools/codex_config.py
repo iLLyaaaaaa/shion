@@ -44,8 +44,8 @@ def digest(value):
     return hashlib.sha256(value).hexdigest() if value is not None else None
 
 
-def atomic(path, data, staging):
-    secure.replace_private(path, data, preserve_security=path.name in ("config.toml", "hooks.json"))
+def atomic(path, data, staging, *, expected=...):
+    secure.replace_private(path, data, preserve_security=path.name in ("config.toml", "hooks.json"), expected=expected)
 
 
 def private_location(home, private_dir=None):
@@ -177,6 +177,7 @@ class Plan:
     changes: list[Change]
     action: str
     private_dir: Path
+    transaction_files: dict | None = None
 
     def diff(self):
         return "\n".join("".join(difflib.unified_diff(
@@ -194,10 +195,8 @@ def install_plan(home: Path, command: list[str], data_dir: Path, private_dir=Non
     owned_raw = read_ownership(home, private_dir)
     if owned_raw is not None:
         owned = json.loads(owned_raw)
-        if owned.get("identity") != NAME or set(owned.get("files", {})) != {"config.toml", "hooks.json"}:
-            raise Conflict("Invalid ownership manifest")
-        # Normal trust review may append records. Validate owned fragments rather
-        # than requiring unrelated user/trust configuration to remain unchanged.
+        check_ownership(owned)
+        # Validate exact owned definitions even after normal trust/user changes.
         uninstall_plan(home, private_dir)
         for filename, item in owned["files"].items():
             if filename == "config.toml":
@@ -227,7 +226,10 @@ def install_plan(home: Path, command: list[str], data_dir: Path, private_dir=Non
     changes = [Change(config_path, before_config, config_text.encode("utf-8")),
                Change(hooks_path, before_hooks, hooks_text.encode("utf-8"))]
     files = {c.path.name: insertion_record(c.before, c.after) for c in changes}
-    record = {"version": 2, "identity": NAME, "files": files}
+    before_json = json.loads(before_hooks or b"{}", object_pairs_hook=_unique_pairs)
+    record = {"version": 3, "identity": NAME, "files": files,
+              "definitions": {"mcp": parsed["mcp_servers"][NAME].unwrap(), "hooks": hook_groups()},
+              "hooks_layout": {"root": "hooks" in before_json, "events": list(before_json.get("hooks", {}))}}
     changes.append(Change(manifest, None, json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8")))
     return Plan(home, changes, "install", private_dir)
 
@@ -278,7 +280,29 @@ def transform(current, item, reverse=False):
     return result
 
 
-def validate_semantics(filename, before, after):
+def same_semantics(left, right):
+    # Python considers True == 1; TOML/JSON ownership must retain scalar types.
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(same_semantics(left[k], right[k]) for k in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(same_semantics(a, b) for a, b in zip(left, right))
+    if isinstance(left, float):
+        import math
+        if math.isnan(left) and math.isnan(right):
+            return True
+    return left == right
+
+
+def owned_group_index(groups, expected):
+    matches = [i for i, group in enumerate(groups) if same_semantics(group, expected)]
+    if len(matches) != 1:
+        raise Conflict("Owned Hook changed or ambiguous")
+    return matches[0]
+
+
+def validate_semantics(filename, before, after, definitions=None):
     """Prove the only semantic difference is our exact MCP/hook definition."""
     import copy
     if filename == "config.toml":
@@ -288,6 +312,8 @@ def validate_semantics(filename, before, after):
         server = stripped.get("mcp_servers", {}).pop(NAME, None)
         if not isinstance(server, dict) or set(server) != {"command", "args", "startup_timeout_sec", "tool_timeout_sec"}:
             raise Conflict("Invalid owned MCP table")
+        if definitions is not None and not same_semantics(server, definitions["mcp"]):
+            raise Conflict("Owned MCP definition changed")
         if "mcp_servers" not in original and not stripped.get("mcp_servers"):
             stripped.pop("mcp_servers", None)
     else:
@@ -297,17 +323,153 @@ def validate_semantics(filename, before, after):
         validate(original)
         validate(installed)
         stripped = copy.deepcopy(installed)
-        for event, groups in hook_groups().items():
+        for event, groups in (definitions["hooks"] if definitions else hook_groups()).items():
             actual = stripped.get("hooks", {}).get(event, [])
-            if actual.count(groups[0]) != 1:
-                raise Conflict("Owned Hook missing or ambiguous")
-            actual.remove(groups[0])
+            actual.pop(owned_group_index(actual, groups[0]))
             if event not in original.get("hooks", {}) and not actual:
                 stripped["hooks"].pop(event)
         if "hooks" not in original and not stripped.get("hooks"):
             stripped.pop("hooks", None)
-    if stripped != original:
+    if not same_semantics(stripped, original):
         raise Conflict("Unrelated configuration semantics changed")
+
+
+def check_ownership(record):
+    if not isinstance(record, dict):
+        raise Conflict("Invalid ownership record")
+    if (record.get("version") != 3 or record.get("identity") != NAME
+            or not isinstance(record.get("files"), dict)
+            or set(record.get("files", {})) != {"config.toml", "hooks.json"}
+            or not isinstance(record.get("definitions"), dict)
+            or not same_semantics(record.get("definitions", {}).get("hooks"), hook_groups())
+            or not isinstance(record.get("hooks_layout"), dict)
+            or type(record.get("hooks_layout", {}).get("root")) is not bool
+            or not isinstance(record.get("hooks_layout", {}).get("events"), list)):
+        raise Conflict("Invalid or legacy ownership; reviewed migration required")
+    for item in record["files"].values():
+        check_insertions(item)
+    # The approved MCP values must still be proved by the original insertions.
+    fragments = "".join(e["text"] for e in record["files"]["config.toml"]["edits"])
+    if not same_semantics(tomlkit.parse(fragments).unwrap().get("mcp_servers", {}).get(NAME), record["definitions"].get("mcp")):
+        raise Conflict("MCP ownership evidence mismatch")
+
+
+def check_insertions(item):
+    def valid_hash(value):
+        return (isinstance(value, str) and len(value) == 64
+                and all(c in "0123456789abcdef" for c in value))
+    if (not isinstance(item, dict) or set(item) != {"before", "after", "length", "edits"}
+            or (item["before"] is not None and not valid_hash(item["before"]))
+            or not valid_hash(item["after"]) or type(item["length"]) is not int
+            or not 0 <= item["length"] <= MAX_CONFIG or not isinstance(item["edits"], list)
+            or not 0 < len(item["edits"]) <= 1024):
+        raise Conflict("Invalid transaction insertion evidence")
+    previous = 0
+    for edit in item["edits"]:
+        if (not isinstance(edit, dict) or set(edit) != {"offset", "text", "sha256"}
+                or type(edit["offset"]) is not int or not previous <= edit["offset"] <= item["length"]
+                or not isinstance(edit["text"], str) or not edit["text"]
+                or digest(edit["text"].encode("utf-8")) != edit["sha256"]):
+            raise Conflict("Ownership fragment hash mismatch")
+        previous = edit["offset"]
+
+
+def remove_ranges(current, ranges, missing_before=False):
+    """Remove proved byte ranges; retain only those owned bytes in the WAL."""
+    ranges = sorted(ranges)
+    end, removed, edits = 0, 0, []
+    for start, stop in ranges:
+        if not end <= start < stop <= len(current):
+            raise Conflict("Owned ranges overlap or are invalid")
+        fragment = current[start:stop]
+        edits.append({"offset": start - removed, "text": fragment.decode("utf-8"), "sha256": digest(fragment)})
+        removed += stop - start
+        end = stop
+    restored = current
+    for start, stop in reversed(ranges):
+        restored = restored[:start] + restored[stop:]
+    if missing_before and not restored:
+        restored = None
+    return restored, {"before": digest(restored), "after": digest(current),
+                      "length": len(restored or b""), "edits": edits}
+
+
+def member_ranges(text, data, spans, parent, wanted):
+    """Remove adjacent JSON members as runs so no trailing comma is left."""
+    node = data
+    for part in parent:
+        node = node[part]
+    keys = list(node)
+    def key_start(position):
+        offset = spans[parent][0] + 1 if position == 0 else spans[parent + (keys[position - 1],)][1]
+        while text[offset].isspace() or text[offset] == ",":
+            offset += 1
+        return offset
+    ranges, index = [], 0
+    while index < len(keys):
+        if keys[index] not in wanted:
+            index += 1
+            continue
+        first = index
+        while index + 1 < len(keys) and keys[index + 1] in wanted:
+            index += 1
+        if index < len(keys) - 1:
+            ranges.append((key_start(first), key_start(index + 1)))
+        else:
+            start = spans[parent + (keys[first - 1],)][1] if first else key_start(first)
+            ranges.append((start, spans[parent + (keys[index],)][1]))
+        index += 1
+    return ranges
+
+
+def remove_owned(current, filename, record):
+    item = record["files"][filename]
+    if current is None:
+        raise Conflict("Installed file missing")
+    if digest(current) == item["after"]:
+        return transform(current, item, reverse=True), item
+    if filename == "config.toml":
+        ranges = []
+        for edit in item["edits"]:
+            fragment = edit["text"].encode("utf-8")
+            if not fragment or current.count(fragment) != 1:
+                raise Conflict("Owned TOML fragment changed or ambiguous")
+            start = current.index(fragment)
+            ranges.append((start, start + len(fragment)))
+        return remove_ranges(current, ranges, item["before"] is None)
+    # JSON clients may reformat an entire file when appending a third-party
+    # group. Prove exact group values, then remove their current lexical spans.
+    text = current.decode("utf-8")
+    data = json.loads(text, object_pairs_hook=_unique_pairs)
+    from tools.hooks_config import validate
+    validate(data)
+    spans = json_spans(text)
+    hooks, expected = data.get("hooks", {}), record["definitions"]["hooks"]
+    ranges, empty = [], []
+    for event, groups in expected.items():
+        actual = hooks.get(event, [])
+        index = owned_group_index(actual, groups[0])
+        path = ("hooks", event)
+        start, stop = spans[path + (index,)]
+        if len(actual) > 1:
+            if index < len(actual) - 1:
+                stop = spans[path + (index + 1,)][0]
+            else:
+                start = spans[path + (index - 1,)][1]
+        elif event not in record["hooks_layout"]["events"]:
+            empty.append(event)
+            continue
+        ranges.append((start, stop))
+    if len(empty) == len(hooks) and not record["hooks_layout"]["root"]:
+        ranges = member_ranges(text, data, spans, (), {"hooks"})
+    else:
+        ranges += member_ranges(text, data, spans, ("hooks",), set(empty))
+    # json_spans uses character offsets; transactions always use UTF-8 bytes.
+    ranges = [(len(text[:a].encode("utf-8")), len(text[:b].encode("utf-8"))) for a, b in ranges]
+    restored, live = remove_ranges(current, ranges)
+    if item["before"] is None and json.loads(restored or b"{}") == {}:
+        return remove_ranges(current, [(0, len(current))], True)
+    return restored, live
 
 
 def uninstall_plan(home, private_dir=None):
@@ -320,16 +482,17 @@ def uninstall_plan(home, private_dir=None):
             raise Conflict("Ownership evidence missing; manual review required")
         return Plan(home, [], "uninstall", private_dir)
     record = json.loads(raw, object_pairs_hook=_unique_pairs)
-    if record.get("version") != 2 or record.get("identity") != NAME or set(record.get("files", {})) != {"config.toml", "hooks.json"}:
-        raise Conflict("Invalid or legacy ownership manifest; manual review required")
-    changes = []
-    for filename, item in record["files"].items():
+    check_ownership(record)
+    changes, live_files = [], {}
+    for filename in record["files"]:
         current = read(home / filename)
-        restored = transform(current, item, reverse=True)
-        validate_semantics(filename, restored, current)
+        restored, live_files[filename] = remove_owned(current, filename, record)
+        validate_semantics(filename, restored, current, record["definitions"])
+        if NAME.encode() in (restored or b""):
+            raise Conflict("Unowned or ambiguous Shion identity remains")
         changes.append(Change(home / filename, current, restored))
     changes.append(Change(ownership_path(home, private_dir), raw, None))
-    return Plan(home, changes, "uninstall", private_dir)
+    return Plan(home, changes, "uninstall", private_dir, live_files)
 
 
 def transaction_path(home, private_dir=None):
@@ -352,13 +515,17 @@ def recover(home, private_dir=None):
             raise Conflict("Transaction evidence missing; manual review required")
         return False
     record = json.loads(read(journal), object_pairs_hook=_unique_pairs)
-    if record.get("version") != 2 or record.get("home") != str(home) or record.get("action") not in ("install", "uninstall"):
+    if (not isinstance(record, dict) or record.get("version") != 3 or record.get("home") != str(home)
+            or record.get("action") not in ("install", "uninstall")):
         raise Conflict("Invalid transaction evidence")
-    files = record["files"]
-    if set(files) != {"config.toml", "hooks.json"}:
+    files = record.get("files")
+    if not isinstance(files, dict) or set(files) != {"config.toml", "hooks.json"}:
         raise Conflict("Invalid transaction targets")
-    if record.get("ownership") != {"version": 2, "identity": NAME, "files": files}:
-        raise Conflict("Inconsistent transaction ownership")
+    for item in files.values():
+        check_insertions(item)
+    check_ownership(record.get("ownership"))
+    if record["action"] == "install" and record["ownership"]["files"] != files:
+        raise Conflict("Inconsistent install ownership")
     reverse = record["action"] == "install"
     changes = []
     for filename, item in files.items():
@@ -370,7 +537,8 @@ def recover(home, private_dir=None):
         if digest(current) != source:
             raise Conflict("External edit prevents recovery")
         restored = transform(current, item, reverse=reverse)
-        validate_semantics(filename, restored if reverse else current, current if reverse else restored)
+        validate_semantics(filename, restored if reverse else current, current if reverse else restored,
+                           record["ownership"]["definitions"])
         changes.append(Change(home / filename, current, restored))
     manifest = ownership_path(home, root)
     owned = json.dumps(record["ownership"], ensure_ascii=False, indent=2).encode("utf-8")
@@ -397,8 +565,8 @@ def recover(home, private_dir=None):
     for change in changes:
         if read(change.path) != change.before:
             raise Conflict("Concurrent edit during recovery")
-        atomic(change.path, change.after, root)
-    atomic(manifest, None if reverse else owned, root)
+        atomic(change.path, change.after, root, expected=change.before)
+    atomic(manifest, None if reverse else owned, root, expected=current_owned)
     # WAL is the authority. Remove lock first so interrupted cleanup is repeatable.
     lock.unlink(missing_ok=True)
     journal.unlink()
@@ -419,19 +587,20 @@ def apply_plan(plan: Plan):
             raise Conflict("Configuration changed after preview")
     manifest_change = plan.changes[-1]
     owned = json.loads(manifest_change.after if plan.action == "install" else manifest_change.before)
+    check_ownership(owned)
     for change in plan.changes[:-1]:
         validate_semantics(change.path.name, change.before if plan.action == "install" else change.after,
-                           change.after if plan.action == "install" else change.before)
+                           change.after if plan.action == "install" else change.before, owned["definitions"])
     secure.write_new(lock, b"")
-    record = {"version": 2, "home": str(plan.home), "action": plan.action,
-              "files": owned["files"], "ownership": owned}
+    record = {"version": 3, "home": str(plan.home), "action": plan.action,
+              "files": plan.transaction_files or owned["files"], "ownership": owned}
     try:
         # Flush the complete WAL before the first configuration mutation.
-        atomic(journal, json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"), root)
+        atomic(journal, json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"), root, expected=None)
         for change in plan.changes:
             if read(change.path) != change.before:
                 raise Conflict("Concurrent configuration edit")
-            atomic(change.path, change.after, root)
+            atomic(change.path, change.after, root, expected=change.before)
             if read(change.path) != change.after:
                 raise Conflict("Post-write verification failed")
         # Commit marker is deleting WAL. A crash before this point rolls back.
