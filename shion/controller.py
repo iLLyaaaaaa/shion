@@ -1290,7 +1290,8 @@ class PetController(QObject):
 
         menu.addSeparator()
         connection = self.connection.inspect()
-        status_action = menu.addAction(ui("connection_status", state=ui("connection_" + connection.state)))
+        status_text = ui("menu_connection_status", state=ui("connection_" + connection.state))
+        status_action = menu.addAction(status_text)
         status_action.setEnabled(False)
         if self.v2.core.enabled:
             full_status = self.v2.text(ui)
@@ -1307,19 +1308,22 @@ class PetController(QObject):
 
         ai_menu = menu.addMenu(ui("menu_ai"))
         ai_menu.setToolTipsVisible(True)  # 连接详情
+        claude_menu = ai_menu.addMenu(ui("menu_claude"))
+        claude_menu.setToolTipsVisible(True)  # 连接详情
+        claude_menu.addAction(status_text).setEnabled(False)
         connection_actions = []
         if connection.state != "connected":
             label = "menu_reconnect" if connection.state == "stale" else "menu_connect"
-            connection_actions.append(ai_menu.addAction(ui(label)))
+            connection_actions.append(claude_menu.addAction(ui(label)))
             connection_actions[-1].triggered.connect(lambda: self.open_connection())
         if connection.state in ("connected", "stale", "error"):
-            connection_actions.append(ai_menu.addAction(ui("menu_disconnect")))
+            connection_actions.append(claude_menu.addAction(ui("menu_disconnect")))
             connection_actions[-1].triggered.connect(self.disconnect)
         if connection.detail:  # 原来挂在“状态/连接/断开”里最后添加的一项上，重排后仍挂在它
             connection_actions[-1].setToolTip(connection.detail)
         if self.chatgpt is not None:
             from shion.chatgpt import review_connection
-            chat = ai_menu.addMenu(ui("chatgpt_manage"))
+            chat = ai_menu.addMenu(ui("menu_chatgpt"))
             chat.setToolTipsVisible(True)  # 被截断的状态行全文
             for line in self.chatgpt.status(ui).split("\n"):  # 多行状态逐行显示；拼成一条要 660~800 逻辑像素宽
                 text = chat.fontMetrics().elidedText(line, Qt.ElideRight, 360)

@@ -93,7 +93,7 @@ def test_claude_connection_row_survives_v2_status(env, tmp_path, monkeypatch, la
     monkeypatch.setattr(ctl.v2, "text", lambda ui: full)
     menu = ctl.build_menu()
     row = menu.actions()[6]
-    assert row.text() == ctl.lines.ui("connection_status", state=ctl.lines.ui("connection_" + state))
+    assert row.text() == ctl.lines.ui("menu_connection_status", state=ctl.lines.ui("connection_" + state))
     assert not row.isEnabled()
     status = menu.actions()[7]
     assert status.text() == menu.fontMetrics().elidedText(full, Qt.ElideRight, 240)

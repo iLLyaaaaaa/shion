@@ -209,10 +209,10 @@ def menu_tree(menu):
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["互动", "工作遥控", "桌宠", "静音气泡", "只显示状态，不显示内容", "连接状态：未连接", "AI 连接", "设置", "关于", "退出"]
+    assert texts == ["互动", "工作遥控", "桌宠", "静音气泡", "只显示状态，不显示内容", "Claude Code：未连接", "AI 连接", "设置", "关于", "退出"]
     assert [a.text() for a in find_action(menu, "桌宠").menu().actions() if not a.isSeparator()] == [
         "表情", "活跃度", "动作", "大小", "置于最上层", "松手后落到任务栏"]
-    assert [a.text() for a in find_action(menu, "AI 连接").menu().actions()] == ["连接 Claude Code"]
+    assert menu_tree(find_action(menu, "AI 连接").menu()) == [("Claude Code", ["Claude Code：未连接", "连接 Claude Code"])]
     assert [a.text() for a in find_action(menu, "设置").menu().actions()] == ["语言", "开机自启"]
     assert find_action(menu, "开机自启").isCheckable()
     assert not find_action(menu, "开机自启").isChecked()
