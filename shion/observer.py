@@ -7,10 +7,11 @@ import queue
 import secrets
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from .events import parse_observation
+from .events import parse_observation, parse_heartbeat
 
 
 class ObservationInbox:
@@ -22,7 +23,7 @@ class ObservationInbox:
         self.received = 0
         self._epoch, self._count = time.monotonic(), 0
 
-    def submit(self, token, data):
+    def submit(self, token, data, *, heartbeat=False):
         if not isinstance(token, str) or not hmac.compare_digest(token, self.token):
             return 403
         now = time.monotonic()
@@ -33,7 +34,8 @@ class ObservationInbox:
             self.degraded.set()
             return 429
         try:
-            event = parse_observation(data)
+            event = parse_heartbeat(data) if heartbeat else parse_observation(data)
+            event = replace(event, received_at=now)
         except (ValueError, TypeError):
             return 400
         if not self.enabled:
@@ -68,7 +70,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         status = 400
-        if (self.path != "/observe/v1" or self.headers.get("Origin") is not None
+        if (self.path not in ("/observe/v1", "/observe/heartbeat/v1") or self.headers.get("Origin") is not None
                 or self.headers.get("Host") != f"127.0.0.1:{self.server.server_port}"):
             status = 403
         elif self.headers.get("Transfer-Encoding") is None:
@@ -82,7 +84,7 @@ class _Handler(BaseHTTPRequestHandler):
                         status = 403
                     else:
                         data = json.loads(self.rfile.read(length))
-                        status = self.server.inbox.submit(token, data)
+                        status = self.server.inbox.submit(token, data, heartbeat=self.path == "/observe/heartbeat/v1")
                 else:
                     status = 413
             except (ValueError, TypeError, OSError):

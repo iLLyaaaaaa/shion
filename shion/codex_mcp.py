@@ -5,12 +5,14 @@ import http.client
 import json
 import sys
 import uuid
+import threading
 from pathlib import Path
 
 from .events import EVENTS, parse_observation
 from .observer_files import read_private
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+HEARTBEAT_INTERVAL = 2.0
 SCHEMA = {"type": "object", "additionalProperties": False,
           "properties": {"event": {"type": "string", "enum": list(EVENTS)},
                          **{k: {"type": ["string", "null"], "maxLength": 128}
@@ -19,7 +21,7 @@ SCHEMA = {"type": "object", "additionalProperties": False,
           "required": ["event", "source"]}
 
 
-def forward(data, directory: Path):
+def forward(data, directory: Path, path="/observe/v1"):
     # Read only our small credential file; never client config, history, or tool data.
     try:
         config = json.loads(read_private(directory / "chatgpt-observer.json"))
@@ -30,7 +32,7 @@ def forward(data, directory: Path):
             return
         connection = http.client.HTTPConnection("127.0.0.1", config["port"], timeout=0.15)
         try:
-            connection.request("POST", "/observe/v1", json.dumps(data),
+            connection.request("POST", path, json.dumps(data),
                                {"Authorization": "Bearer " + config["token"],
                                 "Content-Type": "application/json"})
             connection.getresponse().close()
@@ -40,7 +42,28 @@ def forward(data, directory: Path):
         pass
 
 
-def dispatch(request, directory, observer):
+class HeartbeatSender:
+    """One daemon per stdio Observer; no stdout and no dependence on Hook traffic."""
+    def __init__(self, directory, observer, interval=HEARTBEAT_INTERVAL):
+        self.directory, self.observer, self.interval = directory, observer, interval
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True, name="observer-heartbeat")
+
+    def _run(self):
+        while not self.stopped.is_set():
+            forward({"observer": self.observer}, self.directory, "/observe/heartbeat/v1")
+            self.stopped.wait(self.interval)
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *args):
+        self.stopped.set()
+        self.thread.join(timeout=0.5)
+
+
+def dispatch(request, directory, observer, *, leased=False):
     method = request.get("method")
     params = request.get("params", {})
     if not isinstance(params, dict):
@@ -62,10 +85,12 @@ def dispatch(request, directory, observer):
             raise ValueError("unknown tool")
         data = params.get("arguments")
         event = parse_observation(data)
-        if "observer" in data:
-            raise ValueError("observer is assigned by the transport")
+        if "observer" in data or "leased" in data:
+            raise ValueError("observer and lease capability are assigned by the transport")
         payload = {k: getattr(event, k) for k in ("event", "session_id", "turn_id", "tool_use_id", "source")}
         payload["observer"] = observer
+        if leased:
+            payload["leased"] = True
         forward(payload, directory)
         return {"content": [{"type": "text", "text": "{}"}], "isError": False}
     raise LookupError("method not found")
@@ -77,6 +102,11 @@ def main(argv=None):
     parser.add_argument("--data-dir", required=True, type=Path)
     args = parser.parse_args(argv)
     observer = uuid.uuid4().hex
+    with HeartbeatSender(args.data_dir, observer):
+        return serve(args.data_dir, observer)
+
+
+def serve(directory, observer):
     while True:
         raw = sys.stdin.buffer.readline(8193)
         if not raw:
@@ -91,7 +121,7 @@ def main(argv=None):
                 raise ValueError("invalid request")
             if "id" not in request:
                 continue
-            result = dispatch(request, args.data_dir, observer)
+            result = dispatch(request, directory, observer, leased=True)
             response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
         except (ValueError, TypeError, LookupError, RecursionError):
             response = {"jsonrpc": "2.0", "id": request.get("id") if isinstance(request, dict) else None,

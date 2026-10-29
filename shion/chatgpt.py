@@ -2,14 +2,27 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 from pathlib import Path
 
 from .observer import ObservationServer, credentials
 from .tasks import TaskLedger
+from .events import ObserverHeartbeat
 from . import observer_files as secure
 from tools import codex_config as config
+
+log = logging.getLogger("shion.chatgpt")
+
+
+def log_observation(event):
+    """Only validated metadata; logging failure must not interrupt observation."""
+    try:
+        log.info("观察事件：%s session=%s turn=%s", event.event,
+                 event.session_id[:8], event.turn_id[:8])
+    except Exception:
+        pass
 
 
 def observer_command():
@@ -31,6 +44,8 @@ class ChatGPTConnection:
         self.enabled = True
         self._last_notice = 0.0
         self._unobserved_start = True
+        self._disconnected_keys = set()
+        self._disconnect_notice_pending = False
 
     def start(self):
         try:
@@ -64,6 +79,11 @@ class ChatGPTConnection:
         notices = []
         if self.server:
             for event in self.server.inbox.drain():
+                if isinstance(event, ObserverHeartbeat):
+                    if self.enabled:
+                        self.ledger.heartbeat(event)
+                    continue
+                log_observation(event)
                 if self.enabled:
                     result = self.ledger.accept(event)
                     if result:
@@ -71,7 +91,17 @@ class ChatGPTConnection:
             if self.server.inbox.degraded.is_set():
                 self.ledger.disconnect()
         self.ledger.expire()
+        lost = {key for key, task in self.ledger.tasks.items()
+                if self.enabled and task.state == "disconnected"}
+        if not lost:
+            self._disconnect_notice_pending = False
+        self._disconnect_notice_pending |= bool(lost - self._disconnected_keys)
+        self._disconnected_keys = lost
         # Bounded neutral reminders; no success actions or affection path.
+        if self._disconnect_notice_pending and time.monotonic() - self._last_notice >= 2:
+            self._disconnect_notice_pending = False
+            self._last_notice = time.monotonic()
+            return "chatgpt_disconnected"
         if notices and time.monotonic() - self._last_notice >= 2:
             self._last_notice = time.monotonic()
             return "chatgpt_interrupted" if "interrupted" in notices else "chatgpt_ended"
@@ -80,8 +110,12 @@ class ChatGPTConnection:
     def status(self, ui):
         if not self.enabled:
             return ui("chatgpt_disabled")
-        return ui("chatgpt_status", count=self.ledger.working, received=self.ledger.received) + "\n" + ui(
+        text = ui("chatgpt_status", count=self.ledger.working, received=self.ledger.received) + "\n" + ui(
+            "chatgpt_disconnected" if self.ledger.disconnected else
             "chatgpt_uncertain" if self.error or self.ledger.pending or self._unobserved_start else "chatgpt_observation")
+        if any(t.permission_unknown and not t.terminal for t in self.ledger.tasks.values()):
+            text += "\n" + ui("chatgpt_permission_unknown")
+        return text
 
     def plan(self, uninstall=False):
         return config.uninstall_plan(self.home, self.private_directory) if uninstall else config.install_plan(

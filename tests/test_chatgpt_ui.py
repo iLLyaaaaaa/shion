@@ -15,11 +15,16 @@ def test_chatgpt_activity_cannot_enter_claude_controls_or_rewards(env, tmp_path)
     assert env.state.working_sessions(env.now) == []
     assert not ctl.can_interrupt()
     assert env.win.sprite_name == "working"
+    send("PermissionRequest")
+    assert env.win.sprite_name == "working"
+    assert env.state.observed_working
+    assert ctl.lines.ui("chatgpt_permission_unknown") in ctl.chatgpt.status(ctl.lines.ui)
     before = env.data.stats["claude_tasks"], env.data.affection
     send("Stop")
     send("Stop")
     assert before == (env.data.stats["claude_tasks"], env.data.affection)
     assert not env.state.observed_working
+    assert ctl.lines.ui("chatgpt_permission_unknown") not in ctl.chatgpt.status(ctl.lines.ui)
 
 
 def test_claude_and_chatgpt_finish_independently(env, tmp_path):
@@ -48,3 +53,28 @@ def test_localized_management_menu_does_not_write_config(env, tmp_path):
         assert len(chat.actions()) == 4
         assert "ChatGPT" in ctl.status_text()
         assert not home.exists()
+
+
+def test_lease_loss_is_neutral_and_does_not_stop_claude(env, tmp_path, monkeypatch):
+    from shion.tasks import TaskLedger
+    ctl = env.ctl
+    ctl.chatgpt = ChatGPTConnection(tmp_path / "data", tmp_path / "codex")
+    now = [0.0]
+    ctl.chatgpt.ledger = TaskLedger(clock=lambda: now[0])
+    notices = []
+    monkeypatch.setattr(ctl, "say", lambda text, **kw: notices.append(text))
+    ctl.handle_event("prompt", None, {"session": "claude"})
+    ctl.chatgpt.ledger.accept(parse_observation(dict(event="PreToolUse", session_id="s", turn_id="t",
+                                                   observer="isolated", leased=True)))
+    ctl.tick()
+    before = env.data.stats["claude_tasks"], env.data.affection
+    now[0] = 10.0
+    ctl.tick()
+    assert not env.state.observed_working and env.state.working_sessions(env.now) == ["claude"]
+    assert before == (env.data.stats["claude_tasks"], env.data.affection)
+    assert ctl.lines.ui("chatgpt_disconnected") in ctl.chatgpt.status(ctl.lines.ui)
+    assert ctl.lines.ui("chatgpt_disconnected") in notices
+    assert ctl.lines.ui("chatgpt_ended") not in notices
+    count = len(notices)
+    ctl.tick()
+    assert len(notices) == count

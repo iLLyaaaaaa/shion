@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from shion.events import EVENTS
+from shion.events import EVENTS, Observation
 from shion.observer import ObservationServer
 
 
@@ -103,7 +103,7 @@ def main():
     try:
         (data / "chatgpt-observer.json").write_text(json.dumps({"enabled": True, "port": server.server.server_port, "token": "a" * 64}))
         assert all(r["result"] == neutral for r in batch(rows + rows))
-        assert len(server.inbox.drain()) == 14
+        assert sum(isinstance(event, Observation) for event in server.inbox.drain()) == 14
         checks.append("online repeated events: 14/14 neutral and received")
         server.inbox.enabled = False
         assert all(r["result"] == neutral for r in batch(rows)) and not server.inbox.drain()

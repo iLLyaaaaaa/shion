@@ -55,6 +55,51 @@ def test_duplicate_sources_do_not_double_count():
     assert ledger.working == 1 and ledger.pending and ledger.duplicates == 1
 
 
+def test_permission_preserves_activity_until_terminal_or_expiry():
+    now = [0.0]
+    ledger = TaskLedger(clock=lambda: now[0])
+    ledger.accept(event("PreToolUse", tool_use_id="tool"))
+    ledger.accept(event("PermissionRequest"))
+    now[0] = 299.9
+    assert ledger.working == 1 and ledger.pending
+    ledger.accept(event("PostToolUse", tool_use_id="tool"))
+    assert ledger.working == 1 and ledger.pending
+    ledger.accept(event("Stop"))
+    assert ledger.working == 0
+    ledger.accept(event("PermissionRequest"))
+    assert ledger.working == 0
+
+
+def test_permission_does_not_revive_disconnected_or_expired_work():
+    now = [0.0]
+    ledger = TaskLedger(clock=lambda: now[0])
+    ledger.accept(event("PermissionRequest"))
+    assert ledger.working == 0
+    ledger.accept(event("PreToolUse", tool_use_id="tool"))
+    ledger.accept(event("PermissionRequest"))
+    now[0] = 300
+    ledger.accept(event("PermissionRequest"))
+    assert ledger.working == 0
+    ledger.accept(event("PreToolUse", tool_use_id="other"))
+    ledger.disconnect()
+    ledger.accept(event("PermissionRequest"))
+    assert ledger.working == 0
+
+
+def test_observation_log_is_short_metadata_and_fail_open(caplog, monkeypatch):
+    from shion.chatgpt import log_observation, log
+    observation = event("PermissionRequest", session="abcdefgh-private", turn="ijklmnop-private")
+    with caplog.at_level("INFO", logger="shion.chatgpt"):
+        log_observation(observation)
+    assert "PermissionRequest" in caplog.text
+    assert "abcdefgh" in caplog.text and "ijklmnop" in caplog.text
+    assert "private" not in caplog.text
+    def fail(*args, **kwargs):
+        raise OSError("unavailable")
+    monkeypatch.setattr(log, "info", fail)
+    log_observation(observation)
+
+
 @pytest.mark.parametrize("extra", [{"prompt": "secret"}, {"tool_input": {}}, {"token": "secret"},
                                     {"session_id": "x" * 129}, {"turn_id": "${turn_id}"}])
 def test_metadata_rejects_content_and_bad_ids(extra):

@@ -19,6 +19,9 @@ class Observation:
     observer: str = ""
     provider: str = "chatgpt"
     namespace: str = "codex-local"
+    client_surface: str = "unknown"
+    leased: bool = False
+    received_at: float | None = None  # Assigned by the inbox, never accepted from a client.
 
     @property
     def key(self):
@@ -26,7 +29,7 @@ class Observation:
 
 
 def parse_observation(data: object) -> Observation:
-    allowed = {"event", "session_id", "turn_id", "tool_use_id", "source", "observer"}
+    allowed = {"event", "session_id", "turn_id", "tool_use_id", "source", "observer", "leased"}
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError("metadata fields rejected")
     if data.get("event") not in EVENTS:
@@ -40,4 +43,21 @@ def parse_observation(data: object) -> Observation:
             raise ValueError("invalid metadata identifier")
     if values.get("source", "global") not in ("global", "project"):
         raise ValueError("unknown source")
+    if type(values.get("leased", False)) is not bool:
+        raise ValueError("invalid lease capability")
+    if values.get("leased") and not values["observer"]:
+        raise ValueError("lease needs an observer")
     return Observation(**values)
+
+
+@dataclass(frozen=True)
+class ObserverHeartbeat:
+    observer: str
+    received_at: float | None = None
+
+
+def parse_heartbeat(data: object) -> ObserverHeartbeat:
+    if (not isinstance(data, dict) or set(data) != {"observer"}
+            or not isinstance(data["observer"], str) or not ID.fullmatch(data["observer"])):
+        raise ValueError("invalid observer heartbeat")
+    return ObserverHeartbeat(data["observer"])

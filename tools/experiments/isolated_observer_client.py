@@ -14,6 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from shion.observer import ObservationServer
+from shion.events import Observation
 from tools import codex_config as config
 
 
@@ -72,7 +73,7 @@ def main():
                 assert reply.get("structuredContent") is None and reply.get("_meta") is None
                 assert set(reply) <= {"content", "isError", "structuredContent", "_meta"}
                 times.append((time.perf_counter()-begin)*1000)
-                count += len(server.inbox.drain())
+                count += sum(isinstance(event, Observation) for event in server.inbox.drain())
             report["synthetic_mcp"] = {"sent": 30, "received": count, "median_ms": statistics.median(times), "p95_ms": sorted(times)[28], "max_ms": max(times)}
             report["actual_hook_events"] = 0
             report["trust_modified"] = False
