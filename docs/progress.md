@@ -8,6 +8,7 @@
 - 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 是阶段 1 PermissionRequest 修复版本（当时核验 228 文件）。真实配置、Token、信任及原安装保持；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
 - 最近代码全量结果来自合并报告：**1829 passed、9 skipped、2 条既有 Pillow 警告，583.31 秒**；专项 25 passed、三组定向 86 passed。本次仅文档整理，不重跑测试、不打包，不将历史结果冒充本次执行。
+- 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，提交 `81b8361`，未合并、未 push、未打包）：右键菜单给 Claude Code 连接项单独标名，详见下方 2026-10-30 记录。合并前菜单文案以该分支为准，当前分支仍是旧文案“连接状态：…”。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -49,6 +50,7 @@
 - [ ] v1 桌面交互：Win+D 恢复、置顶与附属面板避让、透明区点穿、不抢焦点、多屏/高 DPI、四档尺寸、动态动作及爱心/Z/睡眠观感。
 - [ ] v1 Claude 实际联动：授权自动收起、暂停/继续、中断文字与工具分支、超时/静音、终端草稿与确认框保护、桌面复制“继续”、连接迁移不重复事件和登录自启。
 - [ ] 三语菜单/台词/气泡、对话数字键与焦点、每日额度/时段问候/等级与存档迁移；逐项条件见归档，自动化通过不能替代用户观感。
+- [ ] 菜单标名（`feature/menu-claude-label`）：真机右键看顶层“Claude Code：…”状态行，以及“AI 连接 › Claude Code › / ChatGPT ›”两个子菜单的展开位置、宽度和 tooltip（高 DPI、多屏）；离屏渲染截图不代替真机观感。
 
 ## v1.1 待办
 - [ ] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）
@@ -60,6 +62,7 @@
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-10-30 菜单给 Claude Code 标名**（分支 `feature/menu-claude-label`，`81b8361`）：顶层状态行改为“Claude Code：{状态}”；“AI 连接”拆成并列的“Claude Code ›”（禁用状态行 + 连接/重连/断开，tooltip 不变）和“ChatGPT ›”（原子菜单迁入，未启用 ChatGPT 时只剩前者）。新增 `menu_connection_status`、`menu_claude`、`menu_chatgpt` 三个 key，没有改 `connection_status`（双击状态气泡仍用）和 `chatgpt_manage`（ChatGPT 面板窗口标题），所以气泡和面板标题仍不出现 Claude。spec 品牌规则改为只有连接类标签可写“Claude Code”，`test_lines.py` 按新边界断言，其余文案仍不含 Claude。`scheduler_disabled_a55825f.json` 只刷新了 `menu_sha256`（菜单形状变了），其余字段未动。验证：全量 1820 passed、8 skipped、10 failed；10 个失败都在 `test_process_sheets.py`，原因是 worktree 缺被忽略的 `assets/sprites/raw/`，链接后 14 项全过，主仓库同样通过，不是本次改动造成；`render_menu.py --platform windows` 三语截图无截断或过宽（最宽为 en 路径失效状态行，约 450px）。未打包、未 push、未部署。
 - **2026-10-29 文档整理**：8 份原未跟踪实验文档和 2 个脚本纳入本地版本管理；加上迁移的合并报告共 9 份文档。ACL 报告与探针标记废弃；先暂存扫描再脱敏。进度历史原文按月归档，首页改为当前交接摘要；没有修改产品代码、测试或实验脚本运行逻辑，没有打包、部署或 push。
 - **2026-10-29 合并与审查**：热修和 V2 已合并；GUI 空档恢复审查修复已保留，最新验证及历史扫描限制见合并报告。早先热修 worktree 的失败记录留在归档，不覆盖本次合并全量结果。
 - **2026-10-29 阶段 2**：租约与 P1～P5 核心、菜单及 GUI 隔离接入完成；真实能力缺口和默认关闭边界继续保留。
