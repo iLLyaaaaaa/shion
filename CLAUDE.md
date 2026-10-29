@@ -3,7 +3,7 @@
 用 Python + PySide6 做的 Windows 桌宠，可以通过 hooks 和 Claude Code 联动（显示工作状态、同意/否决、暂停/继续、反馈）。非官方粉丝作品。
 
 ## 每次会话开始时
-1. 先读 `docs/progress.md`，弄清楚做到哪一步、下一步做什么
+1. 先读 `docs/progress.md` 的当前状态、下一步和未完成人工验收清单；历史在 `docs/progress-archive/` 按月归档，需要查历史时用 grep 搜归档，不要通读
 2. 只读 `docs/spec.md` 中**和当前这一步有关的章节**，不要通读全文
 3. 一个会话只做 progress.md 里的**一个步骤**
 
