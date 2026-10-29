@@ -223,6 +223,10 @@ class PermissionPanel(QWidget):
         self._toggle.setObjectName("toggle")
         self._toggle.setFocusPolicy(Qt.NoFocus)
         self._more_label = QLabel()
+        self._observation_hint = QLabel()
+        self._observation_hint.setTextFormat(Qt.PlainText)
+        self._observation_hint.setWordWrap(True)
+        self._observation_hint.hide()
         self._allow = MouseOnlyButton()
         self._allow.setObjectName("allow")
         self._deny = MouseOnlyButton()
@@ -243,6 +247,7 @@ class PermissionPanel(QWidget):
         layout.addLayout(top)
         layout.addWidget(self._detail)
         layout.addLayout(bottom)
+        layout.addWidget(self._observation_hint)
 
         self._allow.clicked.connect(lambda: self._click(True))
         self._deny.clicked.connect(lambda: self._click(False))
@@ -286,6 +291,12 @@ class PermissionPanel(QWidget):
     def set_more(self, n: int) -> None:
         self._more = n
         self._more_label.setText(self._texts["more"].format(n=n) if n > 0 else "")
+
+    def set_observation_hint(self, text):
+        self._observation_hint.setText(text)
+        self._observation_hint.setVisible(bool(text))
+        self.adjustSize()
+        self.follow(self._body)
 
     def follow(self, body: tuple[int, int, int, int]) -> None:
         self._body = body

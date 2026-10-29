@@ -39,6 +39,7 @@ class TaskLedger:
         self.tasks = OrderedDict()
         self.uncertain = False
         self.received = 0
+        self.received_by_provider = {}
         self.duplicates = 0
         self.lease_ttl = lease_ttl
         self.leases: dict[str, ObserverLease] = {}
@@ -64,6 +65,7 @@ class TaskLedger:
     def accept(self, event: Observation):
         self.expire()
         self.received += 1
+        self.received_by_provider[event.provider] = self.received_by_provider.get(event.provider, 0) + 1
         # A duplicate packet can prove transport life, never task continuity.
         if event.leased:
             self.heartbeat(ObserverHeartbeat(event.observer, event.received_at))
@@ -148,9 +150,11 @@ class TaskLedger:
             elif self.clock() - task.last >= self.ttl:
                 task.state = "uncertain"
 
-    def disconnect(self):
+    def disconnect(self, provider=None):
         self.uncertain = True
-        for task in self.tasks.values():
+        for key, task in self.tasks.items():
+            if provider is not None and key[0] != provider:
+                continue
             if not task.terminal:
                 task.state = "disconnected"
                 task.continuity_lost = True

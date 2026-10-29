@@ -1,6 +1,5 @@
 """Simulated acceptance of the opt-in core, not client/GUI acceptance."""
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -20,15 +19,12 @@ def core():
     return scheduler, now
 
 
-def test_default_off_and_no_production_gui_import():
+def test_default_off():
     scheduler = Scheduler()
     scheduler.observe(event())
     scheduler.open_request(event("PermissionRequest"), "r")
     scheduler.confirm_coverage()
     assert scheduler.select() is None and not scheduler.ledger.tasks and not scheduler.requests
-    root = Path(__file__).resolve().parents[1]
-    for file in ("controller.py", "app.py", "bridge.py", "state.py"):
-        assert "import Scheduler" not in (root / "shion" / file).read_text(encoding="utf-8")
 
 
 def test_identity_isolation_background_and_ui_brands(core):

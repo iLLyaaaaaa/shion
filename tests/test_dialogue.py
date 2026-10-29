@@ -210,7 +210,7 @@ def click_button(panel, text):
 
 def test_menu_opens_without_keyboard_arming_and_click_enables_navigation(env, qapp):
     menu = env.ctl.build_menu()
-    find_action(menu, "对话").trigger()
+    find_action(menu, "互动").trigger()
     panel = env.ctl._dialogue
     assert panel.isVisible() and not panel.keyboard_ready
     assert panel.testAttribute(Qt.WA_ShowWithoutActivating)

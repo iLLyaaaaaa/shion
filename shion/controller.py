@@ -35,6 +35,7 @@ from shion.runtime import console_send_command, hook_process_images
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
 from shion.state import ACTIVITY_LEVELS, EXPRESSIONS, PetState, Reaction, SaveScheduler
+from shion.scheduler_gui import SchedulerGUI
 
 log = logging.getLogger("shion.controller")
 
@@ -109,6 +110,8 @@ class PetController(QObject):
         self._about: Optional[QMessageBox] = None
         self.connection = HookConnection()
         self.chatgpt = None  # Started by app; isolated from Claude RemoteHub.
+        self.v2 = SchedulerGUI(window.monotonic_time, state.save.v2_scheduler_enabled)
+        self._observation_hint = None
         self.startup = Startup()
         self._connection_panel: Optional[ConnectionPanel] = None
         self._connection_onboarding = False
@@ -167,6 +170,10 @@ class PetController(QObject):
         """把状态机当前应显示的精灵同步给窗口（只在变化时切换，不打断呼吸相位）。"""
         now = self._now()
         cur = self.state.current(now)
+        if self.v2.core.enabled:
+            self.v2.refresh(claude_working=self.state.is_working(now), permissions=self.hub.permissions.pending())
+            cur = self.v2.sprite(cur, protected=(cur == "drag" or self.state.paused
+                or bool(self.state.save.fixed_expression) or self.state.eating))
         if cur == "neglect1" and not self._neglect_checked:
             self._neglect_checked = True
             if self._rng.random() < NEGLECT_DESK_CHANCE:
@@ -193,17 +200,24 @@ class PetController(QObject):
     def tick(self) -> None:
         now = self._now()
         if self.chatgpt is not None:
+            if self.v2.core.enabled:
+                self.v2.attach(self.chatgpt)
             notice = self.chatgpt.poll()
-            self.state.observed_working = bool(self.chatgpt.enabled and self.chatgpt.ledger.working)
-            if notice:
+            self.state.observed_working = bool(self.chatgpt.enabled and self.chatgpt.working)
+            if notice and not self.v2.core.enabled:
                 self.say(self.lines.ui(notice), category="chatgpt_observation")
         self._sync_pause()
         self._sync_permission()
         self.react(self.state.tick(now))
         self.sync()
+        if self.v2.core.enabled:
+            if self.v2.notice() and not self.state.save.bubble_muted:
+                self.say(self.v2.text(self.lines.ui), priority=Priority.HIGH, category="v2_observation")
+            self._sync_observation_hint()
         self._sync_connection_prompt()
         action = self._idle.step(
             self.window.monotonic_time(), self.state.can_idle(now)
+            and not (self.v2.core.enabled and self.v2.display and self.v2.display.priority < 5)
             and not self.window.motion_active and not self.window.is_falling
             and not self.window.is_pressed and not self._menu_open
             and not (self._dialogue is not None and self._dialogue.isVisible())
@@ -238,6 +252,10 @@ class PetController(QObject):
     def react(self, reactions: list[Reaction], *, category: str | None = None) -> None:
         # 同一个 tick 也可能有催回提醒；升级放在本批最后，避免刚说出口就被盖掉。
         for r in sorted(reactions, key=lambda item: item.kind == "level_up"):
+            if self.v2.core.enabled and self.v2.display is not None and r.kind == "say":
+                rank = {"claude_done": 3, "nudge": 3, "claude_working": 4, "tool_error": 2}.get(r.key)
+                if rank is not None and self.v2.display.priority < rank:
+                    continue
             if r.kind == "say":
                 self.say_key(r.key, category=category)
             elif r.kind == "level_up" and self.state.affection is not None:
@@ -533,7 +551,8 @@ class PetController(QObject):
                 self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z)
 
     def _dialog_windows(self):
-        return (self._dialogue, self._input_panel, self._perm_panel, self._about, self._connection_panel)
+        return (self._dialogue, self._input_panel, self._perm_panel, self._about, self._connection_panel,
+                self._observation_hint)
 
     def _apply_topmost(self) -> None:
         if self.state.save.always_on_top:
@@ -646,6 +665,8 @@ class PetController(QObject):
             self._bring_forward()
 
     def _say_activity(self, text: str, now: datetime) -> None:
+        if self.v2.core.enabled and self.v2.display is not None and self.v2.display.priority < 4:
+            return
         last = self._last_activity_say
         if last and last[0] == text and now - last[1] < ACTIVITY_REPEAT:
             return
@@ -871,7 +892,7 @@ class PetController(QObject):
     def _permission_texts(self) -> dict[str, str]:
         ui = self.lines.ui
         return {
-            "title": ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
+            "title": ("Claude · " if self.v2.core.enabled else "") + ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
             "more": ui("permission_more"), "expand": ui("permission_expand"),
             "collapse": ui("permission_collapse"),
         }
@@ -912,7 +933,42 @@ class PetController(QObject):
         if self.hub.permissions.decide(rid, allow):
             log.info("授权决定：%s", "同意" if allow else "否决")
         self._sync_permission()
+        if self.v2.core.enabled:
+            self.sync()
+            self._sync_observation_hint()
         self._try_time_speech()
+
+    def set_v2_scheduler_enabled(self, enabled: bool) -> None:
+        """Explicit developer switch; no user configuration migration or hooks."""
+        if type(enabled) is not bool:
+            raise ValueError("scheduler switch must be boolean")
+        if enabled and self.chatgpt is not None:
+            self.v2.attach(self.chatgpt)
+        self.v2.set_enabled(enabled)
+        self.state.save.v2_scheduler_enabled = enabled
+        self.scheduler.mark_dirty(self._now())
+        self._sync_observation_hint()
+        self.sync()
+
+    def observe_v2(self, event) -> None:
+        """GUI-thread adapter for validated metadata (also the isolated preview seam)."""
+        if self.chatgpt is not None and self.v2.core.enabled:
+            self.v2.attach(self.chatgpt)
+        self.v2.observe(event)
+
+    def _sync_observation_hint(self):
+        pending = self.v2.pending_chatgpt() and (self.chatgpt is None or self.chatgpt.enabled)
+        text = self.lines.ui("v2_chatgpt_permission") if pending else ""
+        panel = self._perm_panel
+        if panel is not None:
+            panel.set_observation_hint(text if panel.isVisible() else "")
+        if text and not (panel is not None and panel.isVisible()):
+            if self._observation_hint is None:
+                from shion.observation_hint import ObservationHint
+                self._observation_hint = ObservationHint()
+            self._observation_hint.present(text, self.window.body_rect())
+        elif self._observation_hint is not None:
+            self._observation_hint.hide()
 
     def feedback_good(self) -> None:
         self.react(self.state.feedback_good(self._now()))
@@ -958,7 +1014,7 @@ class PetController(QObject):
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
         self._foreground.stop()
         self.state.cancel_snack()
-        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel):
+        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel, self._observation_hint):
             if panel is not None:
                 panel.hide()
                 panel.setParent(None)
@@ -966,13 +1022,14 @@ class PetController(QObject):
         self._perm_panel = self._input_panel = None
         self._dialogue = self._crumbs = None
         self._connection_panel = None
+        self._observation_hint = None
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:
         self._foreground.stop()
         self.window.stop_motion()
         self.state.cancel_snack()
-        for panel in (self._dialogue, self._crumbs, self._connection_panel):
+        for panel in (self._dialogue, self._crumbs, self._connection_panel, self._observation_hint):
             if panel is not None:
                 panel.hide()
         if self._perm_panel is not None:
@@ -1016,6 +1073,8 @@ class PetController(QObject):
         text += "\n" + self.connection_status_text()
         if self.chatgpt is not None:
             text += "\n" + self.chatgpt.status(ui)
+        if self.v2.core.enabled:
+            text += "\n" + self.v2.text(ui)
         return text
 
     def _show_status(self) -> None:
@@ -1146,6 +1205,7 @@ class PetController(QObject):
 
     def build_menu(self) -> QMenu:
         menu = QMenu()
+        menu.setToolTipsVisible(True)  # QMenu 默认不显示 tooltip；ChatGPT 状态全文要靠它
         ui = self.lines.ui
         menu.addAction(ui("menu_talk")).triggered.connect(self.open_dialogue)
         remote_menu = menu.addMenu(ui("menu_remote"))
@@ -1164,7 +1224,8 @@ class PetController(QObject):
         remote_menu.addAction(ui("menu_good")).triggered.connect(self.feedback_good)
         remote_menu.addAction(ui("menu_bad")).triggered.connect(self.open_bad_feedback)
 
-        expression_menu = menu.addMenu(ui("menu_expression"))
+        pet_menu = menu.addMenu(ui("menu_pet"))
+        expression_menu = pet_menu.addMenu(ui("menu_expression"))
         expression_group = QActionGroup(expression_menu)
         expression_group.setExclusive(True)
         cur_expression = self.state.current(self._now())
@@ -1181,7 +1242,7 @@ class PetController(QObject):
         fixed.triggered.connect(self.fix_expression)
         expression_menu.addAction(ui("menu_auto_expression")).triggered.connect(lambda: self.fix_expression(False))
 
-        activity_menu = menu.addMenu(ui("menu_activity"))
+        activity_menu = pet_menu.addMenu(ui("menu_activity"))
         activity_group = QActionGroup(activity_menu)
         activity_group.setExclusive(True)
         for level in ACTIVITY_LEVELS:
@@ -1191,11 +1252,11 @@ class PetController(QObject):
             activity_group.addAction(act)
             act.triggered.connect(lambda _=False, lv=level: self.set_activity(lv))
 
-        action_menu = menu.addMenu(ui("menu_action"))
+        action_menu = pet_menu.addMenu(ui("menu_action"))
         for name in ("jump", "turn", "face", "bed", "desk"):
             action_menu.addAction(ui("action_" + name)).triggered.connect(lambda _=False, n=name: self.do_action(n))
 
-        size_menu = menu.addMenu(ui("menu_size"))
+        size_menu = pet_menu.addMenu(ui("menu_size"))
         group = QActionGroup(size_menu)
         group.setExclusive(True)
         cur = self.state.save.window.get("height", 200)
@@ -1206,15 +1267,16 @@ class PetController(QObject):
             group.addAction(act)
             act.triggered.connect(lambda _=False, h=h: self.set_size(h))
 
-        release = menu.addAction(ui("menu_release_to_taskbar"))
-        release.setCheckable(True)
-        release.setChecked(self.state.save.release_to_taskbar)
-        release.triggered.connect(self.set_release_to_taskbar)
-
-        topmost = menu.addAction(ui("menu_always_on_top"))
+        pet_menu.addSeparator()
+        topmost = pet_menu.addAction(ui("menu_always_on_top"))
         topmost.setCheckable(True)
         topmost.setChecked(self.state.save.always_on_top)
         topmost.triggered.connect(self.set_always_on_top)
+
+        release = pet_menu.addAction(ui("menu_release_to_taskbar"))
+        release.setCheckable(True)
+        release.setChecked(self.state.save.release_to_taskbar)
+        release.triggered.connect(self.set_release_to_taskbar)
 
         mute = menu.addAction(ui("menu_mute"))
         mute.setCheckable(True)
@@ -1226,7 +1288,51 @@ class PetController(QObject):
         privacy.setChecked(self.state.save.privacy_mode)
         privacy.triggered.connect(self.set_privacy)
 
-        lang_menu = menu.addMenu(ui("menu_language"))
+        menu.addSeparator()
+        connection = self.connection.inspect()
+        status_action = menu.addAction(ui("connection_status", state=ui("connection_" + connection.state)))
+        if self.v2.core.enabled:
+            full_status = self.v2.text(ui)
+            status_action.setText(menu.fontMetrics().elidedText(full_status, Qt.ElideRight, 240))
+            status_action.setToolTip(full_status)
+        status_action.setEnabled(False)
+        if self.chatgpt is not None:
+            # 完整状态是多行长句，放在顶层会把整个菜单撑得很宽：顶层只放状态那一行并截断，全文在 tooltip 和 ChatGPT 子菜单里。
+            full = self.chatgpt.status(ui)
+            lines = full.split("\n")
+            line = menu.addAction(menu.fontMetrics().elidedText(lines[1] if len(lines) > 1 else lines[0], Qt.ElideRight, 240))
+            line.setEnabled(False)
+            line.setToolTip(full)
+
+        ai_menu = menu.addMenu(ui("menu_ai"))
+        ai_menu.setToolTipsVisible(True)  # 连接详情
+        connection_actions = []
+        if connection.state != "connected":
+            label = "menu_reconnect" if connection.state == "stale" else "menu_connect"
+            connection_actions.append(ai_menu.addAction(ui(label)))
+            connection_actions[-1].triggered.connect(lambda: self.open_connection())
+        if connection.state in ("connected", "stale", "error"):
+            connection_actions.append(ai_menu.addAction(ui("menu_disconnect")))
+            connection_actions[-1].triggered.connect(self.disconnect)
+        if connection.detail:  # 原来挂在“状态/连接/断开”里最后添加的一项上，重排后仍挂在它
+            connection_actions[-1].setToolTip(connection.detail)
+        if self.chatgpt is not None:
+            from shion.chatgpt import review_connection
+            chat = ai_menu.addMenu(ui("chatgpt_manage"))
+            chat.setToolTipsVisible(True)  # 被截断的状态行全文
+            for line in self.chatgpt.status(ui).split("\n"):  # 多行状态逐行显示；拼成一条要 660~800 逻辑像素宽
+                text = chat.fontMetrics().elidedText(line, Qt.ElideRight, 360)
+                row = chat.addAction(text)
+                row.setEnabled(False)
+                if text != line:
+                    row.setToolTip(line)
+            chat.addAction(ui("chatgpt_install")).triggered.connect(lambda: review_connection(self))
+            chat.addAction(ui("chatgpt_disable" if self.chatgpt.enabled else "chatgpt_enable")).triggered.connect(self.toggle_chatgpt)
+            chat.addAction(ui("chatgpt_uninstall")).triggered.connect(lambda: review_connection(self, True))
+
+        settings_menu = menu.addMenu(ui("menu_settings"))
+        settings_menu.setToolTipsVisible(True)  # 开机自启错误
+        lang_menu = settings_menu.addMenu(ui("menu_language"))
         lang_group = QActionGroup(lang_menu)
         lang_group.setExclusive(True)
         for code, name in self.lines.available_languages():
@@ -1236,25 +1342,7 @@ class PetController(QObject):
             lang_group.addAction(act)
             act.triggered.connect(lambda _=False, c=code: self.set_language(c))
 
-        menu.addSeparator()
-        connection = self.connection.inspect()
-        if self.chatgpt is not None:
-            from shion.chatgpt import review_connection
-            chat = menu.addMenu(ui("chatgpt_manage"))
-            chat.addAction(self.chatgpt.status(ui)).setEnabled(False)
-            chat.addAction(ui("chatgpt_install")).triggered.connect(lambda: review_connection(self))
-            chat.addAction(ui("chatgpt_disable" if self.chatgpt.enabled else "chatgpt_enable")).triggered.connect(self.toggle_chatgpt)
-            chat.addAction(ui("chatgpt_uninstall")).triggered.connect(lambda: review_connection(self, True))
-        menu.addAction(ui("connection_status", state=ui("connection_" + connection.state))).setEnabled(False)
-        if connection.state != "connected":
-            label = "menu_reconnect" if connection.state == "stale" else "menu_connect"
-            menu.addAction(ui(label)).triggered.connect(lambda: self.open_connection())
-        if connection.state in ("connected", "stale", "error"):
-            menu.addAction(ui("menu_disconnect")).triggered.connect(self.disconnect)
-        if connection.detail:
-            menu.actions()[-1].setToolTip(connection.detail)
-
-        auto = menu.addAction(ui("menu_autostart"))
+        auto = settings_menu.addAction(ui("menu_autostart"))
         auto.setCheckable(True)
         try:
             startup = self.startup.inspect()

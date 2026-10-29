@@ -1,7 +1,7 @@
 """Opt-in, metadata-only Phase 2 core. No GUI, filesystem, network or controls.
 
-Adapters must establish capabilities and verified foreground identity. The
-production controller deliberately does not import or instantiate this module.
+Adapters must establish capabilities and verified foreground identity. The GUI
+adapter is opt-in and cannot grant capabilities to an observation source.
 """
 from __future__ import annotations
 
@@ -237,10 +237,16 @@ class Scheduler:
     def _identity(display):
         return display.priority, display.state, display.tasks, display.request_id, display.token
 
-    def select(self):
+    def select(self, supplements=()):
         candidates = self.candidates()
         if not candidates:
             return None
+        # Trusted legacy GUI state has no turn identity. It may participate in
+        # presentation only; never manufacture a TaskLedger key for it.
+        if supplements:
+            candidates = [d for d in candidates if not (
+                d.state == "uncertain" and not d.tasks and not self.ledger.uncertain
+                and not self.degraded)] + list(supplements)
         priority = min(d.priority for d in candidates)
         choices = [d for d in candidates if d.priority == priority]
         current = next((d for d in choices if self._current and

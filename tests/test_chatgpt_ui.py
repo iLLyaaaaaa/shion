@@ -49,8 +49,11 @@ def test_localized_management_menu_does_not_write_config(env, tmp_path):
     for lang in ("zh", "en", "ja"):
         ctl.set_language(lang)
         menu = ctl.build_menu()
-        chat = next(a.menu() for a in menu.actions() if a.text() == ctl.lines.ui("chatgpt_manage"))
-        assert len(chat.actions()) == 4
+        ai = next(a.menu() for a in menu.actions() if a.text() == ctl.lines.ui("menu_ai"))
+        chat = next(a.menu() for a in ai.actions() if a.text() == ctl.lines.ui("chatgpt_manage"))
+        assert len(chat.actions()) == len(ctl.chatgpt.status(ctl.lines.ui).split("\n")) + 3  # 状态逐行 + 安装/启停/卸载
+        assert not {ctl.lines.ui(k) for k in ("menu_stop", "menu_interrupt", "menu_resume", "menu_good", "menu_bad")} & {
+            a.text() for a in chat.actions()}
         assert "ChatGPT" in ctl.status_text()
         assert not home.exists()
 

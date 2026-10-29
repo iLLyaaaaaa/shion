@@ -200,6 +200,7 @@ class SaveData:
     snacks: dict = field(default_factory=lambda: {"date": "", "count": 0})
     release_to_taskbar: bool = False
     always_on_top: bool = True
+    v2_scheduler_enabled: bool = False
     time_speech: dict = field(default_factory=lambda: {"date": "", "spoken": []})
     connection_prompt: Optional[str] = None  # pending / connect / later / skipped；旧档启动时标 skipped
 
@@ -224,6 +225,7 @@ class SaveData:
             "snacks": dict(self.snacks),
             "release_to_taskbar": self.release_to_taskbar,
             "always_on_top": self.always_on_top,
+            "v2_scheduler_enabled": self.v2_scheduler_enabled,
             "time_speech": {"date": self.time_speech["date"], "spoken": list(self.time_speech["spoken"])},
             "connection_prompt": self.connection_prompt,
         }
@@ -261,6 +263,7 @@ class SaveData:
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
         d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)
         d.always_on_top = _bool(raw.get("always_on_top"), True)
+        d.v2_scheduler_enabled = _bool(raw.get("v2_scheduler_enabled"), False)
         d.time_speech = _time_speech_record(raw.get("time_speech"))
         prompt = raw.get("connection_prompt")
         d.connection_prompt = prompt if prompt in ("pending", "connect", "later", "skipped") else None

@@ -187,16 +187,33 @@ def test_real_mouse_drag_keeps_drag_sprite_while_falling(env):
 
 
 def find_action(menu, text):
+    """先找顶层，再深度优先找子菜单（菜单已分组：多数项在「桌宠」「设置」等子菜单里）。"""
     for a in menu.actions():
         if a.text() == text:
             return a
+    for a in menu.actions():
+        if a.menu() is not None:
+            try:
+                return find_action(a.menu(), text)
+            except AssertionError:
+                pass
     raise AssertionError(f"菜单里没有 {text!r}：{[a.text() for a in menu.actions()]}")
+
+
+def menu_tree(menu):
+    """菜单的纯文本结构：分隔线记为 '-'，子菜单记为 (标题, [子项…])。"""
+    return [("-" if a.isSeparator() else (a.text(), menu_tree(a.menu())) if a.menu() is not None else a.text())
+            for a in menu.actions()]
 
 
 def test_menu_contents(env):
     menu = env.ctl.build_menu()
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["对话", "工作遥控", "表情", "活跃度", "动作", "大小", "松手后落到任务栏", "置于最上层", "静音气泡", "只显示状态，不显示内容", "语言", "连接状态：未连接", "连接 Claude Code", "开机自启", "关于", "退出"]
+    assert texts == ["互动", "工作遥控", "桌宠", "静音气泡", "只显示状态，不显示内容", "连接状态：未连接", "AI 连接", "设置", "关于", "退出"]
+    assert [a.text() for a in find_action(menu, "桌宠").menu().actions() if not a.isSeparator()] == [
+        "表情", "活跃度", "动作", "大小", "置于最上层", "松手后落到任务栏"]
+    assert [a.text() for a in find_action(menu, "AI 连接").menu().actions()] == ["连接 Claude Code"]
+    assert [a.text() for a in find_action(menu, "设置").menu().actions()] == ["语言", "开机自启"]
     assert find_action(menu, "开机自启").isCheckable()
     assert not find_action(menu, "开机自启").isChecked()
     sizes = find_action(menu, "大小").menu().actions()
@@ -581,7 +598,7 @@ def test_switch_language_applies_immediately_and_saves(env):
     assert env.data.language == "en"
     menu2 = env.ctl.build_menu()
     assert [a.text() for a in menu2.actions() if not a.isSeparator()][:4] == [
-        "Talk", "Work remote", "Expression", "Activity",
+        "Interact", "Work remote", "Pet", "Mute speech bubbles",
     ]
     assert "Together for 0m" in env.ctl.status_text(T0)
     assert "Pats today: 0" in env.ctl.status_text(T0)

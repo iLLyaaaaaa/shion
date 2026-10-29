@@ -144,7 +144,7 @@ def test_browsing_or_cancelling_context_menu_preserves_state_and_motion(env, sce
         def exec(self, pos):
             visited.append(True)
             assert env.ctl._menu_open
-            menu.setActiveAction(find_action(menu, "动作"))
+            menu.setActiveAction(find_action(menu, "桌宠"))
             hover(env.win)
             assert snapshot(env) == before
             return None  # 模拟 Esc / 点到菜单外取消，不触发 QAction。

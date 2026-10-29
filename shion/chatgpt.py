@@ -39,6 +39,7 @@ class ChatGPTConnection:
         self.private_directory = self.directory
         self.home = home or config.codex_home()
         self.ledger = TaskLedger()
+        self.presentation = None  # Optional GUI scheduler; shares this ledger.
         self.server = None
         self.error = False
         self.enabled = True
@@ -73,7 +74,12 @@ class ChatGPTConnection:
             self.server.inbox.enabled = self.enabled
             self.server.inbox.drain()
         # Keep dedup tombstones across disable/enable; no Claude mutations.
-        self.ledger.disconnect()
+        self.ledger.disconnect(provider="chatgpt")
+
+    @property
+    def working(self):
+        self.ledger.expire()
+        return sum(t.state == "observed_working" for k, t in self.ledger.tasks.items() if k[0] == "chatgpt")
 
     def poll(self):
         notices = []
@@ -85,14 +91,18 @@ class ChatGPTConnection:
                     continue
                 log_observation(event)
                 if self.enabled:
-                    result = self.ledger.accept(event)
+                    if self.presentation is not None and self.presentation.enabled:
+                        self.presentation.observe(event)
+                        result = None
+                    else:
+                        result = self.ledger.accept(event)
                     if result:
                         notices.append(result)
             if self.server.inbox.degraded.is_set():
-                self.ledger.disconnect()
+                self.ledger.disconnect(provider="chatgpt")
         self.ledger.expire()
         lost = {key for key, task in self.ledger.tasks.items()
-                if self.enabled and task.state == "disconnected"}
+                if self.enabled and key[0] == "chatgpt" and task.state == "disconnected"}
         if not lost:
             self._disconnect_notice_pending = False
         self._disconnect_notice_pending |= bool(lost - self._disconnected_keys)
@@ -110,10 +120,11 @@ class ChatGPTConnection:
     def status(self, ui):
         if not self.enabled:
             return ui("chatgpt_disabled")
-        text = ui("chatgpt_status", count=self.ledger.working, received=self.ledger.received) + "\n" + ui(
-            "chatgpt_disconnected" if self.ledger.disconnected else
-            "chatgpt_uncertain" if self.error or self.ledger.pending or self._unobserved_start else "chatgpt_observation")
-        if any(t.permission_unknown and not t.terminal for t in self.ledger.tasks.values()):
+        tasks = [t for k, t in self.ledger.tasks.items() if k[0] == "chatgpt"]
+        text = ui("chatgpt_status", count=self.working, received=self.ledger.received_by_provider.get("chatgpt", 0)) + "\n" + ui(
+            "chatgpt_disconnected" if any(t.state == "disconnected" for t in tasks) else
+            "chatgpt_uncertain" if self.error or self.ledger.uncertain or any(t.state == "uncertain" for t in tasks) or self._unobserved_start else "chatgpt_observation")
+        if any(t.permission_unknown and not t.terminal for t in tasks):
             text += "\n" + ui("chatgpt_permission_unknown")
         return text
 
