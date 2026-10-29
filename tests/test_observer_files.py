@@ -1,8 +1,10 @@
 """Native replacement faults must preserve evidence and never weaken checks."""
 import ctypes
 from ctypes import wintypes
+from collections import Counter
 from contextlib import contextmanager
 import os
+import struct
 import time
 
 import pytest
@@ -11,6 +13,41 @@ from shion import observer_files as S
 from tools import codex_config as C
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows native file replacement")
+
+
+def security_permissions(path):
+    """Compare permissions without the two Windows-normalized inheritance bits."""
+    get = ctypes.WinDLL("advapi32", use_last_error=True).GetFileSecurityW
+    get.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID,
+                    wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    get.restype = wintypes.BOOL
+    needed = wintypes.DWORD()
+    get(str(path), 7, None, 0, ctypes.byref(needed))  # owner, group, DACL
+    if not 0 < needed.value <= 65536:
+        raise ctypes.WinError(ctypes.get_last_error())
+    buffer = ctypes.create_string_buffer(needed.value)
+    if not get(str(path), 7, buffer, len(buffer), ctypes.byref(needed)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    raw = buffer.raw[:needed.value]
+    revision, reserved, control, owner, group, sacl, dacl = struct.unpack_from("<BBH4I", raw)
+    assert control & 0x8000 and not sacl  # self-relative, no SACL requested
+
+    def sid(offset):
+        return raw[offset:offset + 8 + 4 * raw[offset + 1]] if offset else None
+
+    acl = None  # Keep a null DACL distinct from an empty DACL.
+    if dacl:
+        acl_size, ace_count = struct.unpack_from("<HH", raw, dacl + 2)
+        offset, aces = dacl + 8, Counter()
+        for _ in range(ace_count):
+            ace_type, flags, ace_size = struct.unpack_from("<BBH", raw, offset)
+            # Retain the access mask, SID, and any type-specific ACE data,
+            # plus every flag except INHERITED_ACE (0x10).
+            aces[(ace_type, flags & ~0x10, raw[offset + 4:offset + ace_size])] += 1
+            offset += ace_size
+        acl = (raw[dacl:dacl + 8], aces, raw[offset:dacl + acl_size])
+    # Ignore only SE_DACL_AUTO_INHERITED in descriptor control flags.
+    return (revision, reserved, control & ~0x0400, sid(owner), sid(group), acl)
 
 
 @contextmanager
@@ -34,7 +71,7 @@ def held_file(path):
 def test_retry_only_known_unchanged_state(tmp_path, monkeypatch, code):
     path = tmp_path / "config.toml"
     path.write_bytes(b"old\n")
-    security = S._security_digest(path)
+    security = security_permissions(path)
     # Injected errors use a deterministic retry clock. Real scheduler/FS load
     # may legitimately exhaust the budget before the fourth call; native
     # contention and the expired-budget branch are tested separately below.
@@ -52,7 +89,7 @@ def test_retry_only_known_unchanged_state(tmp_path, monkeypatch, code):
     S.replace_private(path, b"new\n", preserve_security=True)
     assert time.monotonic() - start < .75
     assert len(calls) == 4 and path.read_bytes() == b"new\n"
-    assert S._security_digest(path) == security
+    assert security_permissions(path) == security
     assert not S.staging_path(path).exists()
 
 
