@@ -102,6 +102,7 @@ def test_stop_wire_payload_has_no_detail(monkeypatch):
     calls = []
     monkeypatch.setattr(h.sys, "argv", [str(HOOK), "Stop"])
     monkeypatch.setattr(h, "read_input", lambda: {"last_assistant_message": "私密回复"})
+    monkeypatch.setattr(h, "shion_running", lambda: None)  # 不依赖本机有没有诗音在运行
     monkeypatch.setattr(h, "request", lambda path, payload=None: calls.append((path, payload)))
     h.main()
     assert calls == [("/event", {"type": "stop"})]

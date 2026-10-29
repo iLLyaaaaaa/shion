@@ -21,11 +21,16 @@ import sys
 import threading
 import re
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 from pathlib import Path
 
 TIMEOUT = 0.5
+INSTANCE_NAME = "ShionDesktopPet-single-instance"  # 和 shion/app.py 的 INSTANCE_NAME 保持一致（有测试守着）
+ERROR_FILE_NOT_FOUND = 2
+IS_WINDOWS = os.name == "nt"
+_down = False  # 熔断：本进程里出现过连接类失败后，不再逐个请求等超时
 EVENTS = {
     "SessionStart": "session_start",
     "UserPromptSubmit": "prompt",
@@ -43,8 +48,38 @@ def base_url() -> str:
     return f"http://127.0.0.1:{os.environ.get('SHION_PORT') or 47613}"
 
 
+def _wait_named_pipe(path: str):
+    """(管道是否存在且可连, GetLastError)。零网络开销：Windows 上连未监听的本机端口要等满超时，管道不用。"""
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.WaitNamedPipeW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+    kernel32.WaitNamedPipeW.restype = ctypes.c_int
+    ok = bool(kernel32.WaitNamedPipeW(path, 1))
+    return ok, 0 if ok else ctypes.get_last_error()
+
+
+def shion_running():
+    """诗音的单实例命名管道在不在：True = 在；False = 确定没开；None = 不确定（按原逻辑处理）。
+
+    只有“管道不存在”（ERROR_FILE_NOT_FOUND）才算确定没开。设了 SHION_PORT 说明是测试/自定义环境，
+    它的假服务器没有管道，不判断；任何异常、非 Windows、其他错误码都不判断。
+    """
+    try:
+        if not IS_WINDOWS or os.environ.get("SHION_PORT"):
+            return None
+        ok, error = _wait_named_pipe("\\\\.\\pipe\\" + (os.environ.get("SHION_INSTANCE_NAME") or INSTANCE_NAME))
+        if ok:
+            return True
+        return False if error == ERROR_FILE_NOT_FOUND else None
+    except Exception:
+        return None
+
+
 def request(path: str, payload=None, timeout: float = TIMEOUT):
-    """成功返回解析后的 JSON，失败返回 None。"""
+    """成功返回解析后的 JSON，失败返回 None。连接阶段失败后熔断：之后的请求直接返回 None。"""
+    global _down
+    if _down:
+        return None
     try:
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(base_url() + path, data=data)
@@ -53,8 +88,13 @@ def request(path: str, payload=None, timeout: float = TIMEOUT):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 本机请求不走系统代理
         with opener.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except urllib.error.HTTPError:
+        return None  # 服务端答了（只是不是 200）：不是连接失败
+    except urllib.error.URLError:
+        _down = True  # 连接阶段失败：诗音没在听，别再逐个等超时
         return None
+    except Exception:
+        return None  # 读超时、返回内容不对等：只算这一次失败
 
 
 def read_save() -> dict:
@@ -304,14 +344,21 @@ def launch_shion() -> None:
             continue
 
 
+def probe_health():
+    """/health 探测。熔断不能挡住它：刚拉起诗音的几秒里要反复探测。"""
+    global _down
+    _down = False
+    return request("/health")
+
+
 def ensure_running() -> None:
-    if request("/health"):
+    if probe_health():
         return
     launch_shion()
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         time.sleep(0.2)
-        if request("/health"):
+        if probe_health():
             return
 
 
@@ -392,6 +439,8 @@ def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else ""
     if name not in EVENTS:
         return
+    if name != "SessionStart" and shion_running() is False:
+        return  # 诗音没开：放行，交回 CC 自己处理（SessionStart 仍要走 ensure_running 拉起它）
     etype = EVENTS[name]
     meta = session_meta(name, data)
     session = meta.get("session")
