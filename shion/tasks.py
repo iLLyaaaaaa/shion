@@ -25,6 +25,8 @@ class TaskRecord:
     contexts: set[tuple] = field(default_factory=set)
     lease_supported: bool = False
     continuity_lost: bool = False
+    observation_paused: bool = False  # Explicit v2 switch, not a failed transport.
+    observation_gap_at: float | None = None
 
 
 @dataclass
@@ -110,6 +112,9 @@ class TaskLedger:
                 task.state = "uncertain"
                 return None
             task.seen.add(identity)
+        if (task.observation_gap_at is not None and event.received_at is not None
+                and event.received_at <= task.observation_gap_at):
+            return None  # A packet received before invalidation cannot bridge the gap.
         task.last = now if event.received_at is None else event.received_at
         if event.leased:
             task.observers.add(event.observer)
@@ -122,6 +127,7 @@ class TaskLedger:
         if event.event in ("UserPromptSubmit", "PreToolUse"):
             task.state = "observed_working"
             task.continuity_lost = False
+            task.observation_paused = False
             if event.tool_use_id:
                 task.tools.add(event.tool_use_id)
         elif event.event == "PostToolUse":
@@ -129,6 +135,7 @@ class TaskLedger:
             # A tool result is evidence of activity, never of final success.
             task.state = "observed_working"
             task.continuity_lost = False
+            task.observation_paused = False
         elif event.event == "PermissionRequest":
             task.permission_unknown = True
             # Permission outcome is unknown; retain independently observed activity.
@@ -136,7 +143,7 @@ class TaskLedger:
 
     def expire(self):
         for task in self.tasks.values():
-            if task.terminal:
+            if task.terminal or task.observation_paused:
                 continue
             if task.lease_supported:
                 live = [self.leases[o] for o in task.observers if self._live(o)]
@@ -158,6 +165,20 @@ class TaskLedger:
             if not task.terminal:
                 task.state = "disconnected"
                 task.continuity_lost = True
+
+    def observation_gap(self, provider=None, *, paused=False):
+        """Opt-in v2 invalidation; never poison other providers with a sticky flag.
+
+        Old tasks stay unknown until fresh, nonduplicate activity is accepted.
+        Explicitly paused tasks have no live observation contract to time out;
+        queue gaps still use their existing leases to detect real loss.
+        """
+        for key, task in self.tasks.items():
+            if (provider is None or key[0] == provider) and not task.terminal:
+                task.state = "uncertain"
+                task.continuity_lost = True
+                task.observation_paused = paused
+                task.observation_gap_at = self.clock()
 
     @property
     def disconnected(self):

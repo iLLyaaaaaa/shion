@@ -3,8 +3,12 @@
 The legacy Claude protocol has no turn ID: its live state/request queue are
 display supplements only. Fully identified observations use the existing ledger.
 """
+import logging
+
 from .events import ObserverHeartbeat
 from .scheduler import Display, Priority, Scheduler
+
+log = logging.getLogger("shion.scheduler_gui")
 
 
 class SchedulerGUI:
@@ -15,25 +19,27 @@ class SchedulerGUI:
         self._shown_since = clock()
 
     def attach(self, connection):
-        if connection.presentation is self.core:
-            return
+        if connection.presentation is self.core and connection.ledger is self.core.ledger:
+            return True
         # The connection remains the owner of the single lifecycle ledger.
         # Attach before consuming any GUI observations; no state reconstruction.
-        if self.core.ledger.tasks:
-            raise RuntimeError("attach observation connection before feeding GUI events")
+        if self.core.ledger.tasks and self.core.ledger is not connection.ledger:
+            log.warning("Cannot attach observation connection after GUI events; disabling v2 presentation")
+            self.set_enabled(False)
+            return False
         self.core.ledger = connection.ledger
         connection.presentation = self.core
+        return True
 
     def set_enabled(self, enabled):
         if self.core.enabled == enabled:
             return
-        uncertain = self.core.ledger.uncertain
-        self.core.ledger.disconnect()
-        self.core.ledger.uncertain = uncertain
+        self.core.observation_gap(paused=True)
         self.core.notices.clear()
         self.core.coverage_known = False
         self.core._maintain()
-        self.core.set_foreground(None, verified=True)
+        self.core._foreground = None
+        self.core._current = None
         self.core.enabled = enabled
         self.display = None
         # Dedup tombstones stay in the ledger; switching cannot revive work.
@@ -89,7 +95,7 @@ class SchedulerGUI:
         if d.priority == Priority.P1:
             return "stop"
         if d.priority == Priority.P2:
-            return "stop"  # Unknown is never a success or an idle claim.
+            return "stop" if d.state in ("disconnected", "failed_confirmed") else "idle"
         if d.priority == Priority.P3:
             return "stop" if d.state == "interrupted" else "idle"  # Neutral end.
         if d.priority == Priority.P4:

@@ -191,7 +191,9 @@ def test_disconnect_scope_merge_recovery_and_stale_requests(core):
     assert s.ledger.working == 1 and not s.pending_requests
     now[0] = 11
     s.heartbeat(ObserverHeartbeat("one"))
-    assert s.select().state == "uncertain"
+    assert s.select().priority == Priority.P4  # Healthy source can now be shown.
+    assert s.ledger.tasks[a.key].state == s.ledger.tasks[b.key].state == "uncertain"
+    assert s.ledger.working == 1  # Restored transport never restores old work.
     s.observe(replace(a, event="PreToolUse", tool_use_id="fresh"))
     assert s.ledger.working == 2
     assert not s.pending_requests  # Transport recovery never restores old human-wait claims.
@@ -200,9 +202,9 @@ def test_disconnect_scope_merge_recovery_and_stale_requests(core):
 
 def test_unknown_start_missing_ids_and_state_expiry(core):
     s, now = core
-    assert s.select().state == "uncertain"
+    assert s.select().state == "idle_unconfirmed"
     s.observe(event("SessionStart", turn=""))
-    assert not s.ledger.tasks and s.select().state == "uncertain"
+    assert not s.ledger.tasks and s.select().state == "idle_unconfirmed"
     s.observe(event())
     now[0] = 300
     assert s.select().state == "uncertain"

@@ -1,0 +1,197 @@
+{
+  "zh": [
+    {
+      "stage": "idle",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：已观察到 0 个活动轮次；本次收到 0 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "chatgpt_status": "ChatGPT：已观察到 0 个活动轮次；本次收到 0 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "working": 0,
+      "received": 0,
+      "sprite": "idle",
+      "menu_sha256": "62726e26cb64265cf0124c25e90d5325758f9e0baeae9ad533a5a115cdbd5a1f"
+    },
+    {
+      "stage": "working",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：已观察到 1 个活动轮次；本次收到 1 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "chatgpt_status": "ChatGPT：已观察到 1 个活动轮次；本次收到 1 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "working": 1,
+      "received": 1,
+      "sprite": "working",
+      "menu_sha256": "1e8be681557118f6f1ade1514146256e0416c8765c128e03554e5502d725c163"
+    },
+    {
+      "stage": "permission",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：已观察到 1 个活动轮次；本次收到 2 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）\nChatGPT：授权结果待确认（仅观察）",
+      "chatgpt_status": "ChatGPT：已观察到 1 个活动轮次；本次收到 2 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）\nChatGPT：授权结果待确认（仅观察）",
+      "working": 1,
+      "received": 2,
+      "sprite": "working",
+      "menu_sha256": "d7337aff6c621112ae2eab99326907372a1764bca1041ba45416370df1cea388"
+    },
+    {
+      "stage": "ended",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：已观察到 0 个活动轮次；本次收到 3 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "chatgpt_status": "ChatGPT：已观察到 0 个活动轮次；本次收到 3 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "616e85274b80aa8de6912f9c7d2037b4c9be837e11794c5fe4b09ad21212607c"
+    },
+    {
+      "stage": "degraded",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：已观察到 0 个活动轮次；本次收到 3 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "chatgpt_status": "ChatGPT：已观察到 0 个活动轮次；本次收到 3 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "616e85274b80aa8de6912f9c7d2037b4c9be837e11794c5fe4b09ad21212607c"
+    },
+    {
+      "stage": "disabled",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：联动已关闭",
+      "chatgpt_status": "ChatGPT：联动已关闭",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "ceb5fcb62699e3aac02b6aa228523468c184491ef3e559481de85e769d33a17b"
+    },
+    {
+      "stage": "reenabled",
+      "status": "已陪伴 0 分钟 · 今天被摸 0 次 · 已完成 0 个任务 · 好感度 0\n连接状态：已连接\nbaseline detail\nChatGPT：已观察到 0 个活动轮次；本次收到 3 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "chatgpt_status": "ChatGPT：已观察到 0 个活动轮次；本次收到 3 个事件\nChatGPT：状态待确认（只统计本次观察，缺少历史活动快照）",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "616e85274b80aa8de6912f9c7d2037b4c9be837e11794c5fe4b09ad21212607c"
+    }
+  ],
+  "en": [
+    {
+      "stage": "idle",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: 0 observed active turns; 0 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "chatgpt_status": "ChatGPT: 0 observed active turns; 0 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "working": 0,
+      "received": 0,
+      "sprite": "idle",
+      "menu_sha256": "0089e9103fb1460a88390953334d536d38eaabf92a8b054454731df8e6feea7e"
+    },
+    {
+      "stage": "working",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: 1 observed active turns; 1 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "chatgpt_status": "ChatGPT: 1 observed active turns; 1 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "working": 1,
+      "received": 1,
+      "sprite": "working",
+      "menu_sha256": "b6c5224e69e775bcae06aad79e251f4d0a34a505d3fef12e83b372ed99026c53"
+    },
+    {
+      "stage": "permission",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: 1 observed active turns; 2 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)\nChatGPT: permission outcome unknown (observation only)",
+      "chatgpt_status": "ChatGPT: 1 observed active turns; 2 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)\nChatGPT: permission outcome unknown (observation only)",
+      "working": 1,
+      "received": 2,
+      "sprite": "working",
+      "menu_sha256": "64174c51e9299cdc8ebd91addd0d36bcdf352460384988adde5f3b9131053874"
+    },
+    {
+      "stage": "ended",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: 0 observed active turns; 3 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "chatgpt_status": "ChatGPT: 0 observed active turns; 3 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "b1e212f0d7773b70621f255549c98faa3bca700407365ad79205c8dc857d2d4d"
+    },
+    {
+      "stage": "degraded",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: 0 observed active turns; 3 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "chatgpt_status": "ChatGPT: 0 observed active turns; 3 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "b1e212f0d7773b70621f255549c98faa3bca700407365ad79205c8dc857d2d4d"
+    },
+    {
+      "stage": "disabled",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: observation disabled",
+      "chatgpt_status": "ChatGPT: observation disabled",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "b8bca095f5006965b53fc19183ba833aeaf1bb63eaad44e87d5fb08b606d3a8b"
+    },
+    {
+      "stage": "reenabled",
+      "status": "Together for 0m · Pats today: 0 · Tasks done: 0 · Affection: 0\nConnection: Connected\nbaseline detail\nChatGPT: 0 observed active turns; 3 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "chatgpt_status": "ChatGPT: 0 observed active turns; 3 events received this run\nChatGPT: status uncertain (current observations only; no activity snapshot)",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "b1e212f0d7773b70621f255549c98faa3bca700407365ad79205c8dc857d2d4d"
+    }
+  ],
+  "ja": [
+    {
+      "stage": "idle",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：観測中の活動ターン 0 件、今回受信 0 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "chatgpt_status": "ChatGPT：観測中の活動ターン 0 件、今回受信 0 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "working": 0,
+      "received": 0,
+      "sprite": "idle",
+      "menu_sha256": "e7906ee7975403aec6248b27017448f2519815901fbb1496336824406b158de4"
+    },
+    {
+      "stage": "working",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：観測中の活動ターン 1 件、今回受信 1 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "chatgpt_status": "ChatGPT：観測中の活動ターン 1 件、今回受信 1 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "working": 1,
+      "received": 1,
+      "sprite": "working",
+      "menu_sha256": "1cb2568ccefa9b61b78b37d039dcbe87fd5dd958a03fe6d0dbb058c0bdbeb44f"
+    },
+    {
+      "stage": "permission",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：観測中の活動ターン 1 件、今回受信 2 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）\nChatGPT：許可の結果は未確認（観測のみ）",
+      "chatgpt_status": "ChatGPT：観測中の活動ターン 1 件、今回受信 2 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）\nChatGPT：許可の結果は未確認（観測のみ）",
+      "working": 1,
+      "received": 2,
+      "sprite": "working",
+      "menu_sha256": "d780832628c70a07d065e81177518e10d5a5c7405a458b298cf2655b7492f3e3"
+    },
+    {
+      "stage": "ended",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：観測中の活動ターン 0 件、今回受信 3 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "chatgpt_status": "ChatGPT：観測中の活動ターン 0 件、今回受信 3 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "da697838c16525ec5878ccf060a84333829eb24d82dd0e5fc5aca067d0285137"
+    },
+    {
+      "stage": "degraded",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：観測中の活動ターン 0 件、今回受信 3 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "chatgpt_status": "ChatGPT：観測中の活動ターン 0 件、今回受信 3 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "da697838c16525ec5878ccf060a84333829eb24d82dd0e5fc5aca067d0285137"
+    },
+    {
+      "stage": "disabled",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：連携停止中",
+      "chatgpt_status": "ChatGPT：連携停止中",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "ecd33dbfae4a77ed6d4358af99d23b58d858590f9f8ff8d7eb18264b5716f6f9"
+    },
+    {
+      "stage": "reenabled",
+      "status": "一緒に過ごした時間 0分 · 今日なでられた回数 0 · 完了タスク 0 · 好感度 0\n接続状態：接続済み\nbaseline detail\nChatGPT：観測中の活動ターン 0 件、今回受信 3 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "chatgpt_status": "ChatGPT：観測中の活動ターン 0 件、今回受信 3 件\nChatGPT：状態未確認（今回の観測のみ、過去の活動状況は取得できません）",
+      "working": 0,
+      "received": 3,
+      "sprite": "idle",
+      "menu_sha256": "da697838c16525ec5878ccf060a84333829eb24d82dd0e5fc5aca067d0285137"
+    }
+  ]
+}

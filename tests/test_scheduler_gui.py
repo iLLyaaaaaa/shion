@@ -190,7 +190,7 @@ def test_identity_errors_and_provider_separation(env, tmp_path, variant):
         assert ctl.chatgpt.working == 1
     else:
         assert ctl.v2.display.priority == Priority.P2
-        assert env.win.sprite_name == "stop"
+        assert env.win.sprite_name == "idle"  # Unknown identity is not a transport failure.
 
 
 def test_independent_leases_heartbeat_recovery_and_long_work(env, tmp_path):
@@ -224,7 +224,7 @@ def test_switch_and_restart_keep_setting_not_live_tasks(env, tmp_path, qapp):
     ctl.set_v2_scheduler_enabled(True)
     ctl.observe_v2(e)  # duplicate cannot undo the observation gap
     ctl.tick()
-    assert ctl.v2.display.priority == Priority.P2
+    assert ctl.v2.display.priority == Priority.P5 and ctl.v2.display.state == "uncertain"
     env.scheduler.flush()
     saved = load(env.path)
     assert saved.v2_scheduler_enabled
@@ -232,7 +232,7 @@ def test_switch_and_restart_keep_setting_not_live_tasks(env, tmp_path, qapp):
     try:
         assert second.ctl.v2.core.enabled
         assert not second.ctl.v2.core.ledger.tasks
-        assert second.ctl.v2.display.state == "uncertain"
+        assert second.ctl.v2.display.state == "idle_unconfirmed"
     finally:
         second.close()
     assert SaveData.from_dict({}).v2_scheduler_enabled is False
@@ -279,10 +279,21 @@ def test_confirmed_failure_preempts_work_without_changing_background(env, tmp_pa
     assert ctl.v2.display.priority == Priority.P4 and env.win.sprite_name == "working"
 
 
-def test_idle_requires_explicit_coverage_and_is_not_persisted(env, tmp_path):
+def test_idle_without_coverage_is_neutral_and_coverage_is_not_persisted(env, tmp_path, monkeypatch):
     ctl = enable(env, tmp_path)
+    allowed = []
+    monkeypatch.setattr(ctl._idle, "step", lambda now, can_idle, activity: allowed.append(can_idle))
     ctl.tick()
-    assert ctl.v2.display.priority == Priority.P2
+    assert ctl.v2.display.priority == Priority.P5
+    assert ctl.v2.display.state == "idle_unconfirmed"
+    assert env.win.sprite_name == "idle" and allowed[-1]
+    assert ctl.lines.ui("v2_idle_unconfirmed") in ctl.status_text()
+    assert ctl.lines.ui("v2_idle") not in ctl.v2.text(ctl.lines.ui)
+    ctl.handle_event("prompt", meta={"session": "legacy"})
+    ctl.handle_event("stop", meta={"session": "legacy"})
+    env.advance(31)
+    assert ctl.v2.display.state == "idle_unconfirmed"
+    assert env.win.sprite_name == "idle" and allowed[-1]
     ctl.v2.core.confirm_coverage()  # Synthetic verified snapshot capability only.
     ctl.tick()
     assert ctl.v2.display.priority == Priority.P5
@@ -290,7 +301,8 @@ def test_idle_requires_explicit_coverage_and_is_not_persisted(env, tmp_path):
     ctl.set_v2_scheduler_enabled(False)
     ctl.set_v2_scheduler_enabled(True)
     ctl.tick()
-    assert ctl.v2.display.priority == Priority.P2
+    assert ctl.v2.display.priority == Priority.P5
+    assert ctl.v2.display.state == "idle_unconfirmed"
 
 
 def test_merged_ends_wait_behind_permission_and_only_announce_once(env, tmp_path, monkeypatch):

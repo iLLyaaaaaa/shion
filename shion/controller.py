@@ -943,7 +943,7 @@ class PetController(QObject):
         if type(enabled) is not bool:
             raise ValueError("scheduler switch must be boolean")
         if enabled and self.chatgpt is not None:
-            self.v2.attach(self.chatgpt)
+            enabled = self.v2.attach(self.chatgpt)
         self.v2.set_enabled(enabled)
         self.state.save.v2_scheduler_enabled = enabled
         self.scheduler.mark_dirty(self._now())
@@ -1291,11 +1291,12 @@ class PetController(QObject):
         menu.addSeparator()
         connection = self.connection.inspect()
         status_action = menu.addAction(ui("connection_status", state=ui("connection_" + connection.state)))
+        status_action.setEnabled(False)
         if self.v2.core.enabled:
             full_status = self.v2.text(ui)
-            status_action.setText(menu.fontMetrics().elidedText(full_status, Qt.ElideRight, 240))
-            status_action.setToolTip(full_status)
-        status_action.setEnabled(False)
+            v2_status_action = menu.addAction(menu.fontMetrics().elidedText(full_status, Qt.ElideRight, 240))
+            v2_status_action.setToolTip(full_status)
+            v2_status_action.setEnabled(False)
         if self.chatgpt is not None:
             # 完整状态是多行长句，放在顶层会把整个菜单撑得很宽：顶层只放状态那一行并截断，全文在 tooltip 和 ChatGPT 子菜单里。
             full = self.chatgpt.status(ui)

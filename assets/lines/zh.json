@@ -306,6 +306,7 @@
     "v2_interrupted": "本轮已中断",
     "v2_observed_working": "正在工作",
     "v2_idle": "空闲已确认",
+    "v2_idle_unconfirmed": "暂无活动，观察覆盖未确认",
     "v2_chatgpt_permission": "ChatGPT：观察到权限请求，是否需要人工处理尚未确认。请返回对应客户端查看；诗音不能批准或拒绝。",
     "pause_label": "暂停中",
     "pause_label_hint": "点一下继续",

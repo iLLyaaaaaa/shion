@@ -74,7 +74,10 @@ class ChatGPTConnection:
             self.server.inbox.enabled = self.enabled
             self.server.inbox.drain()
         # Keep dedup tombstones across disable/enable; no Claude mutations.
-        self.ledger.disconnect(provider="chatgpt")
+        if self.presentation is not None and self.presentation.enabled:
+            self.presentation.observation_gap(provider="chatgpt", paused=True)
+        else:
+            self.ledger.disconnect(provider="chatgpt")
 
     @property
     def working(self):
@@ -84,10 +87,20 @@ class ChatGPTConnection:
     def poll(self):
         notices = []
         if self.server:
-            for event in self.server.inbox.drain():
+            core = self.presentation if self.presentation is not None and self.presentation.enabled else None
+            # Consume a degradation once, before processing later evidence. A
+            # second loss during drain stays flagged for the next poll.
+            gap = bool(core and self.server.inbox.degraded.is_set())
+            if gap:
+                self.server.inbox.degraded.clear()
+            events = self.server.inbox.drain()
+            if core and (gap or self.server.inbox.degraded.is_set()):
+                core.observation_gap(provider="chatgpt", paused=not self.enabled)
+                events = []  # Batch order relative to the missing packets is unknown.
+            for event in events:
                 if isinstance(event, ObserverHeartbeat):
                     if self.enabled:
-                        self.ledger.heartbeat(event)
+                        (core or self.ledger).heartbeat(event)
                     continue
                 log_observation(event)
                 if self.enabled:
@@ -98,7 +111,7 @@ class ChatGPTConnection:
                         result = self.ledger.accept(event)
                     if result:
                         notices.append(result)
-            if self.server.inbox.degraded.is_set():
+            if core is None and self.server.inbox.degraded.is_set():
                 self.ledger.disconnect(provider="chatgpt")
         self.ledger.expire()
         lost = {key for key, task in self.ledger.tasks.items()

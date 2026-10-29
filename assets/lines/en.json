@@ -305,6 +305,7 @@
     "v2_interrupted": "Turn interrupted",
     "v2_observed_working": "Working",
     "v2_idle": "Confirmed idle",
+    "v2_idle_unconfirmed": "No observed activity; coverage unconfirmed",
     "v2_chatgpt_permission": "ChatGPT: permission request observed; human action is unconfirmed. Check the corresponding client. Shion cannot approve or deny.",
     "pause_label": "Paused",
     "pause_label_hint": "Click to continue",

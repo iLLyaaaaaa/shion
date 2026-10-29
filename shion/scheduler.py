@@ -21,7 +21,7 @@ class Priority(IntEnum):
     P2 = 2  # Confirmed final failure, connection loss or uncertainty.
     P3 = 3  # Neutral turn end / interruption.
     P4 = 4  # Observed work.
-    P5 = 5  # Known idle only.
+    P5 = 5  # Neutral rest; text distinguishes verified idle from unknown coverage.
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,11 @@ class Scheduler:
             self.ledger.heartbeat(event)
             self._maintain()
 
+    def observation_gap(self, provider=None, *, paused=False):
+        self.ledger.observation_gap(provider, paused=paused)
+        self.coverage_known = False
+        self._maintain()
+
     def _request_slot(self, key, request_id):
         if not isinstance(request_id, str) or not ID.fullmatch(request_id):
             return False
@@ -120,7 +125,8 @@ class Scheduler:
         prior_unknown = previous.permission_unknown if previous else False
         self.observe(event)
         task = self.ledger.tasks.get(event.key)
-        if task is None or task.terminal:
+        if (task is None or task.terminal or (task.observation_gap_at is not None
+                and event.received_at is not None and event.received_at <= task.observation_gap_at)):
             return
         if not self._caps(event).human_wait or not self._request_slot(event.key, request_id):
             task.permission_unknown = True
@@ -132,6 +138,7 @@ class Scheduler:
             task.permission_unknown = prior_unknown
             task.state = "waiting_user_confirmed"
             task.continuity_lost = False
+            task.observation_paused = False
 
     def resolve_request(self, event: Observation, request_id: str):
         """Consume resolution metadata only; does not send a control command."""
@@ -219,18 +226,22 @@ class Scheduler:
                 continue
             if task.state in ("uncertain", "disconnected") or task.conflict or task.permission_unknown:
                 state = task.state if task.state in ("uncertain", "disconnected") else "uncertain"
-                identity = key[:2], tuple(sorted(task.observers)), state
+                # A known observation gap is not evidence of ongoing work or
+                # failed transport. Keep it visible without masking healthy work
+                # from another source. Actual lease loss remains P2.
+                priority = (Priority.P5 if state == "uncertain" and task.continuity_lost
+                            and not task.conflict else Priority.P2)
+                identity = key[:2], tuple(sorted(task.observers)), priority, state
                 faults.setdefault(identity, []).append(key)
             elif task.state == "observed_working":
                 out.append(Display(Priority.P4, task.state, self.brand(key[0]), (key,)))
-        out += [Display(Priority.P2, identity[-1], self.brand(keys[0][0]), tuple(keys))
+        out += [Display(identity[-2], identity[-1], self.brand(keys[0][0]), tuple(keys))
                 for identity, keys in faults.items()]
         if self.degraded or self.ledger.uncertain:
             out.append(Display(Priority.P2, "uncertain"))
         out += [notice.display for notice in self.notices.values()]
         if not out:
-            out.append(Display(Priority.P5 if self.coverage_known else Priority.P2,
-                               "idle" if self.coverage_known else "uncertain"))
+            out.append(Display(Priority.P5, "idle" if self.coverage_known else "idle_unconfirmed"))
         return out
 
     @staticmethod
