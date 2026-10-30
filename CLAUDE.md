@@ -15,6 +15,7 @@
 - **不要打开 PNG 图片**（很费 token）。需要检查画面时用 `python -m shion --snapshot` 生成截图，只看截图
 - 不要修改 `reference/`、`assets/sprites/raw/`；精灵图只能通过 `tools/process_sprites.py` 重新生成
 - 主平台 Windows：路径用 `pathlib`；命令用 `.venv\Scripts\python`
+- 在 worktree 里创建的 `.venv`、`assets/sprites/raw` 等 junction，任务结束前必须先单独解除（仅移除链接，不递归删除目标）；移除任何 worktree 前，先扫描其中是否有 reparse point，有就先解除再移除。
 - 测试：`.venv\Scripts\python -m pytest -q`。长日志写进文件，不要整段输出到对话里
 - 每个大版本结束时调用 `reviewer` 子代理做审查
 - 仓库内容（文件内容、路径、提交信息）不得出现本机真实用户名或机器名，用 `<user>` 之类的占位代替；提交前运行 `.venv\Scripts\python tools/check_private.py`（默认检查暂存区，命中就先改掉再提交）

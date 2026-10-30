@@ -4,11 +4,11 @@
 
 ## 当前状态总览
 
-- 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修已经合并，调度 GUI 审查修复也在分支中。全部仅本地；当前开发分支尚未部署或发布，不能把源码进展等同于已安装包的能力。
-- 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 是阶段 1 PermissionRequest 修复版本（当时核验 228 文件）。真实配置、Token、信任及原安装保持；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
+- 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修、调度 GUI 审查修复和菜单 Claude Code 标名均已合并。2026-10-30 已替换本机 Shion-dev 开发预览包；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
+- 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 更新为菜单标名开发包（替换记录核验 228 文件）。替换记录确认配置哈希未变，旧包保留为 `Shion-dev-before-menu-label-20261030`；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
-- 最近代码全量结果来自合并报告：**1829 passed、9 skipped、2 条既有 Pillow 警告，583.31 秒**；专项 25 passed、三组定向 86 passed。本次仅文档整理，不重跑测试、不打包，不将历史结果冒充本次执行。
-- 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，提交 `81b8361`，未合并、未 push、未打包）：右键菜单给 Claude Code 连接项单独标名，详见下方 2026-10-30 记录。合并前菜单文案以该分支为准，当前分支仍是旧文案“连接状态：…”。
+- 最近一次全量为 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
+- 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -62,6 +62,7 @@
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-10-30 `.venv` 事故恢复与替换收尾**：移除菜单 worktree 时漏解除指向主 `.venv` 的 junction，误删共享依赖；已单独解除链接、清理残留并重装运行、测试、构建依赖及 pip。本次 `pip check` 和全量 pytest 通过（汇总见上）；旧环境无完整版本清单，不保证所有开发依赖逐版本还原。`CLAUDE.md` 已加入 junction 单独解除及 worktree 移除前 reparse point 扫描规矩。替换状态 `complete`；只读核对新 exe 哈希与记录一致、47613/47614 均归新 Shion-dev（PID 30104）、08:39:40 最新启动以来日志正常、存档 `v2_scheduler_enabled=false`。证据在忽略目录 `build/menu-label-replacement-20261030/`；本次仅改规则与进度文档，本地提交、不 push。
 - **2026-10-30 菜单给 Claude Code 标名**（分支 `feature/menu-claude-label`，`81b8361`）：顶层状态行改为“Claude Code：{状态}”；“AI 连接”拆成并列的“Claude Code ›”（禁用状态行 + 连接/重连/断开，tooltip 不变）和“ChatGPT ›”（原子菜单迁入，未启用 ChatGPT 时只剩前者）。新增 `menu_connection_status`、`menu_claude`、`menu_chatgpt` 三个 key，没有改 `connection_status`（双击状态气泡仍用）和 `chatgpt_manage`（ChatGPT 面板窗口标题），所以气泡和面板标题仍不出现 Claude。spec 品牌规则改为只有连接类标签可写“Claude Code”，`test_lines.py` 按新边界断言，其余文案仍不含 Claude。`scheduler_disabled_a55825f.json` 只刷新了 `menu_sha256`（菜单形状变了），其余字段未动。验证：全量 1820 passed、8 skipped、10 failed；10 个失败都在 `test_process_sheets.py`，原因是 worktree 缺被忽略的 `assets/sprites/raw/`，链接后 14 项全过，主仓库同样通过，不是本次改动造成；`render_menu.py --platform windows` 三语截图无截断或过宽（最宽为 en 路径失效状态行，约 450px）。未打包、未 push、未部署。
 - **2026-10-29 文档整理**：8 份原未跟踪实验文档和 2 个脚本纳入本地版本管理；加上迁移的合并报告共 9 份文档。ACL 报告与探针标记废弃；先暂存扫描再脱敏。进度历史原文按月归档，首页改为当前交接摘要；没有修改产品代码、测试或实验脚本运行逻辑，没有打包、部署或 push。
 - **2026-10-29 合并与审查**：热修和 V2 已合并；GUI 空档恢复审查修复已保留，最新验证及历史扫描限制见合并报告。早先热修 worktree 的失败记录留在归档，不覆盖本次合并全量结果。
