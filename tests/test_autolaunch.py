@@ -316,7 +316,7 @@ def test_overlapping_launches_leave_exactly_one_instance(tmp_path):
 
 
 @windows_only
-@pytest.mark.xfail(reason="已知缺口：Qt 6 在 Windows 上允许两个 QLocalServer 同时 listen 同名管道，"
-                          "若多个进程在同一毫秒内都通过了“连接失败”检查，会同时成为赢家（见 progress.md）", strict=False)
 def test_perfectly_simultaneous_launches_leave_exactly_one_instance(tmp_path):
-    assert race(tmp_path, [0, 0, 0]) == ["LOST", "LOST", "WON"]
+    # 4 个进程对齐到同一时刻调用 acquire()（CC 与 Codex 同时新开会话的最坏情况）；连跑 3 轮，每轮必须只剩一个。
+    for _ in range(3):
+        assert race(tmp_path, [0, 0, 0, 0]) == ["LOST", "LOST", "LOST", "WON"]

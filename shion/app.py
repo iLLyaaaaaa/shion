@@ -32,29 +32,88 @@ from shion.speech import Priority
 log = logging.getLogger("shion")
 
 
+ERROR_ALREADY_EXISTS = 183
+
+
+def _create_mutex(name: str):
+    """(句柄, 是否已存在)。句柄为 0 表示创建失败。Qt 6 在 Windows 上允许两个 QLocalServer 监听同一个管道名，
+    几个进程同时启动会都认为自己是第一个；命名互斥锁的创建是原子的，所以用它判定唯一实例。"""
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    ctypes.set_last_error(0)
+    handle = kernel32.CreateMutexW(None, False, "Local\\" + name)
+    if not handle:
+        return 0, False
+    return handle, ctypes.get_last_error() == ERROR_ALREADY_EXISTS
+
+
+def _close_handle(handle) -> None:
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle(handle)
+
+
 class SingleInstance(QObject):
-    """用本地套接字保证只有一个实例。"""
+    """只有一个实例：Windows 上先抢命名互斥锁（原子），再用本地套接字服务器让已有实例可被连到。
+
+    套接字服务器仍然保留：hook / Codex 观察端用它的管道判断诗音有没有开，旧版没有互斥锁的实例也靠它识别。
+    """
 
     def __init__(self, name: str = INSTANCE_NAME, parent: QObject | None = None):
         super().__init__(parent)
         self._name = name
         self._server: QLocalServer | None = None
+        self._mutex = 0  # 拿到锁的实例在整个生命周期内持有句柄
 
-    def acquire(self) -> bool:
-        """True = 我是第一个实例；False = 已有实例在运行。"""
+    def _notify_existing(self) -> bool:
+        """连一下已有实例的服务器再断开；连上了说明确实有实例在运行。"""
         sock = QLocalSocket()
         sock.connectToServer(self._name)
         if sock.waitForConnected(300):
             sock.disconnectFromServer()
+            return True
+        return False
+
+    def acquire(self) -> bool:
+        """True = 我是第一个实例；False = 已有实例在运行。"""
+        if sys.platform == "win32":
+            try:
+                handle, exists = _create_mutex(self._name)
+            except Exception:
+                log.exception("创建单实例互斥锁失败，退回只用套接字判断")
+                handle, exists = 0, False
+            if exists:
+                _close_handle(handle)
+                self._notify_existing()
+                return False
+            self._mutex = handle
+        if self._notify_existing():  # 旧版实例没有互斥锁，只能靠它的服务器识别
+            self._release_mutex()
             return False
         QLocalServer.removeServer(self._name)  # 清理上次崩溃留下的残留
         self._server = QLocalServer(self)
-        return self._server.listen(self._name)
+        if self._server.listen(self._name):
+            return True
+        self._server = None
+        self._release_mutex()
+        return False
+
+    def _release_mutex(self) -> None:
+        handle, self._mutex = self._mutex, 0
+        if handle:
+            _close_handle(handle)
 
     def release(self) -> None:
         if self._server is not None:
             self._server.close()
             self._server = None
+        self._release_mutex()
 
 
 def data_dir() -> Path:
