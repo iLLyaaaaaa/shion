@@ -1,4 +1,4 @@
-"""Claude 在前台时，让普通层级的诗音窗口组紧邻其上；不激活、不绑定 owner。"""
+"""被跟随的应用（Claude / Codex 桌面端）在前台时，让普通层级的诗音窗口组紧邻其上；不激活、不绑定 owner。"""
 from __future__ import annotations
 
 import ctypes
@@ -28,6 +28,10 @@ POSITION_FLAGS = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER
 GW_HWNDPREV = 3
 GWL_EXSTYLE = -20
 WS_EX_TOPMOST = 0x00000008
+# 跟随目标的进程映像名（小写比较）。Codex 桌面端（OpenAI.Codex 包）的主窗口属于 ChatGPT.exe。
+# 不放任何终端程序（WindowsTerminal、conhost、pwsh 等）。
+CLAUDE_IMAGES = frozenset({"claude.exe"})
+CODEX_IMAGES = frozenset({"chatgpt.exe"})
 
 
 def _native_windows() -> bool:
@@ -111,9 +115,10 @@ class _Win32ForegroundApi:
 class ForegroundFollower(QObject):
     """windows() 按从后到前返回当前窗口；每次处理现取，支持延迟创建及 HWND 重建。"""
 
-    def __init__(self, windows, parent=None, *, api_factory=None):
+    def __init__(self, windows, parent=None, *, api_factory=None, follow_codex=None):
         super().__init__(parent)
         self._windows = windows
+        self._follow_codex = follow_codex  # 无参，Codex 窗口此刻是否该跟随（联动已安装且未临时关闭）
         self._api_factory = api_factory or _Win32ForegroundApi
         self._api = None
         self._hook = None
@@ -155,17 +160,17 @@ class ForegroundFollower(QObject):
             if self._hook:
                 self._restore_hook = self._api.register(self._callback, EVENT_SYSTEM_MINIMIZEEND) or None
             if not self._hook or not self._restore_hook:
-                log.warning("无法注册前台/恢复窗口 hook，跳过 Claude 层级跟随")
+                log.warning("无法注册前台/恢复窗口 hook，跳过层级跟随")
                 self.stop()
                 return
         except Exception:
-            log.exception("注册前台窗口 hook 失败，跳过 Claude 层级跟随")
+            log.exception("注册前台窗口 hook 失败，跳过层级跟随")
             self.stop()
             return
         self._enabled = True
         if self._app is not None:
             self._app.installEventFilter(self)
-        self._request_sync(recheck=True)  # 启动/关闭置顶时，Claude 可能已经在前台
+        self._request_sync(recheck=True)  # 启动/关闭置顶时，被跟随的应用可能已经在前台
 
     def stop(self) -> None:
         self._enabled = False
@@ -219,6 +224,17 @@ class ForegroundFollower(QObject):
                 self._request_sync()
         return False
 
+    def _codex_enabled(self) -> bool:
+        try:
+            return bool(self._follow_codex and self._follow_codex())
+        except Exception:
+            log.exception("判断 Codex 窗口是否跟随失败，按不跟随处理")
+            return False
+
+    def _followed(self, image: str) -> bool:
+        name = PureWindowsPath(image).name.casefold()
+        return name in CLAUDE_IMAGES or (name in CODEX_IMAGES and self._codex_enabled())
+
     def _sync(self) -> None:
         if not self._enabled:
             return
@@ -230,7 +246,7 @@ class ForegroundFollower(QObject):
                 self._cancel_rechecks()
                 return
             pid = api.pid(target)
-            if not pid or PureWindowsPath(api.image(pid)).name.casefold() != "claude.exe":
+            if not pid or not self._followed(api.image(pid)):
                 self._cancel_rechecks()
                 return
             if api.foreground() != target or api.pid(target) != pid:
@@ -239,7 +255,7 @@ class ForegroundFollower(QObject):
             if recheck:
                 # 前台事件可能早于恢复完成；即使此刻仍最小化，也必须安排补查。
                 self._schedule_rechecks((target, pid))
-            # 进程查询后重验，避免把过期 Claude 事件应用到别的前台程序。
+            # 进程查询后重验，避免把过期事件应用到别的前台程序。
             if api.foreground() != target or not api.usable(target) or api.pid(target) != pid:
                 return
             handles = []
@@ -270,8 +286,8 @@ class ForegroundFollower(QObject):
                 if api.foreground() != target or not api.usable(target):
                     return
                 if not api.position(hwnd, anchor):
-                    log.warning("调整 Claude 上方窗口层级失败，停止本次跟随")
+                    log.warning("调整前台应用上方窗口层级失败，停止本次跟随")
                     return
                 anchor = hwnd
         except Exception:
-            log.exception("Claude 窗口层级跟随失败，跳过本次事件")
+            log.exception("窗口层级跟随失败，跳过本次事件")

@@ -157,7 +157,7 @@ class PetController(QObject):
         self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(TICK_MS)
         self._timer.timeout.connect(self.tick)
-        self._foreground = ForegroundFollower(self._pet_windows, parent=self)
+        self._foreground = ForegroundFollower(self._pet_windows, parent=self, follow_codex=self._follow_codex_window)
         self._apply_topmost()
         self.sync()
         if autostart:
@@ -166,6 +166,10 @@ class PetController(QObject):
     # ------------------------------------------------------------ 基础
     def _now(self) -> datetime:
         return self._now_fn()
+
+    def _follow_codex_window(self) -> bool:
+        """未置顶时要不要跟随 Codex 桌面端窗口：ChatGPT 联动已安装且没有被临时关闭（关闭 / 未安装 / 读失败都不跟随）。"""
+        return self.chatgpt is not None and self.chatgpt.connection_state() == "installed"
 
     def sync(self) -> None:
         """把状态机当前应显示的精灵同步给窗口（只在变化时切换，不打断呼吸相位）。"""

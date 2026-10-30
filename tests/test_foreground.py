@@ -404,8 +404,9 @@ def test_controller_switch_lifecycle_and_current_full_group(qapp, tmp_path, monk
     import shion.controller as C
     instances = []
     class Follower:
-        def __init__(self, windows, parent):
+        def __init__(self, windows, parent, **kwargs):
             self.windows, self.parent = windows, parent
+            self.kwargs = kwargs
             self.calls = []
             instances.append(self)
         def stop(self):
@@ -418,6 +419,7 @@ def test_controller_switch_lifecycle_and_current_full_group(qapp, tmp_path, monk
         spy = instances[0]
         assert spy.calls[-1] is False
         assert spy.parent is e.ctl
+        assert spy.kwargs == {"follow_codex": e.ctl._follow_codex_window}
         assert spy.windows() == e.ctl._pet_windows()
         e.ctl.set_always_on_top(False)
         assert spy.calls[-1] is True
@@ -645,3 +647,138 @@ def test_native_system_hidden_pet_restores_geometry_and_mask_without_activation(
         f.stop()
         pet.close()
         target.close()
+
+
+# ------------------------------------------------------------ Codex 桌面端（ChatGPT.exe）
+CODEX_IMAGE = r"C:\Program Files\WindowsApps\OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"
+
+
+def codex_follower(qapp, monkeypatch, follow, image=CODEX_IMAGE):
+    monkeypatch.setattr(F, "_native_windows", lambda: True)
+    api = Api()
+    api.order = [800, 70, 11, 302, 300, 90, 10, 12]
+    api.current = 302
+    api.pids[302] = 402
+    api.images[402] = image
+    windows = [Window(10), Window(11), Window(12)]
+    f = F.ForegroundFollower(lambda: windows, api_factory=lambda: api, follow_codex=follow)
+    return f, api
+
+
+def test_follow_target_sets_are_exactly_claude_and_codex_and_no_terminals():
+    assert F.CLAUDE_IMAGES == {"claude.exe"} and F.CODEX_IMAGES == {"chatgpt.exe"}
+
+
+def test_codex_window_in_foreground_is_followed_when_link_is_active(qapp, monkeypatch):
+    f, api = codex_follower(qapp, monkeypatch, lambda: True)
+    try:
+        f.set_enabled(True)
+        sync(f)
+        assert api.order == [800, 70, 12, 11, 10, 302, 300, 90]  # 诗音窗口组紧邻 Codex 窗口上方
+        assert api.positions == [(12, 70), (11, 12), (10, 11)]
+        assert not any(c[0] == "show_without_activation" and c[1] == 302 for c in api.calls)  # 不碰 Codex 窗口
+        assert api.topmosts == {800}
+    finally:
+        f.stop()
+
+
+def test_codex_image_name_is_case_insensitive(qapp, monkeypatch):
+    f, api = codex_follower(qapp, monkeypatch, lambda: True, image=r"D:\x\CHATGPT.EXE")
+    try:
+        f.set_enabled(True)
+        sync(f)
+        assert api.positions
+    finally:
+        f.stop()
+
+
+@pytest.mark.parametrize("follow", [lambda: False, None, lambda: (_ for _ in ()).throw(RuntimeError("boom"))])
+def test_codex_window_is_not_followed_when_link_is_off_missing_or_failing(qapp, monkeypatch, follow):
+    f, api = codex_follower(qapp, monkeypatch, follow)
+    try:
+        before = api.order[:]
+        f.set_enabled(True)
+        sync(f)
+        assert api.order == before and not api.positions
+    finally:
+        f.stop()
+
+
+def test_follow_codex_is_only_asked_for_codex_images(qapp, monkeypatch):
+    asked = []
+    f, api = codex_follower(qapp, monkeypatch, lambda: asked.append(1) or True)
+    try:
+        f.set_enabled(True)
+        for hwnd in (300, 90):  # Claude / 其他程序
+            api.current = hwnd
+            sync(f)
+        assert asked == []
+        api.current = 302
+        sync(f)
+        assert asked == [1]
+    finally:
+        f.stop()
+
+
+@pytest.mark.parametrize("image", [r"C:\Windows\System32\conhost.exe",
+                                   r"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1\WindowsTerminal.exe",
+                                   r"C:\Program Files\PowerShell\7\pwsh.exe",
+                                   r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                                   r"C:\Windows\System32\cmd.exe", r"C:\other.exe"])
+def test_terminals_and_other_programs_are_never_followed_even_with_link_active(qapp, monkeypatch, image):
+    f, api = codex_follower(qapp, monkeypatch, lambda: True, image=image)
+    try:
+        before = api.order[:]
+        f.set_enabled(True)
+        sync(f)
+        assert api.order == before and not api.positions
+    finally:
+        f.stop()
+
+
+def test_codex_foreground_is_revalidated_like_any_followed_app(qapp, monkeypatch):
+    f, api = codex_follower(qapp, monkeypatch, lambda: True)
+    try:
+        f.set_enabled(True)
+        api.pids[302] = 0  # 进程查询失败
+        sync(f)
+        assert not api.positions
+        api.pids[302] = 402
+        api.minimized.add(302)  # 不可用
+        sync(f)
+        assert not api.positions
+        api.minimized.clear()
+        f._recheck_requested = True
+        sync(f)
+        assert api.positions and f._retry_target == (302, 402)  # 前台事件之后同样安排两次补查
+    finally:
+        f.stop()
+
+
+def test_link_toggle_takes_effect_on_the_next_event(qapp, monkeypatch):
+    state = {"on": True}
+    f, api = codex_follower(qapp, monkeypatch, lambda: state["on"])
+    try:
+        f.set_enabled(True)
+        sync(f)
+        assert api.positions
+        api.calls.clear()
+        api.order = [800, 70, 11, 302, 300, 90, 10, 12]
+        state["on"] = False
+        event(f, 302)
+        sync(f)
+        assert not api.positions
+    finally:
+        f.stop()
+
+
+@pytest.mark.parametrize("chatgpt,expected", [(None, False), ("installed", True), ("off", False),
+                                              ("not_installed", False), ("error", False)])
+def test_controller_follows_codex_only_when_chatgpt_link_is_installed_and_on(qapp, tmp_path, chatgpt, expected):
+    e = Env(tmp_path)
+    try:
+        if chatgpt is not None:
+            e.ctl.chatgpt = type("Fake", (), {"connection_state": lambda self: chatgpt})()
+        assert e.ctl._follow_codex_window() is expected
+    finally:
+        e.close()
