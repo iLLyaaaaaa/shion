@@ -90,6 +90,7 @@ class PetController(QObject):
         self.overlay = overlay
         self.bubble = bubble
         self.hub = hub or RemoteHub()
+        self.hub.set_link_enabled(state.save.claude_link_enabled)  # 在 HTTP 服务启动之前
         self._held_said = False  # 这次停下已经说过“已经停下啦～”
         self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示标签，直到继续）
         self._procs: dict[str, interrupt.CCProcess] = {}  # 会话 → hook 报来的 CC 进程（立即中断用）
@@ -583,6 +584,8 @@ class PetController(QObject):
 
         meta：hook 附带的会话信息 {"session", "tool_id", "proc"}（server.parse_meta 已校验）。
         """
+        if not self.hub.link_enabled:
+            return  # 临时关闭联动：服务线程刚放进来的事件也丢掉，不补播
         if etype in ("stop", "plan_ready"):
             detail = None  # 兼容旧 hook：回复/计划内容不显示、不记录
         meta = meta or {}
@@ -699,7 +702,7 @@ class PetController(QObject):
     # ------------------------------------------------------------ 遥控：停下
     def stop_work(self) -> None:
         """“停下”：下一个检查点（工具调用前或做完后）hook 原地等待，直到点“继续”或在 CC 里说话。"""
-        if self.state.paused:
+        if self.state.paused or not self.hub.link_enabled:
             return
         self.react(self.state.interact(self._now()))
         self._held_said = self._held_seen = False
@@ -755,7 +758,7 @@ class PetController(QObject):
 
     # ------------------------------------------------------------ 遥控：立即中断
     def can_interrupt(self) -> bool:
-        return bool(self.state.working_sessions(self._now()))
+        return self.hub.link_enabled and bool(self.state.working_sessions(self._now()))
 
     def interrupt_work(self) -> None:
         """“立即中断”：结束所有工作中会话正在跑的工具进程，并让它们下一个检查点结束这一轮。
@@ -763,6 +766,8 @@ class PetController(QObject):
         只对工作中的会话做；做完把会话标成空闲（下一次 prompt / PreToolUse 之前不会再发）。
         一个都找不到对应进程时说明原因，退回普通的“停下”。
         """
+        if not self.hub.link_enabled:
+            return
         now = self._now()
         sessions = self.state.working_sessions(now)
         ui = self.lines.ui
@@ -827,7 +832,7 @@ class PetController(QObject):
     def continue_ended(self) -> None:
         """这一轮已经被结束后的“继续”：终端版替用户发一句“继续”，桌面端复制到剪贴板。"""
         ended = self._ended
-        if ended is None:
+        if ended is None or not self.hub.link_enabled:
             return
         ui = self.lines.ui
         text = ui("continue_text")
@@ -1223,6 +1228,7 @@ class PetController(QObject):
         interrupt_action.triggered.connect(self.interrupt_work)
         remote_menu.addAction(ui("menu_good")).triggered.connect(self.feedback_good)
         remote_menu.addAction(ui("menu_bad")).triggered.connect(self.open_bad_feedback)
+        remote_menu.setEnabled(self.hub.link_enabled)  # 临时关闭联动：整个子菜单置灰
 
         pet_menu = menu.addMenu(ui("menu_pet"))
         expression_menu = pet_menu.addMenu(ui("menu_expression"))
@@ -1290,50 +1296,62 @@ class PetController(QObject):
 
         menu.addSeparator()
         connection = self.connection.inspect()
-        status_text = ui("menu_connection_status", state=ui("connection_" + connection.state))
-        status_action = menu.addAction(status_text)
-        status_action.setEnabled(False)
+        claude_state = ui("connection_" + connection.state)
+        claude_activity = ui("activity_link_" + self.claude_activity())
+
+        def status_row(name: str, state: str, activity: str, tooltip: str = "") -> None:
+            """顶层每个提供方一行：名称：连接 · 活动。截断到 240，全文在 tooltip。"""
+            full = ui("menu_link_status", name=name, state=state, activity=activity)
+            row = menu.addAction(menu.fontMetrics().elidedText(full, Qt.ElideRight, 240))
+            row.setEnabled(False)
+            tip = "\n".join(t for t in (full if row.text() != full else "", tooltip) if t)
+            if tip:
+                row.setToolTip(tip)
+
+        status_row(ui("menu_claude"), claude_state, claude_activity)
         if self.v2.core.enabled:
             full_status = self.v2.text(ui)
             v2_status_action = menu.addAction(menu.fontMetrics().elidedText(full_status, Qt.ElideRight, 240))
             v2_status_action.setToolTip(full_status)
             v2_status_action.setEnabled(False)
         if self.chatgpt is not None:
-            # 完整状态是多行长句，放在顶层会把整个菜单撑得很宽：顶层只放状态那一行并截断，全文在 tooltip 和 ChatGPT 子菜单里。
-            full = self.chatgpt.status(ui)
-            lines = full.split("\n")
-            line = menu.addAction(menu.fontMetrics().elidedText(lines[1] if len(lines) > 1 else lines[0], Qt.ElideRight, 240))
-            line.setEnabled(False)
-            line.setToolTip(full)
+            chat_state = ui("link_state_" + self.chatgpt.connection_state())
+            chat_activity, chat_hint = self.chatgpt.activity(ui)
+            status_row(ui("menu_chatgpt"), chat_state, chat_activity, self.chatgpt.status(ui))  # 原来的多行全文
+
+        def provider_menu(name: str, state: str, activity: str, hint: Optional[str]) -> QMenu:
+            """两边子菜单同一套结构：连接行、活动行，然后三个操作项。"""
+            sub = ai_menu.addMenu(name)
+            sub.setToolTipsVisible(True)  # 连接详情 / 被截断的状态行全文
+            for text, tip in ((ui("menu_link_connection", state=state), None),
+                              (ui("menu_link_activity", state=activity), hint)):
+                shown = sub.fontMetrics().elidedText(text, Qt.ElideRight, 360)
+                row = sub.addAction(shown)
+                row.setEnabled(False)
+                tip = "\n".join(t for t in (text if shown != text else "", tip or "") if t)
+                if tip:
+                    row.setToolTip(tip)
+            sub.addSeparator()
+            return sub
 
         ai_menu = menu.addMenu(ui("menu_ai"))
         ai_menu.setToolTipsVisible(True)  # 连接详情
-        claude_menu = ai_menu.addMenu(ui("menu_claude"))
-        claude_menu.setToolTipsVisible(True)  # 连接详情
-        claude_menu.addAction(status_text).setEnabled(False)
-        connection_actions = []
-        if connection.state != "connected":
-            label = "menu_reconnect" if connection.state == "stale" else "menu_connect"
-            connection_actions.append(claude_menu.addAction(ui(label)))
-            connection_actions[-1].triggered.connect(lambda: self.open_connection())
+        claude_menu = provider_menu(ui("menu_claude"), claude_state, claude_activity, None)
+        connection_actions = [claude_menu.addAction(ui("link_manage"))]
+        connection_actions[-1].triggered.connect(lambda: self.open_connection())
+        claude_menu.addAction(ui("link_disable" if self.hub.link_enabled else "link_enable")).triggered.connect(
+            self.toggle_claude_link)
         if connection.state in ("connected", "stale", "error"):
-            connection_actions.append(claude_menu.addAction(ui("menu_disconnect")))
+            connection_actions.append(claude_menu.addAction(ui("link_remove")))
             connection_actions[-1].triggered.connect(self.disconnect)
-        if connection.detail:  # 原来挂在“状态/连接/断开”里最后添加的一项上，重排后仍挂在它
+        if connection.detail:  # 原来挂在“连接/断开”里最后添加的一项上，重排后仍挂在它
             connection_actions[-1].setToolTip(connection.detail)
         if self.chatgpt is not None:
             from shion.chatgpt import review_connection
-            chat = ai_menu.addMenu(ui("menu_chatgpt"))
-            chat.setToolTipsVisible(True)  # 被截断的状态行全文
-            for line in self.chatgpt.status(ui).split("\n"):  # 多行状态逐行显示；拼成一条要 660~800 逻辑像素宽
-                text = chat.fontMetrics().elidedText(line, Qt.ElideRight, 360)
-                row = chat.addAction(text)
-                row.setEnabled(False)
-                if text != line:
-                    row.setToolTip(line)
-            chat.addAction(ui("chatgpt_install")).triggered.connect(lambda: review_connection(self))
-            chat.addAction(ui("chatgpt_disable" if self.chatgpt.enabled else "chatgpt_enable")).triggered.connect(self.toggle_chatgpt)
-            chat.addAction(ui("chatgpt_uninstall")).triggered.connect(lambda: review_connection(self, True))
+            chat = provider_menu(ui("menu_chatgpt"), chat_state, chat_activity, chat_hint)
+            chat.addAction(ui("link_manage")).triggered.connect(lambda: review_connection(self))
+            chat.addAction(ui("link_disable" if self.chatgpt.enabled else "link_enable")).triggered.connect(self.toggle_chatgpt)
+            chat.addAction(ui("link_remove")).triggered.connect(lambda: review_connection(self, True))
 
         settings_menu = menu.addMenu(ui("menu_settings"))
         settings_menu.setToolTipsVisible(True)  # 开机自启错误
@@ -1363,6 +1381,35 @@ class PetController(QObject):
         menu.addAction(ui("menu_about")).triggered.connect(self.show_about)
         menu.addAction(ui("menu_quit")).triggered.connect(self.quit)
         return menu
+
+    def claude_activity(self) -> str:
+        """菜单“活动”行：off / stopped / permission / working / idle（都来自诗音自己的状态）。"""
+        if not self.hub.link_enabled:
+            return "off"
+        if self.state.paused:
+            return "stopped"
+        if self.hub.permissions.pending():
+            return "permission"
+        return "working" if self.state.is_working(self._now()) else "idle"
+
+    def toggle_claude_link(self) -> None:
+        """临时关闭 / 重新开启和 Claude Code 的联动。关闭时诗音表现得像没开：hook 照常调用但拿不到任何决定。"""
+        enabled = not self.hub.link_enabled
+        self.state.save.claude_link_enabled = enabled
+        self.scheduler.mark_dirty(self._now())
+        self.scheduler.flush()
+        self.hub.set_link_enabled(enabled)  # 关闭：撤回授权、放行停下等待的 hook、清掉暂停和中断
+        if not enabled:
+            self._leave_pause()
+            self._interrupt_waiting.clear()
+            self._interrupted.clear()
+            self._end_pending.clear()
+            self._ended = None
+            self._procs.clear()
+            self._tool_wall.clear()
+            self.state.reset_claude()
+            self._sync_permission()  # 收起授权面板
+        self.sync()  # 两个方向都从空闲开始；关闭期间的事件不补播
 
     def toggle_chatgpt(self):
         if self.chatgpt is not None:

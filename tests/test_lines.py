@@ -82,8 +82,9 @@ def test_ready_reminders_are_native_and_brand_only_describes_connection(code):
     for key in ("plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end", "claude_done"):
         assert raw["lines"][key]  # 必须原生提供，不能依赖中文回退
         assert Lines(code).pick(key) in raw["lines"][key]
-    # 只有连接相关的标签（状态行、连接/重连、Claude Code 子菜单标题、确认说明）可以出现 Claude Code；其余文案一律不含。
-    compatibility = {"menu_connect", "menu_reconnect", "connection_explain", "menu_connection_status", "menu_claude"}
+    # 只有连接相关的标签（Claude Code 名称/子菜单标题、确认说明）可以出现 Claude Code；其余文案一律不含。
+    # 状态行改为“{name}：…”模板、连接项改为两边共用的文案后，原来的 menu_connect/menu_reconnect/menu_connection_status 已删除。
+    compatibility = {"connection_explain", "menu_claude"}
     assert all("Claude Code" in raw["ui"][key] for key in compatibility)
     visible = [text for key, text in raw["ui"].items() if key not in compatibility] + [s if isinstance(s, str) else s["text"]
                                           for pool in raw["lines"].values() for s in pool]

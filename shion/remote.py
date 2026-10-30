@@ -23,7 +23,29 @@ class RemoteHub:
         self._holding = 0
         self._last_hold = float("-inf")
         self._interrupts: set[str] = set()  # 被“立即中断”的会话：下一个检查点结束这一轮（一次性）
+        self._link = True  # 临时关闭联动时为 False：诗音表现得像没开
         self.permissions = PermissionQueue()
+
+    # ---- 临时关闭联动 ----
+    @property
+    def link_enabled(self) -> bool:
+        with self._cond:
+            return self._link
+
+    def set_link_enabled(self, enabled: bool) -> None:
+        """只由诗音界面调用。关闭：所有授权请求撤回（包括已有决定还没被取走的），hook 只能拿到 gone；
+        清掉暂停和中断，正在检查点等待的 hook 放行（不带停下）。开启：从空白开始，不恢复任何东西。"""
+        enabled = bool(enabled)
+        if not enabled:
+            self.permissions.close()  # 先关授权：切换期间不可能有决定被取走
+        with self._cond:
+            self._link = enabled
+            if not enabled:
+                self._paused = False
+                self._interrupts.clear()
+            self._cond.notify_all()
+        if enabled:
+            self.permissions.reopen()
 
     # ---- 暂停 / 继续 ----
     @property
@@ -87,6 +109,8 @@ class RemoteHub:
         """
         seconds = max(0.0, min(float(seconds), MAX_WAIT))
         with self._cond:
+            if not self._link:
+                return False, False  # 临时关闭联动：不停、不中断
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)
                 return False, True
@@ -96,12 +120,14 @@ class RemoteHub:
             self._holding += 1
             try:
                 self._cond.wait_for(
-                    lambda: not self._paused or self._end_gen != gen
+                    lambda: not self._paused or self._end_gen != gen or not self._link
                     or (session is not None and session in self._interrupts),
                     timeout=seconds)
             finally:
                 self._holding -= 1
                 self._last_hold = time.monotonic()
+            if not self._link:
+                return False, False  # 等待中被临时关闭：放行
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)
                 return self._paused, True
@@ -114,6 +140,7 @@ DETAIL_MAX = 20000  # 命令/路径/计划全文的字数上限
 TOOL_MAX = 60
 PENDING_IDLE = 25.0  # 请求超过这么久没被 hook 轮询，就认为 hook 已经没了（用户在 CC 里自己答了）
 DECIDED_KEEP = 60.0  # 已有决定但没人来取的请求，保留多久
+DISABLED = "disabled"  # open() 在临时关闭联动时的返回值（不是 id：真正的 id 是 32 位十六进制）
 
 
 @dataclass
@@ -140,13 +167,33 @@ class PermissionQueue:
     def __init__(self) -> None:
         self._cond = threading.Condition()
         self._items: dict[str, PermissionRequest] = {}
+        self._closed = False  # 临时关闭联动：不登记、不等、不产生决定
+
+    # ---- 临时关闭联动（只由 RemoteHub.set_link_enabled 调用）----
+    def close(self) -> None:
+        """撤回全部请求，包括已有决定还没被取走的：正在长轮询的 hook 醒来只能拿到 gone。"""
+        with self._cond:
+            self._closed = True
+            self._items.clear()
+            self._cond.notify_all()
+
+    def reopen(self) -> None:
+        with self._cond:
+            self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        with self._cond:
+            return self._closed
 
     # ---- 给 HTTP 服务线程 ----
     def open(self, tool: str, detail: str, now: Optional[float] = None,
              session: str = "", key: str = "") -> Optional[str]:
-        """登记一个请求，返回 id；排队已满返回 None。"""
+        """登记一个请求，返回 id；排队已满返回 None；临时关闭联动时返回 DISABLED。"""
         now = time.monotonic() if now is None else now
         with self._cond:
+            if self._closed:
+                return DISABLED
             pending = sum(1 for r in self._items.values() if r.status == "pending")
             if pending >= MAX_PENDING:
                 return None
@@ -166,7 +213,7 @@ class PermissionQueue:
         with self._cond:
             while True:
                 item = self._items.get(rid)
-                if item is None:
+                if item is None or self._closed:
                     return "gone"
                 item.last_seen = time.monotonic() if now is None else now
                 if item.status != "pending":
@@ -204,7 +251,7 @@ class PermissionQueue:
         """用户在诗音上点了按钮。只对仍在等待的请求有效。"""
         with self._cond:
             item = self._items.get(rid)
-            if item is None or item.status != "pending":
+            if self._closed or item is None or item.status != "pending":
                 return False
             item.status = "allow" if allow else "deny"
             item.decided_at = time.monotonic()

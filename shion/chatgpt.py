@@ -141,6 +141,27 @@ class ChatGPTConnection:
             text += "\n" + ui("chatgpt_permission_unknown")
         return text
 
+    def connection_state(self):
+        """菜单“连接”行：off / installed / not_installed / error。只读 Shion 自己的安装记录，不解析 Codex 配置。"""
+        if not self.enabled:
+            return "off"
+        try:
+            return "installed" if config.read_ownership(self.home, self.private_directory) is not None else "not_installed"
+        except Exception:  # 读不了或旧版记录冲突：只是显示，不能让菜单打不开
+            return "error"
+
+    def activity(self, ui):
+        """菜单“活动”行：(文字, tooltip 或 None)。关闭时没有活动。"""
+        if not self.enabled:
+            return ui("activity_link_none"), None
+        tasks = [t for k, t in self.ledger.tasks.items() if k[0] == "chatgpt"]
+        rounds = ui("activity_link_rounds", count=self.working)
+        if any(t.state == "disconnected" for t in tasks):
+            return ui("activity_link_unknown", rounds=rounds), ui("link_lost_hint")
+        if self.error or self.ledger.uncertain or any(t.state == "uncertain" for t in tasks) or self._unobserved_start:
+            return ui("activity_link_unknown", rounds=rounds), ui("link_unknown_hint")
+        return rounds, None
+
     def plan(self, uninstall=False):
         return config.uninstall_plan(self.home, self.private_directory) if uninstall else config.install_plan(
             self.home, observer_command(), self.private_directory, self.private_directory)

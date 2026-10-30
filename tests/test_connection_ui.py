@@ -35,7 +35,7 @@ def test_menu_confirm_connect_status_disconnect_in_each_language(connected_env, 
     ctl.set_language(lang)
     ui = ctl.lines.ui
     menu = ctl.build_menu()
-    find_action(menu, ui("menu_connect")).trigger()
+    find_action(menu, ui("link_manage")).trigger()
     panel = ctl._connection_panel
     assert panel.isVisible()
     assert not ctl.connection.user.exists()  # 确认前不写
@@ -50,8 +50,11 @@ def test_menu_confirm_connect_status_disconnect_in_each_language(connected_env, 
     assert ctl.connection.inspect().state == "connected"
     assert ui("connection_connected") in ctl.status_text()
     menu2 = ctl.build_menu()
-    assert ui("menu_connect") not in [a.text() for a in menu2.actions()]
-    find_action(menu2, ui("menu_disconnect")).trigger()
+    find_action(menu2, ui("link_manage")).trigger()  # 已连接也能打开连接面板查看配置
+    assert panel.isVisible() and "settings.json" in panel._detail.text()  # 已连接也能看到要写入的配置位置
+    panel._later.click()
+    assert ctl.connection.inspect().state == "connected"
+    find_action(menu2, ui("link_remove")).trigger()
     assert ctl.connection.inspect().state == "disconnected"
     assert ui("connection_disconnected") in ctl.status_text()
 
@@ -101,7 +104,7 @@ def test_failed_connection_still_records_choice_and_remains_retryable(connected_
     e.advance(60)
     assert not panel.isVisible()
     menu = e.ctl.build_menu()
-    assert find_action(menu, "连接 Claude Code").isEnabled()
+    assert find_action(menu, "连接 / 查看配置").isEnabled()
     assert "无法读取配置" in e.ctl.status_text()
 
 

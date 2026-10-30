@@ -529,8 +529,9 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
    - 现已预留 `sys.frozen` → 当前 `Shion.exe --hook <事件名>`，入口在加载 GUI 前分派到原 hook 的标准库逻辑，SessionStart 拉起当前 exe；源码命令仍沿用 `.venv/Scripts/python.exe` + 绝对 hook 路径。实际打包后还需验证标准流、资源路径、启动耗时；如需独立 `shion-hook.exe`，再按实测决定
 
 2. **一键连接 Claude Code**
-   - 中英日右键菜单提供“连接 Claude Code / 重新连接 Claude Code / 断开连接”，菜单及双击状态实时检查用户级配置：已连接、未连接、路径失效或连接不完整、无法读取配置。已连接只表示八个条目完整且指向当前有效路径，不代表实际事件联动已验收
-   - 菜单结构：顶层状态行写作“Claude Code：{状态}”（英文 `Claude Code: {state}`），状态值文案不变；“AI 连接”下是并列的两个子菜单：“Claude Code ›”（第一行是同样的禁用状态行，其后是连接 / 重新连接 / 断开，显示条件和 `connection.detail` tooltip 不变）与“ChatGPT ›”（原 ChatGPT 联动子菜单，仅标题改为 ChatGPT）。Claude Code 在前；未启用 ChatGPT 时只显示 Claude Code 子菜单。双击状态气泡仍用不含品牌名的“连接状态：…”
+   - 中英日右键菜单提供“连接 / 查看配置”“临时关闭联动 / 重新开启联动”“断开并移除配置”，菜单及双击状态实时检查用户级配置：已连接、未连接、路径失效或连接不完整、无法读取配置。已连接只表示八个条目完整且指向当前有效路径，不代表实际事件联动已验收
+   - 菜单结构（2026-10-30 对齐）：顶层每个提供方一行“{名称}：{连接状态} · {活动}”，截断到 240 像素，全文挂 tooltip（ChatGPT 行的 tooltip 另附原多行状态）；v2 调度开关打开时额外的那一行不变。“AI 连接”下并列“Claude Code ›”和“ChatGPT ›”（Claude Code 在前，未启用 ChatGPT 时只有前者），两边结构相同：禁用的“连接：{状态}”“活动：{状态}”两行（不带提供方前缀，截断到 360 像素挂 tooltip）、分隔线、上述三个操作项，文案两边一致。Claude 连接用 `connection.state`，活动依次取已临时关闭 / 已停下 / 等待授权 / 正在工作 / 空闲；ChatGPT 连接取已临时关闭 / 已安装 / 未安装 / 无法读取配置（只读 Shion 安装记录），活动显示观察到的活动轮次，不确定时标“待确认”并在 tooltip 说明只统计本次观察。Claude 的“连接 / 查看配置”在任何状态都打开连接面板；“断开并移除配置”只在已连接、路径失效、无法读取时出现，`connection.detail` tooltip 挂在最后一个连接项上。双击状态气泡仍用不含品牌名的“连接状态：…”
+   - **临时关闭联动（Claude）**：诗音表现得像没开。hook 照常调用，服务端立即响应：`/event` 只校验后忽略（不改状态、不说话）；`/pause/wait` 立即放行；`/permission/open` 不登记、不给 id，hook 不输出决定，交回 CC 自己的授权框；`/permission/wait` 一律 gone；`/feedback/take` 返回空且不取走反馈队列。切换为关闭时撤回全部授权请求（含已决定未取走的）、放行正在检查点等待的 hook（不带停下）、清掉暂停和中断标记，诗音回到空闲，“工作遥控”子菜单整体置灰。重新开启时不补播关闭期间的事件，从空闲开始。开关存进 `state.json` 的 `claude_link_enabled`（ChatGPT 的开关同样存在数据目录里），旧存档缺字段时为开启
    - 确认面板说明会合并写入 `%USERPROFILE%\.claude\settings.json`、备份及迁移。沿用 `tools/hooks_config.py`，CLI 安装/卸载与界面共用；事件、command + args、matcher、timeout、statusMessage 均沿用现有定义
    - 只处理明确的诗音脚本/打包命令，兼容旧命令格式，不按子串删除第三方条目；statusLine、modelSettings、未知键及混合分组中的其他 hooks 均保留。重复连接无变化时不写盘、不备份
    - 写前校验用户级及本项目 `.claude/settings.local.json`，损坏/空 JSON 和非法 hooks 结构拒绝写入。所有变更文件先备份原始字节并暂存，再先移除项目级旧诗音 hooks、后写用户级配置，避免双发；任一步失败恢复已改文件，恢复失败明确报告备份位置。检测到并发修改时拒绝覆盖。**迁移旧项目 hooks 只在源码运行时有效**，且只处理当前源码项目，不扫描其他旧项目；用 exe 连接时，请在旧项目里运行 `tools\uninstall_hooks.py`，再使用用户级连接，避免重复事件。连接确认面板中英日均明确说明此限制

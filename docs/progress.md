@@ -9,6 +9,7 @@
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
 - 最近一次全量为 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
 - 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
+- 分支 `feature/menu-parity`（从 `dc9fe3d` 派生）：右键菜单 Claude Code / ChatGPT 连接管理对齐，并新增 Claude 的“临时关闭联动”。未合并、未部署、未 push；本分支全量结果见下方 2026-10-30 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -33,6 +34,7 @@
 ## 正在进行的阶段与下一步
 
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
+- `feature/menu-parity` 待用户审核、真机验收后决定是否合并到当前分支。
 - 下一步由用户审核开发分支及下方清单，再安排真实客户端适配与 GUI 人工验收；部署、打包、用户开关开放、真实配置写入与发布须有对应授权。本任务不推进这些步骤。
 - 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。
 
@@ -50,6 +52,7 @@
 - [ ] v1 桌面交互：Win+D 恢复、置顶与附属面板避让、透明区点穿、不抢焦点、多屏/高 DPI、四档尺寸、动态动作及爱心/Z/睡眠观感。
 - [ ] v1 Claude 实际联动：授权自动收起、暂停/继续、中断文字与工具分支、超时/静音、终端草稿与确认框保护、桌面复制“继续”、连接迁移不重复事件和登录自启。
 - [ ] 三语菜单/台词/气泡、对话数字键与焦点、每日额度/时段问候/等级与存档迁移；逐项条件见归档，自动化通过不能替代用户观感。
+- [ ] 菜单对齐与临时关闭联动（`feature/menu-parity`）：真机右键看两个子菜单的结构、截断与 tooltip；Claude 临时关闭后真实 CC 的授权框、停下中的 hook、反馈注入与重新开启的表现；离屏渲染和合成测试不代替真机。
 - [ ] 菜单标名（`feature/menu-claude-label`）：真机右键看顶层“Claude Code：…”状态行，以及“AI 连接 › Claude Code › / ChatGPT ›”两个子菜单的展开位置、宽度和 tooltip（高 DPI、多屏）；离屏渲染截图不代替真机观感。
 
 ## v1.1 待办
@@ -57,10 +60,13 @@
 - [x] hook 耗时：诗音没开时的等待已在 v1.0.1 热修里去掉（见当前状态）。诗音运行时 PreToolUse 仍约 354 ms（源码）/ 435 ms（exe）：主要是进程启动，`find_cc_process` 只占约 26 ms；是否继续降另议
 - [ ] 实验：桌面端能否拿到 statusLine 的 `rate_limits.seven_day`（每任务额度上限的前提）
 - [ ] 接入 GPT / Codex
+- [ ] V2.1 候选：Codex 控制能力。实验结论：授权可行（异常时交回 Codex 自己处理，桌面端未测）；停下只能做到"检查点暂停 → 继续"；中断目前不可行。详见 docs/experiments/shion-v2-codex-control.md。
 
 - [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-10-30 菜单连接管理对齐 + Claude 临时关闭联动**（分支 `feature/menu-parity`，worktree `..\claude-pet-menu-parity`）：两个子菜单统一为“连接：… / 活动：… / ─ / 连接 / 查看配置 / 临时关闭联动（重新开启联动）/ 断开并移除配置”，三语文案两边一致；顶层每个提供方一行“{名称}：{连接} · {活动}”，截断 240 挂 tooltip。Claude 新增临时关闭：`RemoteHub.set_link_enabled` 关闭授权队列（撤回全部请求，含已决定未取走的）、清暂停和中断并唤醒检查点等待；服务端 `/event` 忽略、`/pause/wait` 放行、`/permission/open` 不给 id、`/permission/wait` 一律 gone、`/feedback/take` 返回空且不取走队列；hook 脚本未改。开关存 `state.json` 的 `claude_link_enabled`，旧档默认开启。删除不再使用的 `menu_connect/menu_reconnect/menu_disconnect/menu_connection_status/chatgpt_install/disable/enable/uninstall`，`test_lines.py` 白名单缩小为 `connection_explain`、`menu_claude`。`scheduler_disabled_a55825f.json` 只刷新 21 个 `menu_sha256`，其余字段逐项比对一致。全量（`--basetemp=build\pytest-tmp\full2`）：`1870 passed, 8 skipped, 2 warnings in 607.21s (0:10:07)`，两条为既有 Pillow `getdata()` 弃用警告。第一次全量有 2 个失败：`test_menu_contents` 是旧断言没跟上，已改；`test_install_hooks.py::test_corrupt_json_not_touched` 是环境问题：当前会话设了 `PYTHONIOENCODING=utf-8`，子进程按 UTF-8 写 stderr，测试用 `text=True` 按 GBK 解码；去掉该变量后通过，与本改动无关。`render_menu.py --platform windows --baseline dc9fe3d` 三语无未挂 tooltip 的截断，ChatGPT 子菜单比旧版窄，英文 Claude 子菜单约宽 70 逻辑像素（“Disconnect and remove configuration”）。范围外发现：`ChatGPTConnection._unobserved_start` 从未被清除，所以 ChatGPT 活动总显示“待确认”；工作遥控置灰时好评/差评也无法入队（按要求整体置灰）。未合并、未打包、未部署、未 push。
 
 - **2026-10-30 Codex 控制能力隔离实验**：仅临时 CODEX_HOME、临时项目、独立 CLI/TUI/app-server 和固定回环响应器，不改产品代码、真实 Codex/CC 配置或 Shion-dev。同步 Pre/Post 每次 125 秒等待可用；Pre deny 只挡当前调用，Post continue:false 的 stopped 状态仍未阻止下一工具。官方 turn/interrupt 可结束轮次，但两组测试父子工具进程八秒后仍运行。PermissionRequest allow/deny 有效；超时/崩溃回原审批，自动审批仍可能放行；事件输入无可靠人工等待标志且缺 tool_use_id/request_id。桌面独立实例隔离未证实，GUI 六项均未验证。详见 [控制实验报告](experiments/shion-v2-codex-control.md)，不开放 ChatGPT 控制能力；后续须先解决失败关闭、进程归属和桌面隔离。本地提交，不 push。
 - **2026-10-30 `.venv` 事故恢复与替换收尾**：移除菜单 worktree 时漏解除指向主 `.venv` 的 junction，误删共享依赖；已单独解除链接、清理残留并重装运行、测试、构建依赖及 pip。本次 `pip check` 和全量 pytest 通过（汇总见上）；旧环境无完整版本清单，不保证所有开发依赖逐版本还原。`CLAUDE.md` 已加入 junction 单独解除及 worktree 移除前 reparse point 扫描规矩。替换状态 `complete`；只读核对新 exe 哈希与记录一致、47613/47614 均归新 Shion-dev（PID 30104）、08:39:40 最新启动以来日志正常、存档 `v2_scheduler_enabled=false`。证据在忽略目录 `build/menu-label-replacement-20261030/`；本次仅改规则与进度文档，本地提交、不 push。

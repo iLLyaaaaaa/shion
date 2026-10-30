@@ -14,7 +14,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
-from .remote import RemoteHub
+from .remote import DISABLED, RemoteHub
 
 log = logging.getLogger("shion.server")
 
@@ -185,6 +185,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "session / tool_id / proc 字段不合法"})
             return
         hub = self.server.hub
+        if not hub.link_enabled:
+            # 临时关闭联动：不改状态、不说话，也不碰暂停和授权
+            self._send(200, {"ok": True, "ignored": True})
+            return
         if etype in ("prompt", "stop") and "session" in meta:
             hub.clear_interrupt(meta["session"])  # 这一轮已经结束或重新开始：没用上的中断作废
         if "session" in meta and (etype in ("prompt", "stop") or (etype == "notification" and detail == IDLE_PROMPT)):
@@ -207,6 +211,9 @@ class _Handler(BaseHTTPRequestHandler):
     def _post_take_feedback(self):
         # 读取 body（即使不用），避免连接被意外重置
         if self._read_json() is None:
+            return
+        if not self.server.hub.link_enabled:
+            self._send(200, {"text": ""})  # 临时关闭联动：反馈留在队列里，不取走
             return
         try:
             with self.server.feedback_lock:
@@ -255,6 +262,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "session / key 字段不合法"})
             return
         rid = self.server.hub.permissions.open(tool, detail, session=session, key=key or "")
+        if rid == DISABLED:
+            self._send(200, {"disabled": True})  # 临时关闭联动：不给 id，hook 不给决定，交回 CC 自己的授权框
+            return
         if rid is None:
             self._send(503, {"error": "too many pending requests"})
             return

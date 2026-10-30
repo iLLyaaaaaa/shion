@@ -201,6 +201,7 @@ class SaveData:
     release_to_taskbar: bool = False
     always_on_top: bool = True
     v2_scheduler_enabled: bool = False
+    claude_link_enabled: bool = True  # 临时关闭联动时为 False；旧档没有这个字段 = 开启
     time_speech: dict = field(default_factory=lambda: {"date": "", "spoken": []})
     connection_prompt: Optional[str] = None  # pending / connect / later / skipped；旧档启动时标 skipped
 
@@ -226,6 +227,7 @@ class SaveData:
             "release_to_taskbar": self.release_to_taskbar,
             "always_on_top": self.always_on_top,
             "v2_scheduler_enabled": self.v2_scheduler_enabled,
+            "claude_link_enabled": self.claude_link_enabled,
             "time_speech": {"date": self.time_speech["date"], "spoken": list(self.time_speech["spoken"])},
             "connection_prompt": self.connection_prompt,
         }
@@ -264,6 +266,7 @@ class SaveData:
         d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)
         d.always_on_top = _bool(raw.get("always_on_top"), True)
         d.v2_scheduler_enabled = _bool(raw.get("v2_scheduler_enabled"), False)
+        d.claude_link_enabled = _bool(raw.get("claude_link_enabled"), True)
         d.time_speech = _time_speech_record(raw.get("time_speech"))
         prompt = raw.get("connection_prompt")
         d.connection_prompt = prompt if prompt in ("pending", "connect", "later", "skipped") else None
@@ -488,6 +491,13 @@ class PetState:
     def end_session(self, session: Optional[str]) -> None:
         """这个会话的这一轮结束了（被中断 / 停太久结束）：不再算工作中，不计完成任务。"""
         self._sessions.pop(session or "", None)
+
+    def reset_claude(self) -> None:
+        """临时关闭联动：忘掉所有 Claude 会话和停下状态，回到空闲。不计任务、不加好感、不催。"""
+        self._sessions.clear()
+        self._stopped_at = None
+        self._nudges = 0
+        self.paused = False
 
     def can_idle(self, now: datetime) -> bool:
         return (
