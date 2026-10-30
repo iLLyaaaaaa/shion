@@ -207,7 +207,8 @@ def test_frozen_hook_launch_uses_current_exe_without_python(tmp_path, monkeypatc
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(exe))
     calls = []
-    monkeypatch.setattr(hook.subprocess, "Popen", lambda args, **kw: calls.append((args, kw)))
+    from shion import launcher
+    monkeypatch.setattr(launcher, "_popen", lambda args, **kw: calls.append((args, kw)))
     hook.launch_shion()
     assert calls[0][0] == [str(exe)]
     assert calls[0][1]["cwd"] == str(tmp_path)

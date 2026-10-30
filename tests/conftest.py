@@ -53,3 +53,10 @@ def isolated_user(tmp_path_factory, monkeypatch):
     registry = FakeRegistry()
     monkeypatch.setattr(Startup, "registry", property(lambda self: self._registry or registry))
     return home
+
+
+@pytest.fixture(autouse=True)
+def no_real_launch(monkeypatch):
+    """任何测试都不能真的拉起诗音 GUI；要检查启动参数的测试自己再替换 _popen。"""
+    from shion import launcher
+    monkeypatch.setattr(launcher, "_popen", lambda *args, **kwargs: None)

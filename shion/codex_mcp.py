@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import http.client
 import json
+import logging
 import sys
 import uuid
 import threading
 from pathlib import Path
 
 from .events import EVENTS, parse_observation
+from .launcher import AutoLaunch
 from .observer_files import read_private
+
+log = logging.getLogger("shion.codex_mcp")
+_AUTOLAUNCH = AutoLaunch()  # one per Observer process: at most one launch attempt per cooldown
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 HEARTBEAT_INTERVAL = 2.0
@@ -40,6 +45,25 @@ def forward(data, directory: Path, path="/observe/v1"):
             connection.close()
     except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException, RecursionError):
         pass
+
+
+def codex_link_enabled(directory: Path) -> bool:
+    # The ChatGPT/Codex "temporarily off" switch is `enabled` in chatgpt-observer.json.
+    # Only an explicit false counts; a missing or unreadable file keeps the default (on).
+    try:
+        config = json.loads(read_private(directory / "chatgpt-observer.json"))
+        return not (isinstance(config, dict) and config.get("enabled") is False)
+    except Exception:
+        return True
+
+
+def autolaunch(event, directory: Path):
+    # Best effort, after the event was forwarded; nothing here may fail the tool call.
+    try:
+        if event.event == "SessionStart":
+            _AUTOLAUNCH.attempt(codex_link_enabled(directory))
+    except Exception:
+        log.exception("auto-launch failed")
 
 
 class HeartbeatSender:
@@ -92,6 +116,7 @@ def dispatch(request, directory, observer, *, leased=False):
         if leased:
             payload["leased"] = True
         forward(payload, directory)
+        autolaunch(event, directory)
         return {"content": [{"type": "text", "text": "{}"}], "isError": False}
     raise LookupError("method not found")
 

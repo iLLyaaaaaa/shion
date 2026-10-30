@@ -263,7 +263,8 @@ def test_launch_sets_source_only_on_child_environment(monkeypatch):
     h = load_hook()
     calls = []
     before = os.environ.get("SHION_LAUNCHED_BY_HOOK")
-    monkeypatch.setattr(h.subprocess, "Popen", lambda *args, **kwargs: calls.append((args, kwargs)))
+    from shion import launcher
+    monkeypatch.setattr(launcher, "_popen", lambda *args, **kwargs: calls.append((args, kwargs)))
     h.launch_shion()
     assert len(calls) == 1
     assert calls[0][1]["env"]["SHION_LAUNCHED_BY_HOOK"] == "1"

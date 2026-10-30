@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from shion import launcher
+
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "shion_hook.py"
 windows_only = pytest.mark.skipif(os.name != "nt", reason="命名管道探测只在 Windows 上启用")
 
@@ -69,12 +71,12 @@ PAYLOADS = {
 def test_instance_name_constant_matches_the_app():
     from shion.app import INSTANCE_NAME
 
-    assert load_hook().INSTANCE_NAME == INSTANCE_NAME
+    assert INSTANCE_NAME is launcher.INSTANCE_NAME == "ShionDesktopPet-single-instance"
 
 
-# ------------------------------------------------------------ shion_running()
+# ------------------------------------------------------------ shion_running()（实现在 shion/launcher.py，hook 共用）
 def test_pipe_name_default_and_env_override(monkeypatch):
-    h = load_hook()
+    h = launcher
     seen = []
     monkeypatch.setattr(h, "IS_WINDOWS", True)
     monkeypatch.setattr(h, "_wait_named_pipe", lambda path: seen.append(path) or (False, 2))
@@ -92,7 +94,7 @@ def test_pipe_name_default_and_env_override(monkeypatch):
 @pytest.mark.parametrize("instance", [None, "Custom-Name"])
 def test_custom_port_means_a_test_harness_so_it_is_uncertain(monkeypatch, instance):
     # 测试/冒烟脚本常用 SHION_PORT 指向一个没有命名管道的假服务器：不能因为没管道就丢事件。
-    h = load_hook()
+    h = launcher
     monkeypatch.setattr(h, "IS_WINDOWS", True)
     monkeypatch.setattr(h, "_wait_named_pipe", lambda path: (_ for _ in ()).throw(AssertionError("不该探测")))
     monkeypatch.setenv("SHION_PORT", "5555")
@@ -111,7 +113,7 @@ def test_custom_port_means_a_test_harness_so_it_is_uncertain(monkeypatch, instan
     ((False, 0), None),
 ])
 def test_shion_running_results(monkeypatch, result, expected):
-    h = load_hook()
+    h = launcher
     monkeypatch.setattr(h, "IS_WINDOWS", True)
     monkeypatch.setattr(h, "_wait_named_pipe", lambda path: result)
     monkeypatch.delenv("SHION_PORT", raising=False)
@@ -119,7 +121,7 @@ def test_shion_running_results(monkeypatch, result, expected):
 
 
 def test_shion_running_exception_and_non_windows_are_uncertain(monkeypatch):
-    h = load_hook()
+    h = launcher
     monkeypatch.delenv("SHION_PORT", raising=False)
     monkeypatch.setattr(h, "IS_WINDOWS", True)
     monkeypatch.setattr(h, "_wait_named_pipe", lambda path: (_ for _ in ()).throw(OSError("boom")))
@@ -138,7 +140,7 @@ def test_real_pipe_of_a_qt_local_server_is_detected(monkeypatch):
     name = "ShionHookTest-" + uuid.uuid4().hex[:12]
     monkeypatch.setenv("SHION_INSTANCE_NAME", name)
     monkeypatch.delenv("SHION_PORT", raising=False)
-    h = load_hook()
+    h = launcher
     assert h.shion_running() is False
     server = QLocalServer()
     try:

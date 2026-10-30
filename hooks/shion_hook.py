@@ -16,7 +16,6 @@ ExitPlanMode 仅发送 plan_ready 提醒，不登记授权请求，计划确认�
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import threading
 import re
@@ -27,9 +26,6 @@ from urllib.parse import urlparse
 from pathlib import Path
 
 TIMEOUT = 0.5
-INSTANCE_NAME = "ShionDesktopPet-single-instance"  # 和 shion/app.py 的 INSTANCE_NAME 保持一致（有测试守着）
-ERROR_FILE_NOT_FOUND = 2
-IS_WINDOWS = os.name == "nt"
 _down = False  # 熔断：本进程里出现过连接类失败后，不再逐个请求等超时
 EVENTS = {
     "SessionStart": "session_start",
@@ -48,29 +44,17 @@ def base_url() -> str:
     return f"http://127.0.0.1:{os.environ.get('SHION_PORT') or 47613}"
 
 
-def _wait_named_pipe(path: str):
-    """(管道是否存在且可连, GetLastError)。零网络开销：Windows 上连未监听的本机端口要等满超时，管道不用。"""
-    import ctypes
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.WaitNamedPipeW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
-    kernel32.WaitNamedPipeW.restype = ctypes.c_int
-    ok = bool(kernel32.WaitNamedPipeW(path, 1))
-    return ok, 0 if ok else ctypes.get_last_error()
+def _launcher():
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from shion import launcher  # 只用标准库，不 import Qt；Codex 观察端共用同一份
+    return launcher
 
 
 def shion_running():
-    """诗音的单实例命名管道在不在：True = 在；False = 确定没开；None = 不确定（按原逻辑处理）。
-
-    只有“管道不存在”（ERROR_FILE_NOT_FOUND）才算确定没开。设了 SHION_PORT 说明是测试/自定义环境，
-    它的假服务器没有管道，不判断；任何异常、非 Windows、其他错误码都不判断。
-    """
+    """诗音的单实例命名管道在不在：True = 在；False = 确定没开；None = 不确定。实现见 shion/launcher.py。"""
     try:
-        if not IS_WINDOWS or os.environ.get("SHION_PORT"):
-            return None
-        ok, error = _wait_named_pipe("\\\\.\\pipe\\" + (os.environ.get("SHION_INSTANCE_NAME") or INSTANCE_NAME))
-        if ok:
-            return True
-        return False if error == ERROR_FILE_NOT_FOUND else None
+        return _launcher().shion_running()
     except Exception:
         return None
 
@@ -325,23 +309,10 @@ def take_feedback() -> str:
 
 
 def launch_shion() -> None:
-    frozen = getattr(sys, "frozen", False)
-    exe = Path(sys.executable) if frozen else ROOT / ".venv" / "Scripts" / "pythonw.exe"
-    if not exe.exists():
-        return
-    flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    for extra in (0x01000000, 0):  # CREATE_BREAKAWAY_FROM_JOB；被拒绝就去掉重试
-        try:
-            subprocess.Popen(
-                [str(exe)] + ([] if frozen else ["-m", "shion"]),
-                cwd=str(exe.parent if frozen else ROOT), creationflags=flags | extra,
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env={**os.environ, "SHION_LAUNCHED_BY_HOOK": "1",
-                     **({"PYINSTALLER_RESET_ENVIRONMENT": "1"} if frozen else {})},
-            )
-            return
-        except OSError:
-            continue
+    try:
+        _launcher().launch_shion(ROOT)
+    except Exception:
+        pass
 
 
 def probe_health():
@@ -439,8 +410,10 @@ def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else ""
     if name not in EVENTS:
         return
-    if name != "SessionStart" and shion_running() is False:
-        return  # 诗音没开：放行，交回 CC 自己处理（SessionStart 仍要走 ensure_running 拉起它）
+    # 只有 SessionStart 且联动没被临时关闭时才会拉起诗音；存档读不到 / 缺字段 = 默认开启
+    can_launch = name == "SessionStart" and read_save().get("claude_link_enabled") is not False
+    if not can_launch and shion_running() is False:
+        return  # 诗音没开：放行，交回 CC 自己处理
     etype = EVENTS[name]
     meta = session_meta(name, data)
     session = meta.get("session")
@@ -451,7 +424,7 @@ def main() -> None:
         if data.get("is_interrupt"):
             request("/event", {"type": "tool_done", **meta})  # 用户在 CC 里按了 Esc：工具结束，不算出错
             return
-    if name == "SessionStart":
+    if can_launch:
         ensure_running()
     if name == "PostToolUse":
         # 检查点：工具做完、开始写文字之前也能停住；继续以后才取反馈，停下时反馈留给下一次 UserPromptSubmit
