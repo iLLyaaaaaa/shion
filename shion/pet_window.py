@@ -27,7 +27,7 @@ from shion.behavior import (
     JUMP_DURATION, JUMP_HEIGHT,
     LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT,
     SHAKE_WINDOW, DragPlayback, ShakeTracker, jump_sample, TickleGesture,
-    TURN_FRAME_SECONDS, FACE_SECONDS, CHEEK_RELEASE_SECONDS, CHEEK_LIFT_DISTANCE,
+    FACE_SECONDS, CHEEK_RELEASE_SECONDS, CHEEK_LIFT_DISTANCE,
     TICKLE_STOP_SECONDS, TICKLE_FRAME_SECONDS, TICKLE_TWIST_DEGREES,
     TICKLE_TWIST_PERIOD, TICKLE_SPEECH_SECONDS, BELLY_LIFT_DISTANCE, TICKLE_MOVE_DISTANCE,
     ReleaseVelocity, RELEASE_FAST_SPEED,
@@ -154,7 +154,6 @@ class PetWindow(QWidget):
         self._fall_y0 = 0.0
         self._last_tick = self._clock()
         self._shake = ShakeTracker()
-        self._turn_start: float | None = None
         self._pose: str | None = None
         self._pose_until = 0.0
         self._automatic_pose = False
@@ -548,10 +547,6 @@ class PetWindow(QWidget):
             f = Frame(name, angle=TICKLE_TWIST_DEGREES * math.sin(2 * math.pi * elapsed / TICKLE_TWIST_PERIOD))
         elif self._pose is not None:
             f = Frame(self._pose)
-        elif self._turn_start is not None:
-            names = self._sequences["turn"]
-            index = min(len(names) - 1, int(max(0.0, now - self._turn_start) / TURN_FRAME_SECONDS + 1e-9))
-            f = Frame(names[index])
         return f
 
     def _blend_action(self, now: float, f: Frame) -> Frame:
@@ -614,9 +609,6 @@ class PetWindow(QWidget):
         """推进一帧：拖动速度、下落、动画。定时器和测试/截图都走这里。"""
         dt = max(0.0, now - self._last_tick)
         self._last_tick = now
-        if self._turn_start is not None and now + 1e-9 >= self._turn_start + len(self._sequences["turn"]) * TURN_FRAME_SECONDS:
-            self._finish_action_fade(self._turn_start + len(self._sequences["turn"]) * TURN_FRAME_SECONDS)
-            self._turn_start = None
         if self._pose is not None and not self._cheek_pulling and now + 1e-9 >= self._pose_until:
             self._finish_action_fade(self._pose_until)
             self._pose = None
@@ -864,16 +856,6 @@ class PetWindow(QWidget):
         self._pose_until = self._clock() + FACE_SECONDS
         self._refresh(self._clock())
 
-    def turn(self, *, automatic: bool = False) -> None:
-        if self._dragging or self._falling or "turn" not in self._sequences:
-            return
-        self.stop_motion()
-        self._end_tickle()
-        self._begin_action_fade(self._clock())
-        self._automatic_pose = automatic
-        self._turn_start = self._clock()
-        self._refresh(self._clock())
-
     def set_calm(self, calm: bool) -> None:
         self._animator.calm = calm
 
@@ -882,23 +864,22 @@ class PetWindow(QWidget):
 
     @property
     def motion_active(self) -> bool:
-        return (self._jump_start is not None or self._turn_start is not None
+        return (self._jump_start is not None
                 or self._pose is not None or self._tickle_start is not None)
 
     @property
     def idle_motion_active(self) -> bool:
         return ((self._jump_start is not None and self._automatic_jump)
-                or (self._automatic_pose and (self._turn_start is not None or self._pose is not None)))
+                or (self._automatic_pose and self._pose is not None))
 
     @property
     def is_pressed(self) -> bool:
         return self._press_global is not None
 
     def stop_motion(self) -> None:
-        if (self._turn_start is not None or (self._pose is not None and not self._cheek_pulling)
+        if ((self._pose is not None and not self._cheek_pulling)
                 or (self._jump_start is not None and self._jump_framed)):
             self._finish_action_fade(self._clock())
-        self._turn_start = None
         if not self._cheek_pulling:
             self._pose = None
         self._automatic_pose = False

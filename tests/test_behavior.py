@@ -45,7 +45,7 @@ def test_idle_intervals_and_pause_do_not_catch_up(level):
     assert lo <= b.next_at <= hi
     due = b.next_at
     assert b.step(due - 0.001, True, level) is None
-    assert b.step(due, True, level) in ("turn", "face", "jump", "expression", "talk")
+    assert b.step(due, True, level) in ("face", "jump", "expression", "talk")
     assert b.step(1000, False, level) is None
     assert b.next_at is None
     assert b.step(2000, True, level) is None
@@ -61,3 +61,10 @@ def test_idle_talk_is_rare_and_respects_cooldown(monkeypatch):
     assert b.step(first, True, "lively") == "talk"
     assert b.step(b.next_at, True, "lively") != "talk"
     assert b.step(first + IDLE_TALK_COOLDOWN, True, "lively") == "talk"
+
+
+def test_turn_is_no_longer_an_idle_action_and_others_share_evenly():
+    from shion.behavior import IDLE_ACTIONS, IDLE_ACTION_WEIGHTS
+    assert "turn" not in IDLE_ACTIONS
+    assert IDLE_ACTIONS == ("face", "jump", "expression")
+    assert len(set(IDLE_ACTION_WEIGHTS)) == 1 and len(IDLE_ACTION_WEIGHTS) == len(IDLE_ACTIONS)

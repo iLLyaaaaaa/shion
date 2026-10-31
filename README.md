@@ -35,7 +35,7 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 ### Everyday interaction
 - Headpats (with hearts), pokes, cheek pinches, tickles, picking her up and shaking her (she gets dizzy)
 - Open **Talk → Give a snack**, or pick a preset conversation (no AI model involved)
-- **Actions**: **Jump**, **Turn around**, **Go to bed**, or **Rest at the desk**
+- **Actions**: **Jump**, **Face the mouse**, **Go to bed**, or **Rest at the desk**
 - Time-aware greetings: asks about breakfast in the morning, tells you to sleep late at night
 - **Affection**: grows slowly through headpats, snacks and talks; five levels unlock new talks, snacks and lines
 - 中文 / English / 日本語

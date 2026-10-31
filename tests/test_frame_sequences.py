@@ -58,14 +58,14 @@ def test_jump_four_stages_45px_then_lands_with_squash_and_rebound(env, automatic
     assert w.frame.sx == 1 and w.frame.angle == 0
 
 
-@pytest.mark.parametrize("action,elapsed", [("turn", 0.47), ("jump", 0.35), ("jump", 0.625), ("jump", 1.0)])
+@pytest.mark.parametrize("action,elapsed", [("jump", 0.35), ("jump", 0.625), ("jump", 1.0)])
 def test_motion_does_not_depend_on_dropped_frames(qapp, action, elapsed):
     windows = [PetWindow(clock=lambda: 100.0, autostart=False) for _ in range(2)]
     try:
         for w in windows:
             w.set_state("working", animate=False)
             w.place_default()
-            w.turn() if action == "turn" else w.jump()
+            w.jump()
         for i in range(1, int(elapsed * 60) + 1):
             windows[0].advance_to(100 + i / 60)
         for w in windows:
@@ -110,7 +110,7 @@ def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missi
             assert not w.motion_active and w._jump_offset == 0
         elif group in ("turn", "tickle", "cheek"):
             if group == "turn":
-                w.turn()
+                w.face(1)  # 侧身用 turn_2 / turn_8，缺组时不执行
                 assert not w.motion_active and w.displayed_sprite == "working"
             elif group == "tickle":
                 w._feed_tickle(100)
@@ -133,9 +133,9 @@ def test_motion_pixels_are_not_clipped_and_masks_cover_visible_pixels(env, heigh
     w.set_height(height)
     w.set_state("working", animate=False)
     w.place_default()
-    for action, times in (("turn", [i * 0.09 for i in range(8)]),
+    for action, times in (("face", [0, 0.05, 0.1, 1.0]),
                           ("jump", [0, 0.075, 0.15, 0.24, 0.35, 0.44, 0.495, 0.625])):
-        w.turn() if action == "turn" else w.jump()
+        w.face(1) if action == "face" else w.jump()
         start = env.mono[0]
         for elapsed in times:
             env.mono[0] = start + elapsed
@@ -162,16 +162,15 @@ def test_mouse_press_interrupts_jump_without_a_delayed_landing(env):
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
 
 
-def test_snapshot_cli_exposes_turn_and_jump_sequence_stages(qapp, tmp_path):
+def test_snapshot_cli_exposes_jump_and_drag_sequence_stages(qapp, tmp_path):
     from shion.__main__ import main
     frames = []
-    for motion, elapsed in (("--turn", "0.04"), ("--turn", "0.14"), ("--jump", "0.10"), ("--jump", "0.35"),
-                            ("--drag", "0"), ("--drag", "0.11")):
+    for motion, elapsed in (("--jump", "0.10"), ("--jump", "0.35"), ("--drag", "0"), ("--drag", "0.11")):
         out = tmp_path / f"{motion[2:]}-{elapsed}.png"
         assert main(["--snapshot", str(out), motion, "--at", elapsed]) == 0
         img = QImage(str(out)).convertToFormat(QImage.Format_RGBA8888)
         frames.append(bytes(img.constBits()))
-    assert len(set(frames)) == 6
+    assert len(set(frames)) == 4
 
 
 def test_snapshot_bubble_does_not_paint_over_jump_at_apex(qapp, tmp_path):

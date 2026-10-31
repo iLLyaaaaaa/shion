@@ -112,7 +112,7 @@ def test_dense_and_sparse_updates_match_during_many_micro_actions():
         dense._tested_to = at
 
 
-@pytest.mark.parametrize("action", ["jump", "legacy_jump", "turn", "face", "drag", "fall", "press", "bed", "desk", "fixed", "calm"])
+@pytest.mark.parametrize("action", ["jump", "legacy_jump", "face", "drag", "fall", "press", "bed", "desk", "fixed", "calm"])
 def test_window_actions_block_new_idle_effects(env, action):
     w = env.win
     w.set_state("idle", animate=False)
@@ -123,8 +123,6 @@ def test_window_actions_block_new_idle_effects(env, action):
         if action == "legacy_jump":
             w._sequences.pop("jump")
         w.jump()
-    elif action == "turn":
-        w.turn()
     elif action == "face":
         w.face(1)
     elif action == "drag":

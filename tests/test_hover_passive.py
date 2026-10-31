@@ -33,7 +33,7 @@ def hover(w):
 SCENARIOS = [
     "sleep", "night", "bed", "goodnight", "desk", "auto_desk", "neglect1", "neglect2",
     "working", "paused", "temporary", "idle_expression", "snack",
-    "turn", "face", "jump", "auto_turn", "auto_face", "auto_jump", "cheek", "tickle",
+    "face", "jump", "auto_face", "auto_jump", "cheek", "tickle",
 ] + ["fixed_" + name for name in EXPRESSIONS]
 
 
@@ -89,7 +89,7 @@ def snapshot(e):
         asdict(e.data), e.state.current(e.now), e.state._last_activity, e.state._woken_date,
         e.state._menu_sleep, e.state._resting, e.state._resting_auto, e.state._idle_expression,
         e.win.sprite_name, e.win.displayed_sprite, e.win.frame, e.win.geometry(),
-        e.win._turn_start, e.win._jump_start, e.win._pose, e.win._pose_until,
+        e.win._jump_start, e.win._pose, e.win._pose_until,
         e.win._tickle_start, e.win._tickle_last, e.ctl._idle.next_at, list(e.said),
     )
 
@@ -133,7 +133,7 @@ def test_enter_leave_during_drag_keep_closed_hand_and_dragging(env):
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, w.mapFromGlobal(gp))
 
 
-@pytest.mark.parametrize("scenario", ["sleep", "night", "bed", "desk", "auto_desk", "turn", "auto_jump"])
+@pytest.mark.parametrize("scenario", ["sleep", "night", "bed", "desk", "auto_desk", "face", "auto_jump"])
 def test_browsing_or_cancelling_context_menu_preserves_state_and_motion(env, scenario, monkeypatch):
     prepare(env, scenario)
     before = snapshot(env)

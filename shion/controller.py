@@ -230,9 +230,7 @@ class PetController(QObject):
             # 引导/确认期间不做自动动作，仍继续处理工作和授权事件。
             self.state.save.activity_level,
         )
-        if action == "turn":
-            self.window.turn(automatic=True)
-        elif action == "face":
+        if action == "face":
             self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1,
                              automatic=True)
         elif action == "jump":
@@ -532,8 +530,6 @@ class PetController(QObject):
         self._idle.next_at = None
         if name == "jump":
             self.window.jump()
-        elif name == "turn":
-            self.window.turn()
         elif name == "face":
             self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1)
         elif name == "bed":
@@ -1263,7 +1259,7 @@ class PetController(QObject):
             act.triggered.connect(lambda _=False, lv=level: self.set_activity(lv))
 
         action_menu = pet_menu.addMenu(ui("menu_action"))
-        for name in ("jump", "turn", "face", "bed", "desk"):
+        for name in ("jump", "face", "bed", "desk"):
             action_menu.addAction(ui("action_" + name)).triggered.connect(lambda _=False, n=name: self.do_action(n))
 
         size_menu = pet_menu.addMenu(ui("menu_size"))

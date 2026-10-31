@@ -49,7 +49,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--panel-expand", action="store_true", help="截图用：展开长内容")
     motion = p.add_mutually_exclusive_group()
     motion.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
-    motion.add_argument("--turn", action="store_true", help="截图用：转一圈，配合 --at 检查八帧")
     motion.add_argument("--face", choices=["left", "right"], help="截图用：朝向鼠标的左右侧身")
     motion.add_argument("--cheek", choices=["left", "right", "release"], help="截图用：捏脸与松手")
     motion.add_argument("--tickle", action="store_true", help="截图用：持续挠痒痒")
@@ -68,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
                                   args.panel_more, args.panel_expand, args.with_pet)
     if args.snapshot:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
-                            args.from_state, jump=args.jump, turn=args.turn, drag=args.drag,
+                            args.from_state, jump=args.jump, drag=args.drag,
                             face=args.face, cheek=args.cheek, tickle=args.tickle, badge=args.badge,
                             height=args.height, activity=args.activity, weight_shift=args.weight_shift,
                             nod=args.nod, desk_blink=args.desk_blink)

@@ -286,7 +286,6 @@ def render_snapshot(
     lang: str = "zh",
     from_state: str | None = None,
     jump: bool = False,
-    turn: bool = False,
     drag: bool = False,
     face: str | None = None,
     cheek: str | None = None,
@@ -314,8 +313,6 @@ def render_snapshot(
         win._animator.squash(t[0], squash)
     if jump:
         win.jump()
-    elif turn:
-        win.turn()
     elif face:
         win.face(1 if face == "right" else -1)
     elif cheek:
@@ -398,13 +395,13 @@ def render_snapshot(
 def snapshot(
     out: str, state: str = "idle", bubble: str | None = None, at: float = 0.0,
     squash: str | None = None, lang: str = "zh", from_state: str | None = None,
-    jump: bool = False, turn: bool = False, drag: bool = False, face: str | None = None,
+    jump: bool = False, drag: bool = False, face: str | None = None,
     cheek: str | None = None, tickle: bool = False, badge: bool = False, height: int = 200,
     activity: str = "normal", weight_shift: str | None = None, nod: bool = False,
     desk_blink: str | None = None,
 ) -> int:
     """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
-    img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, turn, drag,
+    img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, drag,
                           face, cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
 
     ok = img.save(out, "PNG")

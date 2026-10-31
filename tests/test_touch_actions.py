@@ -30,30 +30,18 @@ def belly_click(e):
     QTest.mouseClick(e.win, Qt.LeftButton, Qt.NoModifier, point(e.win, y=.69))
 
 
-@pytest.mark.parametrize("automatic", [False, True])
-def test_turn_displays_all_eight_frames_once_and_restores_idle(env, automatic):
-    w = env.win
-    original = w.pos()
-    w.turn(automatic=automatic)
-    for i in range(8):
-        if i:
-            env.advance(b.TURN_FRAME_SECONDS)
-        assert w.displayed_sprite == f"turn_{i + 1}"
-        assert w.idle_motion_active == automatic
-        assert w.pos() == original and w._jump_offset == 0
-    env.advance(b.TURN_FRAME_SECONDS)
-    assert w.displayed_sprite == "idle" and not w.motion_active
-
-
-@pytest.mark.parametrize("action", ["turn", "face"])
-def test_idle_scheduler_uses_same_turn_and_side_pose(env, monkeypatch, action):
-    monkeypatch.setattr(env.ctl._idle, "step", lambda *args: action)
+def test_idle_scheduler_uses_side_pose(env, monkeypatch):
+    monkeypatch.setattr(env.ctl._idle, "step", lambda *args: "face")
     env.ctl.tick()
     assert env.win.idle_motion_active
-    if action == "turn":
-        assert env.win.displayed_sprite == "turn_1"
-    else:
-        assert env.win.displayed_sprite in {"turn_2", "turn_8"}
+    assert env.win.displayed_sprite in {"turn_2", "turn_8"}
+
+
+def test_turn_around_action_is_removed_but_turn_frames_stay_loaded(env):
+    assert not hasattr(env.win, "turn") and not hasattr(env.win, "_turn_start")
+    assert len(env.win._sequences["turn"]) == 8  # face() 用 turn_2 / turn_8
+    env.ctl.do_action("turn")  # 旧名字：什么也不做，不报错
+    assert not env.win.motion_active
 
 
 @pytest.mark.parametrize("direction,sprite", [(1, "turn_2"), (-1, "turn_8")])
@@ -70,10 +58,9 @@ def test_side_pose_times_out_and_never_builds_mirror_cache(env, direction, sprit
     assert not any(name.startswith("walk_") for name in w._pixmaps)
 
 
-@pytest.mark.parametrize("action", ["turn", "face"])
-def test_press_interrupts_pose_and_work_interrupts_only_automatic_pose(env, action):
-    start = (lambda automatic: env.win.turn(automatic=automatic)) if action == "turn" else (
-        lambda automatic: env.win.face(1, automatic=automatic))
+def test_press_interrupts_pose_and_work_interrupts_only_automatic_pose(env):
+    def start(automatic):
+        env.win.face(1, automatic=automatic)
     start(True)
     env.ctl.handle_event("working")
     assert not env.win.motion_active
