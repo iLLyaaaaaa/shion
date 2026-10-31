@@ -16,12 +16,25 @@ HOLD_GRACE = 2.0  # hook 两段长轮询之间的空当，这么久之内仍算�
 
 
 class RemoteHub:
+    """停下 / 继续 / 结束这一轮 / 立即中断，都可以按会话进行。
+
+    暂停有两层：全局（菜单“全部”，以及只有 0～1 个会话时的原有行为）和单个会话。
+    会话 s 要等 = s 被单独停下，或全局停下中且 s 没有被单独放行。没有 session 的旧请求只看全局。
+    """
+
     def __init__(self) -> None:
         self._cond = threading.Condition()
-        self._paused = False
-        self._end_gen = 0
-        self._holding = 0
+        self._paused = False  # 全局暂停
+        self._paused_sessions: set[str] = set()  # 被单独停下的会话
+        self._exempt: set[str] = set()  # 全局暂停中被单独放行的会话（继续 / 在 CC 里说话 / 结束这一轮）
+        self._end_gen = 0  # 全局“结束这一轮”的一次性代数
+        self._end_gens: dict[str, int] = {}  # 按会话的“结束这一轮”代数
+        self._holding = 0  # 正在检查点等待的 hook 总数
         self._last_hold = float("-inf")
+        self._held: dict[Optional[str], int] = {}  # 会话 → 正在等的 hook 数（None = 没带 session 的旧请求）
+        self._held_last: dict[Optional[str], float] = {}  # 会话 → 最近一次退出等待的时刻
+        self._held_order: dict[Optional[str], int] = {}  # 会话 → 开始等的先后（面板排序用）
+        self._held_seq = 0
         self._interrupts: set[str] = set()  # 被“立即中断”的会话：下一个检查点结束这一轮（一次性）
         self._link = True  # 临时关闭联动时为 False：诗音表现得像没开
         self.permissions = PermissionQueue()
@@ -41,49 +54,116 @@ class RemoteHub:
         with self._cond:
             self._link = enabled
             if not enabled:
-                self._paused = False
+                self._clear_pauses()
                 self._interrupts.clear()
             self._cond.notify_all()
         if enabled:
             self.permissions.reopen()
 
     # ---- 暂停 / 继续 ----
+    def _clear_pauses(self) -> None:
+        self._paused = False
+        self._paused_sessions.clear()
+        self._exempt.clear()
+
+    def _paused_for(self, session: Optional[str]) -> bool:
+        if session is None:
+            return self._paused
+        return session in self._paused_sessions or (self._paused and session not in self._exempt)
+
+    def _release(self, session: str) -> None:
+        """只放行这个会话。全局暂停中：没有别的会话被单独停下、也没有别的 hook 在等时，整个解除全局暂停
+        （只有一个会话时和原来“继续 / 在 CC 里说话就解除停下”完全一样）；否则只把这个会话记为已放行。"""
+        self._paused_sessions.discard(session)
+        if not self._paused:
+            return
+        now = time.monotonic()
+        others = any(k != session and self._recently_held(k, now) for k in self._held)
+        if not self._paused_sessions and not others:
+            self._clear_pauses()
+        else:
+            self._exempt.add(session)
+
     @property
     def is_paused(self) -> bool:
+        """有任何暂停（全局或某个会话）。"""
+        with self._cond:
+            return self._paused or bool(self._paused_sessions)
+
+    @property
+    def is_global_paused(self) -> bool:
         with self._cond:
             return self._paused
 
-    def pause(self) -> None:
+    def is_session_paused(self, session: str) -> bool:
         with self._cond:
-            self._paused = True
+            return self._paused_for(session)
+
+    def paused_sessions(self) -> set[str]:
+        """被单独停下的会话（不含只因全局暂停而停的）。"""
+        with self._cond:
+            return set(self._paused_sessions)
+
+    def pause(self, session: Optional[str] = None) -> None:
+        """None：全局停下（原行为，之后才开始工作的会话也会停）。给了会话：只停这个会话。"""
+        with self._cond:
+            if session is None:
+                self._paused = True
+                self._exempt.clear()
+            else:
+                self._paused_sessions.add(session)
+                self._exempt.discard(session)
             self._cond.notify_all()
 
-    def resume(self) -> None:
+    def resume(self, session: Optional[str] = None) -> None:
+        """None：解除全部暂停（原行为）。给了会话：只放行这个会话，其他会话的暂停不变。"""
         with self._cond:
-            self._paused = False
+            if session is None:
+                self._clear_pauses()
+            else:
+                self._release(session)
             self._cond.notify_all()
 
     def wait_while_paused(self, seconds: float) -> bool:
-        """最多等 seconds 秒，直到不再暂停。返回结束时是否仍在暂停。"""
+        """最多等 seconds 秒，直到不再（全局）暂停。返回结束时是否仍在暂停。"""
         seconds = max(0.0, min(float(seconds), MAX_WAIT))
         with self._cond:
             self._cond.wait_for(lambda: not self._paused, timeout=seconds)
             return self._paused
 
     # ---- 结束这一轮 ----
-    def end(self) -> None:
-        """停下等满上限：解除暂停，并让此刻正在检查点等待的 hook 全部带着停下返回。
+    def end(self, session: Optional[str] = None) -> None:
+        """None：解除全部暂停，并让此刻正在检查点等待的 hook 全部带着停下返回（原行为）。
+        给了会话：只放行这个会话，只让此刻正在等的、属于这个会话的 hook 带着停下返回。
         之后才到的 hook 不受影响，不留残余状态。"""
         with self._cond:
-            self._paused = False
-            self._end_gen += 1
+            if session is None:
+                self._clear_pauses()
+                self._end_gen += 1
+            else:
+                self._release(session)
+                self._end_gens[session] = self._end_gens.get(session, 0) + 1
             self._cond.notify_all()
+
+    def _recently_held(self, key: Optional[str], now: float) -> bool:
+        return self._held.get(key, 0) > 0 or now - self._held_last.get(key, float("-inf")) < HOLD_GRACE
 
     @property
     def is_holding(self) -> bool:
         """有 hook 正在检查点等待（刚退出 HOLD_GRACE 秒内也算，长轮询两段之间有空当）。"""
         with self._cond:
             return self._holding > 0 or time.monotonic() - self._last_hold < HOLD_GRACE
+
+    def is_session_holding(self, session: str) -> bool:
+        with self._cond:
+            return self._recently_held(session, time.monotonic())
+
+    def holding_sessions(self) -> list[str]:
+        """正在检查点等着、而且仍在暂停的会话（宽限期内也算），按开始等的先后。没带 session 的旧请求不列出。"""
+        now = time.monotonic()
+        with self._cond:
+            keys = [k for k in self._held if k is not None and self._recently_held(k, now) and self._paused_for(k)]
+            return sorted(keys, key=lambda k: self._held_order.get(k, 0))
 
     # ---- 立即中断 ----
     def request_interrupt(self, sessions) -> None:
@@ -102,9 +182,9 @@ class RemoteHub:
             return session in self._interrupts
 
     def wait_gate(self, seconds: float, session: Optional[str] = None) -> tuple[bool, bool]:
-        """检查点：最多等 seconds 秒，直到不再暂停。返回 (仍在暂停, 这次要停下)。
+        """检查点：最多等 seconds 秒，直到这个会话不再暂停。返回 (仍在暂停, 这次要停下)。
 
-        等待期间等满上限被“结束”（end），返回 stop=True（并行等待的 hook 都会拿到）；
+        等待期间被“结束这一轮”（全局，或针对这个会话），返回 stop=True（此刻并行等待的同范围 hook 都会拿到）；
         这个会话被“立即中断”过，立即返回 stop=True（只生效一次）。
         """
         seconds = max(0.0, min(float(seconds), MAX_WAIT))
@@ -114,24 +194,35 @@ class RemoteHub:
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)
                 return False, True
-            if not self._paused:
+            if not self._paused_for(session):
                 return False, False
             gen = self._end_gen
+            sgen = self._end_gens.get(session, 0) if session is not None else 0
+
+            def ended() -> bool:
+                return self._end_gen != gen or (session is not None and self._end_gens.get(session, 0) != sgen)
+
+            now = time.monotonic()
+            if not self._recently_held(session, now):
+                self._held_seq += 1
+                self._held_order[session] = self._held_seq
             self._holding += 1
+            self._held[session] = self._held.get(session, 0) + 1
             try:
                 self._cond.wait_for(
-                    lambda: not self._paused or self._end_gen != gen or not self._link
+                    lambda: not self._paused_for(session) or ended() or not self._link
                     or (session is not None and session in self._interrupts),
                     timeout=seconds)
             finally:
                 self._holding -= 1
-                self._last_hold = time.monotonic()
+                self._held[session] -= 1
+                self._last_hold = self._held_last[session] = time.monotonic()
             if not self._link:
                 return False, False  # 等待中被临时关闭：放行
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)
-                return self._paused, True
-            return self._paused, self._end_gen != gen
+                return self._paused_for(session), True
+            return self._paused_for(session), ended()
 
 
 # ---------------------------------------------------------------- 授权请求

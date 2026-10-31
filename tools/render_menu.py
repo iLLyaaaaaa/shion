@@ -21,11 +21,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LANGS = ("zh", "en", "ja")
 SCENARIOS = {
-    # 名称: (Claude 连接状态, 连接 tooltip, 启用 ChatGPT, 开机自启是否失效)
-    "plain": ("disconnected", "", False, False),
-    "connected": ("connected", "", True, False),
-    "stale": ("stale", "路径失效 / path is stale", True, True),
+    # 名称: (Claude 连接状态, 连接 tooltip, 启用 ChatGPT, 开机自启是否失效, 工作中的 Claude 会话数)
+    "plain": ("disconnected", "", False, False, 0),
+    "connected": ("connected", "", True, False, 0),
+    "stale": ("stale", "路径失效 / path is stale", True, True, 0),
+    "one_session": ("connected", "", False, False, 1),
+    "two_sessions": ("connected", "", False, False, 2),
 }
+PROJECTS = ("shion-pet", "docs-site")  # 合成的项目文件夹名
 PAYLOAD = ("shion", "assets", "tools", "hooks")
 
 
@@ -135,7 +138,7 @@ def worker(source: Path, out: Path) -> int:
                 walk(act.menu(), ids, path + [ident], chain[:-1] + [(menu, act), (act.menu(), None)],
                      texts + [act.text()], entries, shots)
 
-    for scenario, (state_name, detail, with_chatgpt, startup_stale) in SCENARIOS.items():
+    for scenario, (state_name, detail, with_chatgpt, startup_stale, n_sessions) in SCENARIOS.items():
         for lang in LANGS:
             path = scratch / f"{scenario}-{lang}"
             path.mkdir(parents=True)
@@ -156,6 +159,9 @@ def worker(source: Path, out: Path) -> int:
             if with_chatgpt:
                 ctl.chatgpt = ChatGPTConnection(path / "chatgpt", path / "codex")
             ctl.set_language(lang)
+            for i in range(n_sessions):  # 合成的工作中会话（只给菜单看，不碰真实 CC）
+                ctl.handle_event("working", json.dumps({"tool": "bash", "target": ""}),
+                                 {"session": f"s{i}", "tool_id": f"t{i}", "project": PROJECTS[i]})
 
             ids = {}
             real_ui = ctl.lines.ui

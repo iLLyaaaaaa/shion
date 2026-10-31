@@ -164,6 +164,28 @@ def _int(value, default: int, minimum: int = 0) -> int:
     return max(value, minimum)
 
 
+FEEDBACK_SESSION_MAX = 128  # 反馈归属的会话 id 长度上限（与服务端 ID_MAX 一致）
+ALL_FEEDBACK = object()  # take_feedback 的默认值：不分会话全部取走（调试入口和旧调用方）
+
+
+def _feedback_session(item: dict) -> str:
+    """反馈项归属的会话；没有（旧存档 / 当时没有可选的会话）= 无归属，返回空串。"""
+    s = item.get("session")
+    return s if isinstance(s, str) and 0 < len(s) <= FEEDBACK_SESSION_MAX else ""
+
+
+def _cap_feedback(items: list) -> list:
+    """每个归属（各会话、无归属）各自最多 FEEDBACK_MAX 条，满了丢该归属里最早的；顺序不变。"""
+    counts: dict[str, int] = {}
+    keep = []
+    for item in reversed(items):
+        key = _feedback_session(item)
+        counts[key] = counts.get(key, 0) + 1
+        if counts[key] <= FEEDBACK_MAX:
+            keep.append(item)
+    return keep[::-1]
+
+
 def _feedback_items(raw) -> list:
     out = []
     if isinstance(raw, list):
@@ -171,8 +193,11 @@ def _feedback_items(raw) -> list:
             if isinstance(item, dict) and item.get("kind") in ("good", "bad"):
                 text = item.get("text")
                 text = " ".join(text.split())[:FEEDBACK_TEXT_MAX] if isinstance(text, str) else ""
-                out.append({"kind": item["kind"], "text": text})
-    return out[-FEEDBACK_MAX:]
+                entry = {"kind": item["kind"], "text": text}
+                if _feedback_session(item):
+                    entry["session"] = _feedback_session(item)
+                out.append(entry)
+    return _cap_feedback(out)
 
 
 def _bool(value, default: bool) -> bool:
@@ -697,35 +722,47 @@ class PetState:
         self._log_state(now)
         return [] if key == "belly" else [_say(key)]
 
-    def feedback_good(self, now: datetime) -> list[Reaction]:
-        """右键菜单“做得好”：加入反馈队列，等下次送达 Claude。"""
+    def feedback_good(self, now: datetime, sessions=None) -> list[Reaction]:
+        """右键菜单“做得好”：加入反馈队列，等下次送达 Claude。
+        sessions：送给哪些会话（每个各放一份）；None = 无归属（谁先来取给谁，原行为）。好感度、表情只算一次。"""
         reactions = self._touch(now, attend=False)
         if self.affection is None:
             self.save.affection += self.config.praise_affection
-        self._enqueue({"kind": "good", "text": ""})
+        self._enqueue({"kind": "good", "text": ""}, sessions)
         self._set_temp("proud", now)
         self._changed(now)
         reactions.append(_say("praise_menu_working" if self.is_working(now) else "praise_menu"))
         self._log_state(now)
         return reactions
 
-    def feedback_bad(self, text: str, now: datetime) -> list[Reaction]:
-        """右键菜单“有问题”：附一句话（单行，可留空）。"""
+    def feedback_bad(self, text: str, now: datetime, sessions=None) -> list[Reaction]:
+        """右键菜单“有问题”：附一句话（单行，可留空）。sessions 同 feedback_good。"""
         reactions = self._touch(now, attend=False)
-        self._enqueue({"kind": "bad", "text": " ".join((text or "").split())[:FEEDBACK_TEXT_MAX]})
+        self._enqueue({"kind": "bad", "text": " ".join((text or "").split())[:FEEDBACK_TEXT_MAX]}, sessions)
         self._changed(now)
         reactions.append(_say("feedback_bad_working" if self.is_working(now) else "feedback_bad"))
         return reactions
 
-    def _enqueue(self, item: dict) -> None:
-        self.save.feedback_queue.append(item)
-        del self.save.feedback_queue[:-FEEDBACK_MAX]
+    def _enqueue(self, item: dict, sessions=None) -> None:
+        targets = [s for s in (sessions or []) if isinstance(s, str) and 0 < len(s) <= FEEDBACK_SESSION_MAX]
+        if not targets:
+            self.save.feedback_queue.append(item)
+        for s in dict.fromkeys(targets):
+            self.save.feedback_queue.append({**item, "session": s})
+        self.save.feedback_queue = _cap_feedback(self.save.feedback_queue)
 
-    def take_feedback(self, now: Optional[datetime] = None) -> list:
-        """读取并清空反馈队列（送达时调用）。now 用来给存档防抖计时。"""
-        items = [dict(i) for i in self.save.feedback_queue]
+    def take_feedback(self, now: Optional[datetime] = None, session=ALL_FEEDBACK) -> list:
+        """读取并移出反馈（送达时调用）。now 用来给存档防抖计时。
+        session：请求者的会话——取给它的和无归属的；None = 旧请求，只取无归属的；默认全部取走。"""
+        queue = self.save.feedback_queue
+        if session is ALL_FEEDBACK:
+            picked = list(queue)
+        else:
+            mine = session if isinstance(session, str) else ""
+            picked = [i for i in queue if _feedback_session(i) in ("", mine)]
+        items = [dict(i) for i in picked]
         if items:
-            self.save.feedback_queue = []
+            self.save.feedback_queue = [i for i in queue if not any(i is p for p in picked)]
             self._changed(now or self._last_activity)
         return items
 

@@ -301,9 +301,10 @@ def emit(obj) -> None:
     sys.stdout.buffer.flush()
 
 
-def take_feedback() -> str:
+def take_feedback(session=None) -> str:
     # 超时要比 bridge 等 GUI 线程的时间（1.5 秒）长：否则 hook 先放弃、GUI 线程随后仍清空队列，反馈就丢了
-    result = request("/feedback/take", {}, timeout=FEEDBACK_TIMEOUT)
+    # 带 session：只取给这个会话的反馈（和没指定会话的）
+    result = request("/feedback/take", {"session": session} if session else {}, timeout=FEEDBACK_TIMEOUT)
     text = result.get("text") if isinstance(result, dict) else ""
     return text if isinstance(text, str) else ""
 
@@ -388,6 +389,17 @@ def build_detail(name: str, data: dict):
     return None
 
 
+PROJECT_MAX = 64
+
+
+def project_name(cwd) -> str:
+    """工作目录的文件夹名（只取最后一段，不发完整路径），给诗音菜单区分会话用。拿不到返回空串。"""
+    if not isinstance(cwd, str):
+        return ""
+    name = re.split(r"[\\/]", cwd.rstrip("\\/"))[-1].strip()
+    return name if 0 < len(name) <= PROJECT_MAX and not name.endswith(":") else ""
+
+
 def session_meta(name: str, data: dict) -> dict:
     """事件里附带的会话信息：session_id、tool_use_id；prompt / PreToolUse 附带 CC 进程。"""
     meta = {}
@@ -395,6 +407,9 @@ def session_meta(name: str, data: dict) -> dict:
         value = data.get(field)
         if isinstance(value, str) and value and len(value) <= 128:
             meta[key] = value
+    project = project_name(data.get("cwd"))
+    if project:
+        meta["project"] = project
     if name in ("UserPromptSubmit", "PreToolUse"):
         try:
             proc = find_cc_process()
@@ -433,7 +448,7 @@ def main() -> None:
             emit({"continue": False, "stopReason": gate[1]})
             return
         request("/event", {"type": "tool_done", **meta})
-        text = take_feedback()
+        text = take_feedback(session)
         if text:
             emit({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}})
         return
@@ -458,7 +473,7 @@ def main() -> None:
         payload["detail"] = detail[:MAX_DETAIL]
     request("/event", payload)
     if name == "UserPromptSubmit":
-        text = take_feedback()
+        text = take_feedback(session)
         if text:
             sys.stdout.buffer.write((text + "\n").encode("utf-8"))
             sys.stdout.buffer.flush()

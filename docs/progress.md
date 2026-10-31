@@ -11,6 +11,7 @@
 - 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
 - 分支 `feature/menu-parity`（从 `dc9fe3d` 派生）：右键菜单 Claude Code / ChatGPT 连接管理对齐，并新增 Claude 的“临时关闭联动”。未合并、未部署、未 push；本分支全量结果见下方 2026-10-30 记录。
 - 分支 `feature/remove-codex-autolaunch`（从 `fad0e3a` 派生）：删除 Codex 新开会话自动拉起诗音，保留 Claude 拉起、单实例互斥锁和 Codex 窗口层级跟随。未合并、未 push，详见下方 2026-10-31 记录。
+- 分支 `feature/per-session-remote`（从 `5062919` 派生）：工作遥控四个按钮按会话区分，多个会话同时停住时用检查点面板分别继续/结束。未合并、未部署、未 push，详见下方 2026-10-31 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -37,12 +38,15 @@
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
 - `feature/menu-parity` 待用户审核、真机验收后决定是否合并到当前分支。
 - `feature/remove-codex-autolaunch` 待用户审核后合并到当前分支；Codex 自动拉起相关验收项已取消。
+- `feature/per-session-remote` 待用户审核、真机验收后决定是否合并到当前分支。
 - 下一步由用户审核开发分支及下方清单，再安排真实客户端适配与 GUI 人工验收；部署、打包、用户开关开放、真实配置写入与发布须有对应授权。本任务不推进这些步骤。
 - 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。
 
 ## 未完成的人工验收清单
 
 以下是当前交接清单；历史原文中的 125 条未勾选明细全部留在月度归档（包括后续版本已取代的旧方案/旧计划，不自动改勾）。需要执行某项时用 `rg -n '关键词|\[ \]' docs/progress-archive/2026-10.md` 定位对应小节，并以最新实现为准。
+
+V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；平时碰不到的项目（立即中断后工具进程是否结束、Codex 配置断开再重连、干净环境解压运行）留到发布前专门验收。
 
 - [ ] 阶段 1：修复后桌面普通任务的完整生命周期、真实故障画面、活动中断连；原会话自动恢复或明确的恢复边界。
 - [ ] 人工权限长等待、实际 PermissionRequest 语义；工具执行中 Interrupt 后工具进程及时终止。现有视觉“轮次 0、无异常”和官方 turn interrupted 不等于工具被及时终止。
@@ -63,6 +67,8 @@
 - [x] Codex 桌面端窗口层级跟随（2026-10-31 真机通过）：未置顶时诗音浮在 Codex 窗口上方，其他程序照常遮挡。
 - [ ] 单实例互斥锁（`feature/codex-autolaunch`）：多个 Claude 会话同时新开只剩一个诗音；Claude 临时关闭联动后新开 CC 会话不拉起诗音（源码版与打包版各验一次；原属上面已取消的条目，Claude 侧保留）；旧版诗音（无互斥锁）运行时新版不会重复启动；诗音被强制结束后能正常重新启动；退出后再启动正常。
 - [x] 单实例互斥锁（2026-10-31 真机通过）：同时新开两个 CC 会话只出现一个诗音。
+- [ ] 工作遥控按会话区分（`feature/per-session-remote`），日常试用时留意：只开一个 CC 会话时右键菜单和以前一样；开两个项目同时工作时，“停下 / 立即中断 / 做得好 / 有问题……”展开成子菜单，名称是项目文件夹名（同名带“(2)”，隐私模式显示“会话 1 / 会话 2”）；停下 A 时 B 继续干活；A 停住时暂停标签写“暂停中：A 的文件夹名”，在 A 的 CC 里说话只放开 A；两个都停住时出现检查点面板，可分别“继续 / 结束这一轮”，面板不抢焦点、出现后 0.6 秒内点击无效；“做得好 / 有问题……”只在选中的会话下一次工具调用时注入，选“全部”时每个会话各收到一份、好感度只加一次。
+- [ ] 发布前专门验收（按会话中断）：两个会话都在跑长命令时只中断 A，A 的工具进程结束、B 的不受影响；选“全部”时两边都结束。
 
 ## v1.1 待办
 - [ ] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）
@@ -74,6 +80,8 @@
 - [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-10-31 工作遥控按会话区分**（分支 `feature/per-session-remote`，从 `5062919` 派生，worktree `..\claude-pet-wt\per-session-remote`，本地提交、未合并、未 push）：hook 所有事件多带 `project`（只是 `cwd` 的文件夹名，不带完整路径），`/feedback/take` 也带 `session`；服务端 `clean_project` 去掉 Unicode Cc/Cf 字符和首尾空白，非字符串、含 `/` `\`、为空或超过 64 字时只丢掉这个字段，事件照常，旧格式事件不受影响。`RemoteHub` 新增按会话暂停、按会话放行（全局暂停中被单独放行的会话）和按会话的一次性“结束这一轮”代数；`wait_gate` 在全局或自己会话暂停时等待，不带会话的旧请求只看全局。UserPromptSubmit 只放开自己会话；为了单会话时与原来一致，放行某会话后如果没有别的会话单独停着或在等，就整个解除全局暂停；多会话选“全部”停下时会同时给每个会话单独打标记，所以 A 说话不会放掉 B。新文件 `shion/sessions.py` 负责菜单名称（首次出现顺序、同名 “(2)”、隐私或无名时“会话 n”）。菜单：0/1 个会话时走原代码路径，三语菜单树与 `5062919` 逐项一致；≥2 个时四个按钮变成子菜单（各会话 + “全部”），“继续”在多个目标时也是子菜单，“有问题……”选完会话再弹输入框。立即中断只结束选中会话的工具进程，收尾只解除这些会话的暂停。反馈队列项带可选 `session`，每个归属各最多 5 条；带 session 的取走“自己的 + 无归属的”，旧请求只取无归属的；“全部”给每个相关会话各放一份，好感度、表情、台词只算一次。检查点：1 个会话停住仍是暂停标签，文字为“暂停中：{名称}”；≥2 个停住时换成 `badge.CheckpointPanel`，每个会话一行“继续 / 结束这一轮”，不抢焦点、只响应鼠标、出现或会话集合变化后 0.6 秒才生效、键盘无效。新增三语 key：`pause_label_named`、`session_n`、`menu_all`、`checkpoint_title`、`checkpoint_resume`、`checkpoint_end`、`checkpoint_ended`。新测试 `tests/test_per_session_remote.py` 53 个。`render_menu.py` 增加 `one_session`、`two_sessions` 场景；基线快照 `scheduler_disabled_a55825f.json` 未改动（单会话菜单不变，快照测试直接通过）。验证：全量 pytest（`--basetemp=build\pytest-tmp\full`，在 worktree 内）汇总原文：`1 failed, 1951 passed, 8 skipped, 6 warnings in 494.08s (0:08:14)`；唯一失败是已知的 `tests/test_install_hooks.py::test_corrupt_json_not_touched`（子进程 stderr 按 GBK 解码失败），设 `PYTHONUTF8=1` 单独重跑 `1 passed`，与本次改动无关。三语单/双会话菜单截图和双会话停住的面板截图已自查（在忽略目录 `build/menu-shots/`、`build/checkpoint-shots/`，不提交）；面板最初因字体回退把标题裁掉一半，已改用台词字体并设最小行高。范围外发现（未实现）：单会话时没有“结束这一轮”的界面按钮（只有多会话面板有）；“继续（这一轮已结束）”只记最近一个会话；授权面板不显示项目名。
 
 - **2026-10-31 删除 Codex 新开会话自动拉起**（分支 `feature/remove-codex-autolaunch`，从 `fad0e3a` 派生，worktree `..\claude-pet-wt\remove-codex-autolaunch`，本地提交、未合并、未 push）：诊断结论是 Codex 把 MCP 观察端放进 `KILL_ON_JOB_CLOSE` 且不允许脱离的 Job，观察端拉起的诗音会随 Codex 退出或关闭 MCP 一起被结束，所以决定不再由 Codex 拉起，Codex 用户改用“开机自启”。删除 `codex_mcp.py` 的 `autolaunch()`、`codex_link_enabled()`、`_AUTOLAUNCH`、`dispatch()` 中的调用及相关 import，`git diff d907e33 -- shion/codex_mcp.py` 为空（观察端转发、心跳、租约与 668962c 之前一致）；`launcher.py` 删除 `AutoLaunch`、`AUTOLAUNCH_COOLDOWN` 及不再用的 `logging`/`time`，保留 `shion_running()`、`launch_shion()`、`INSTANCE_NAME`；`tests/test_autolaunch.py` 删掉 Codex 观察端拉起的全部用例，Claude 拉起、公共函数、Claude 联动开关、单实例竞争用例保留；三语 README 常见问题各加一条“用 Codex 时诗音不会被自动拉起，建议右键 → 设置 → 开启开机自启”；spec.md 末节记录决定与原因。Claude hook 的 `claude_link_enabled` 判断、单实例互斥锁（`fad0e3a`）、Codex 窗口层级跟随（`4a6e9eb`）均未改动。验证：全量 pytest（`--basetemp=build/pytest-tmp4`，在 worktree 内）汇总原文：`1913 passed, 8 skipped, 2 warnings in 648.08s (0:10:48)`，退出码 0。首轮为 `11 failed, 1902 passed, 8 skipped, 6 warnings in 628.37s (0:10:28)`：其中 10 个是 `tests/test_process_sheets.py`，原因是新 worktree 没有 `assets/sprites/raw` junction（补上后通过）；另 1 个 `tests/test_install_hooks.py::test_corrupt_json_not_touched` 是子进程 stderr 按本机 GBK 解码失败，主仓库未改动的 `fad0e3a` 上同样失败，设 `PYTHONUTF8=1` 后通过，与本次改动无关。`tools/check_private.py` 暂存区通过，作者与提交者邮箱均为 noreply 邮箱。
 - **2026-10-30 单实例改用命名互斥锁**（分支 `feature/codex-autolaunch`，本地提交、未合并、未 push）：`SingleInstance.acquire()` 在 Windows 上先 `CreateMutexW("Local\\" + 实例名)`（原子，实例名仍支持 `SHION_INSTANCE_NAME` 覆盖），返回 `ERROR_ALREADY_EXISTS` 就关掉本次句柄、照原样连一下已有实例的管道后返回 False；拿到锁的实例在整个生命周期内持有句柄，`release()` 才关闭，崩溃由系统回收。拿到锁后仍做原来的管道连接检查（兼容没有互斥锁的旧版诗音），再 `listen`，listen 失败会释放锁。命名管道服务保留，`launcher.shion_running()` 和 hook/观察端接口不变；非 Windows、创建锁失败时行为与原来一致。上一条的 xfail 竞态用例改为必须只剩一个：4 个进程对齐到同一时刻、一个测试里连跑 3 轮，另独立连续跑 5 次全部通过；另有 `tests/test_single_instance.py` 覆盖锁语义。
