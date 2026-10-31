@@ -1,10 +1,8 @@
-"""Codex 新开会话自动拉起诗音：共用的 shion/launcher.py、观察端的拉起逻辑、Claude hook 的联动开关、单实例竞争。
+"""拉起诗音：shion/launcher.py 的公共函数、Claude hook 的联动开关、单实例竞争。
 
 所有用例都替换了 launch_shion / _popen，不会真的拉起诗音。
 """
 import importlib.util
-import io
-import json
 import os
 import subprocess
 import sys
@@ -15,150 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from shion import codex_mcp, launcher
+from shion import launcher
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / "hooks" / "shion_hook.py"
-OTHER_EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "Interrupt"]
-
-
-# ------------------------------------------------------------ 观察端
-class Clock:
-    def __init__(self):
-        self.now = 1000.0
-
-    def __call__(self):
-        return self.now
-
-
-@pytest.fixture
-def env(tmp_path, monkeypatch):
-    clock = Clock()
-    forwarded, launched = [], []
-    monkeypatch.setattr(codex_mcp, "_AUTOLAUNCH", launcher.AutoLaunch(clock=clock))
-    monkeypatch.setattr(codex_mcp, "forward", lambda data, directory, path="/observe/v1": forwarded.append(data))
-    monkeypatch.setattr(launcher, "launch_shion", lambda *a, **k: launched.append(1) or True)
-    monkeypatch.setattr(launcher, "shion_running", lambda: False)
-    (tmp_path / "chatgpt-observer.json").write_text(json.dumps({"enabled": True}), encoding="utf-8")
-    return type("Env", (), {"dir": tmp_path, "clock": clock, "forwarded": forwarded, "launched": launched})
-
-
-def call(env, event, **extra):
-    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-               "params": {"name": "observe_lifecycle", "arguments": {"event": event, "source": "global", **extra}}}
-    return codex_mcp.dispatch(request, env.dir, "obs")
-
-
-NEUTRAL = {"content": [{"type": "text", "text": "{}"}], "isError": False}
-
-
-def test_session_start_launches_when_shion_is_not_running(env):
-    assert call(env, "SessionStart", session_id="s1") == NEUTRAL
-    assert env.launched == [1]
-    assert [d["event"] for d in env.forwarded] == ["SessionStart"]  # 事件照常转发
-
-
-@pytest.mark.parametrize("state", [True, None])
-def test_running_or_uncertain_does_not_launch(env, monkeypatch, state):
-    monkeypatch.setattr(launcher, "shion_running", lambda: state)
-    assert call(env, "SessionStart") == NEUTRAL
-    assert env.launched == []
-
-
-@pytest.mark.parametrize("event", OTHER_EVENTS)
-def test_other_events_never_launch_or_probe(env, monkeypatch, event):
-    monkeypatch.setattr(launcher, "shion_running", lambda: (_ for _ in ()).throw(AssertionError("不该探测")))
-    assert call(env, event) == NEUTRAL
-    assert env.launched == [] and [d["event"] for d in env.forwarded] == [event]
-
-
-def test_cooldown_limits_launch_attempts(env):
-    call(env, "SessionStart")
-    env.clock.now += 29.9
-    call(env, "SessionStart")
-    assert env.launched == [1]
-    env.clock.now += 0.2
-    call(env, "SessionStart")
-    assert env.launched == [1, 1]
-
-
-def test_cooldown_only_starts_when_an_attempt_is_really_made(env, monkeypatch):
-    monkeypatch.setattr(launcher, "shion_running", lambda: True)
-    call(env, "SessionStart")
-    monkeypatch.setattr(launcher, "shion_running", lambda: False)
-    call(env, "SessionStart")  # 前面只是“已在运行”，没有尝试过，不占冷却
-    assert env.launched == [1]
-
-
-def test_failed_launch_is_still_rate_limited(env, monkeypatch):
-    monkeypatch.setattr(launcher, "launch_shion", lambda *a, **k: env.launched.append(1) or False)
-    call(env, "SessionStart")
-    call(env, "SessionStart")
-    assert env.launched == [1]
-
-
-def test_temporarily_disabled_link_does_not_launch(env):
-    (env.dir / "chatgpt-observer.json").write_text(json.dumps({"enabled": False}), encoding="utf-8")
-    assert call(env, "SessionStart") == NEUTRAL
-    assert env.launched == []
-    assert [d["event"] for d in env.forwarded] == ["SessionStart"]  # 转发不受影响（forward 自己会因 enabled 丢弃）
-
-
-@pytest.mark.parametrize("content", [None, b"{ not json", b"[]", b'{"enabled": "no"}', b"{}"])
-def test_unreadable_switch_keeps_the_default_which_is_on(env, content):
-    path = env.dir / "chatgpt-observer.json"
-    if content is None:
-        path.unlink()
-    else:
-        path.write_bytes(content)
-    assert codex_mcp.codex_link_enabled(env.dir) is True
-    call(env, "SessionStart")
-    assert env.launched == [1]
-
-
-def test_launch_errors_never_fail_the_tool_call(env, monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(launcher, "launch_shion", boom)
-    assert call(env, "SessionStart") == NEUTRAL
-    env.clock.now += 100
-    monkeypatch.setattr(launcher, "shion_running", boom)
-    assert call(env, "SessionStart") == NEUTRAL
-    monkeypatch.setattr(codex_mcp, "codex_link_enabled", boom)
-    assert call(env, "SessionStart") == NEUTRAL
-    assert len(env.forwarded) == 3
-
-
-def test_attempt_itself_swallows_errors_even_with_a_broken_clock(monkeypatch):
-    def broken():
-        raise OSError("clock")
-
-    monkeypatch.setattr(launcher, "shion_running", lambda: False)
-    monkeypatch.setattr(launcher, "launch_shion", lambda *a, **k: (_ for _ in ()).throw(AssertionError("不该启动")))
-    auto = launcher.AutoLaunch(clock=broken)
-    assert auto.attempt(False) is False
-    assert auto.attempt(True) is False  # 时钟坏了：吞掉异常、不启动
-
-
-def test_serve_session_start_returns_normally_and_keeps_lease_flag(env, monkeypatch):
-    request = {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
-               "params": {"name": "observe_lifecycle", "arguments": {"event": "SessionStart", "source": "global"}}}
-    monkeypatch.setattr(sys, "stdin", type("In", (), {"buffer": io.BytesIO((json.dumps(request) + "\n").encode())}))
-    out = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", out)
-    assert codex_mcp.serve(env.dir, "obs") == 0
-    assert json.loads(out.getvalue())["result"] == NEUTRAL
-    assert env.forwarded[0]["leased"] is True and env.forwarded[0]["observer"] == "obs"
-    assert env.launched == [1]
-
-
-def test_observe_returns_within_the_tool_timeout(env, monkeypatch):
-    # 拉起只是一次 Popen，不等诗音起来：即便 Popen 本身慢一点，也只是一次调用。
-    monkeypatch.setattr(launcher, "launch_shion", lambda *a, **k: True)
-    t0 = time.monotonic()
-    call(env, "SessionStart")
-    assert time.monotonic() - t0 < 0.5
 
 
 # ------------------------------------------------------------ 公共函数
@@ -219,7 +77,7 @@ def test_frozen_launch_uses_current_exe(tmp_path, monkeypatch):
     assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
 
 
-def test_hook_and_observer_share_one_implementation(monkeypatch):
+def test_hook_delegates_to_the_launcher_module(monkeypatch):
     spec = importlib.util.spec_from_file_location("shion_hook_shared", HOOK)
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
@@ -311,12 +169,12 @@ windows_only = pytest.mark.skipif(os.name != "nt", reason="单实例命名管道
 
 @windows_only
 def test_overlapping_launches_leave_exactly_one_instance(tmp_path):
-    # CC 和 Codex 先后（相隔远大于一次 acquire 的几毫秒）触发拉起：后来者看得到先到者的管道，直接退出。
+    # 多个会话先后（相隔远大于一次 acquire 的几毫秒）触发拉起：后来者看得到先到者的管道，直接退出。
     assert race(tmp_path, [0, 0.8, 1.6]) == ["LOST", "LOST", "WON"]
 
 
 @windows_only
 def test_perfectly_simultaneous_launches_leave_exactly_one_instance(tmp_path):
-    # 4 个进程对齐到同一时刻调用 acquire()（CC 与 Codex 同时新开会话的最坏情况）；连跑 3 轮，每轮必须只剩一个。
+    # 4 个进程对齐到同一时刻调用 acquire()（多个会话同时新开的最坏情况）；连跑 3 轮，每轮必须只剩一个。
     for _ in range(3):
         assert race(tmp_path, [0, 0, 0, 0]) == ["LOST", "LOST", "LOST", "WON"]

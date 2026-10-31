@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication
 from shion import state as state_mod
 from shion import __version__
 from shion.icons import ICON_SIZES, application_icon
-from shion.launcher import INSTANCE_NAME  # 单实例管道名；hook 和 Codex 观察端用同一个常量判断诗音是否在运行
+from shion.launcher import INSTANCE_NAME  # 单实例管道名；hook 用同一个常量判断诗音是否在运行
 from shion.bridge import ServerBridge
 from shion.bubble import CHAR_INTERVAL, GAP, BubbleWindow, place_bubble
 from shion.controller import PetController

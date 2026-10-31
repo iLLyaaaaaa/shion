@@ -111,6 +111,9 @@ Only **newly started** Claude Code sessions pick up the change.
 **Shion doesn't react.**
 Double-click her and check the connection status. If it says "Invalid path or incomplete connection", check the app location and right-click → **Reconnect to Claude Code**. Then start a **new** Claude Code session.
 
+**Shion doesn't start by itself when I use Codex.**
+Claude Code sessions can launch Shion for you, but Codex sessions don't. If you use Codex, right-click → **Settings** → turn on **Start with Windows** so she is already there when you start working.
+
 **"Port already in use".**
 Shion uses local port `47613`. Make sure only one Shion is running.
 

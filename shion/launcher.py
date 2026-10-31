@@ -1,23 +1,18 @@
-"""拉起诗音 GUI 的公共代码：Claude 的 hook 和 Codex 的观察端共用。
+"""拉起诗音 GUI 的公共代码：Claude 的 hook 用，app.py 用其中的 INSTANCE_NAME。
 
-只用标准库、不 import Qt（hook 和观察端的启动时间都很紧）。
+只用标准库、不 import Qt（hook 的启动时间很紧）。
 """
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
-
-log = logging.getLogger("shion.launcher")
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTANCE_NAME = "ShionDesktopPet-single-instance"  # 单实例命名管道名，shion/app.py 也用它
 ERROR_FILE_NOT_FOUND = 2
 IS_WINDOWS = os.name == "nt"
-AUTOLAUNCH_COOLDOWN = 30.0
 _popen = subprocess.Popen  # 测试在 conftest 里统一替换掉，防止在开发机上真的拉起诗音
 
 
@@ -71,30 +66,3 @@ def launch_shion(root: Path = ROOT) -> bool:
         except OSError:
             continue
     return False
-
-
-class AutoLaunch:
-    """长驻进程（Codex 观察端）用的“诗音没开就拉起”：带冷却，任何异常只记日志。"""
-
-    def __init__(self, cooldown: float = AUTOLAUNCH_COOLDOWN, clock=time.monotonic):
-        self.cooldown = cooldown
-        self.clock = clock
-        self._last = None  # 上一次真正尝试拉起的时间
-
-    def attempt(self, enabled: bool) -> bool:
-        """enabled = 对应客户端的联动没有被临时关闭。返回这次是否发出了启动。
-
-        只有确定没开（shion_running() is False）才拉；管道状态不确定时宁可不拉。
-        冷却时间在真正尝试之前记下，所以启动失败也不会被反复拉起。
-        """
-        try:
-            if not enabled or shion_running() is not False:
-                return False
-            now = self.clock()
-            if self._last is not None and now - self._last < self.cooldown:
-                return False
-            self._last = now
-            return bool(launch_shion())
-        except Exception:
-            log.exception("auto-launch failed")
-            return False

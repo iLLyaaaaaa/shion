@@ -47,7 +47,7 @@ def base_url() -> str:
 def _launcher():
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
-    from shion import launcher  # 只用标准库，不 import Qt；Codex 观察端共用同一份
+    from shion import launcher  # 只用标准库，不 import Qt
     return launcher
 
 

@@ -597,3 +597,9 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 `scheduler.Scheduler` 默认禁用、不接生产 GUI，复用现有 `Observation` / `TaskLedger`。P1 可靠人工请求、P2 可靠最终失败/失联/身份或容量异常、P3 中性结束/中断、P4 工作、P5 中性待机（仅有 coverage 时称空闲已确认；已知观察空档仍标待确认）；高优先级先于前台权重，同级前台需验证完整任务身份，后台继续维护。多请求独立排队，事件和提醒分开去重，提醒合并及容量降级有界。ChatGPT 仅观察，未验证的权限检查不生成精确人工等待数，不增加任何控制能力。实现细节、参数、测试与待人工验收矩阵见 [独立核心记录](experiments/shion-v2-phase2-core.md)。
 
 本轮只准源码、文档、隔离测试及本地提交；保留真实 MCP/Hooks/Token/信任，不替换已安装 Shion-dev，不卸载全局联动，不 push、合并 master 或发布。桌面完整生命周期、真实故障画面、人工长等待/工具及时终止、两个现有项目真正并发和其他不能隔离证明的行为均待人工验收，不阻塞独立核心开发。
+
+## Codex 不自动拉起诗音（2026-10-31 决定）
+
+- **决定**：Codex 观察端（`shion/codex_mcp.py`，入口 `Shion.exe --codex-observer`）只做事件转发、2 秒心跳和租约，**不拉起诗音**。`668962c` 加入的“收到 SessionStart 且命名管道不存在时拉起”已删除（`autolaunch()`、`codex_link_enabled()`、`_AUTOLAUNCH` 及 `dispatch()` 中的调用，连同 `launcher.AutoLaunch` 及其冷却逻辑）；`git diff d907e33 -- shion/codex_mcp.py` 为空。Codex 用户改为在右键菜单 → 设置中开启“开机自启”，三语 README 的常见问题里已写明。
+- **原因（诊断结论）**：Codex 把 MCP 观察端放进设置了 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 且不允许脱离（breakaway）的 Job Object。观察端拉起的诗音即使带 `CREATE_BREAKAWAY_FROM_JOB` 也留在这个 Job 里，Codex 退出或关闭 MCP 子进程时，Job 关闭，诗音被一起结束，所以这条路径做不到“拉起后独立存活”。Claude 的 hook 子进程不在这样的 Job 里，行为不受影响。
+- **保留不变**：Claude hook 的 SessionStart 拉起及 `claude_link_enabled` 临时关闭判断；`shion/launcher.py` 的 `shion_running()`、`launch_shion()`、`INSTANCE_NAME`（hook 和 `app.py` 在用）；单实例命名互斥锁（`fad0e3a`）；未开“置于最上层”时对 Codex 桌面端窗口的层级跟随（`4a6e9eb`）。
