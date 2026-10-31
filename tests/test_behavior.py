@@ -45,7 +45,7 @@ def test_idle_intervals_and_pause_do_not_catch_up(level):
     assert lo <= b.next_at <= hi
     due = b.next_at
     assert b.step(due - 0.001, True, level) is None
-    assert b.step(due, True, level) in ("face", "jump", "expression", "talk")
+    assert b.step(due, True, level) in ("jump", "expression", "talk")
     assert b.step(1000, False, level) is None
     assert b.next_at is None
     assert b.step(2000, True, level) is None
@@ -63,8 +63,21 @@ def test_idle_talk_is_rare_and_respects_cooldown(monkeypatch):
     assert b.step(first + IDLE_TALK_COOLDOWN, True, "lively") == "talk"
 
 
-def test_turn_is_no_longer_an_idle_action_and_others_share_evenly():
-    from shion.behavior import IDLE_ACTIONS, IDLE_ACTION_WEIGHTS
-    assert "turn" not in IDLE_ACTIONS
-    assert IDLE_ACTIONS == ("face", "jump", "expression")
-    assert len(set(IDLE_ACTION_WEIGHTS)) == 1 and len(IDLE_ACTION_WEIGHTS) == len(IDLE_ACTIONS)
+def test_idle_actions_are_jump_and_expression_weighted_one_to_two():
+    import shion.behavior as behavior
+    assert behavior.IDLE_ACTIONS == ("jump", "expression")
+    assert behavior.IDLE_ACTION_WEIGHTS == (1, 2)
+    assert not hasattr(behavior, "FACE_SECONDS")
+
+
+def test_idle_action_draws_follow_the_one_to_two_weights():
+    from collections import Counter
+    b = IdleBehavior(random.Random(7))
+    b.last_talk = float("inf")  # 只看动作抽取，排除自言自语。
+    b.level = "normal"
+    counts = Counter()
+    for i in range(6000):
+        b.next_at = float(i)
+        counts[b.step(float(i), True, "normal")] += 1
+    assert set(counts) == {"jump", "expression"}
+    assert counts["expression"] / counts["jump"] == pytest.approx(2, rel=.1)

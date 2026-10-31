@@ -41,7 +41,7 @@ def test_wrong_frame_count_stops_before_writing_outputs(sheets, monkeypatch, tmp
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("group,count", [("walk", 8), ("jump", 4), ("drag", 4), ("turn", 8), ("tickle", 3), ("cheek", 3), ("bed", 2), ("desk", 3)])
+@pytest.mark.parametrize("group,count", [("walk", 8), ("jump", 4), ("drag", 4), ("tickle", 3), ("cheek", 3), ("bed", 2), ("desk", 3)])
 def test_current_raw_sheets_split_to_expected_count_and_outputs_decode(sheets, group, count):
     assert sheets.EXPECTED[f"{group}_sheet"] == count
     frames = sheets.split_frames(sheets.ps.load_clean(sheets.ps.RAW / f"{group}_sheet.png"))
@@ -51,6 +51,14 @@ def test_current_raw_sheets_split_to_expected_count_and_outputs_decode(sheets, g
             image.load()
             assert image.size == (sheets.WIDE.get(f"{group}_sheet", sheets.ps.CANVAS[0]), sheets.ps.CANVAS[1])
             assert image.mode == "RGBA"
+
+
+def test_turn_sheet_is_no_longer_processed(sheets, monkeypatch, tmp_path):
+    assert "turn_sheet" not in sheets.SHEETS and "turn_sheet" not in sheets.EXPECTED
+    assert "turn" not in [prefix for prefix, _, _ in sheets.SHEETS.values()]
+    monkeypatch.setattr(sheets.ps, "OUT", tmp_path)
+    sheets.main(only=["jump"])  # raw 里留着 turn_sheet.png 也不会被读取或输出
+    assert sorted(p.name for p in tmp_path.iterdir()) == [f"jump_{i}.png" for i in range(1, 5)]
 
 
 @pytest.mark.parametrize("group,width", [("bed", 640), ("desk", 448)])

@@ -27,7 +27,7 @@ from shion.behavior import (
     JUMP_DURATION, JUMP_HEIGHT,
     LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT,
     SHAKE_WINDOW, DragPlayback, ShakeTracker, jump_sample, TickleGesture,
-    FACE_SECONDS, CHEEK_RELEASE_SECONDS, CHEEK_LIFT_DISTANCE,
+    CHEEK_RELEASE_SECONDS, CHEEK_LIFT_DISTANCE,
     TICKLE_STOP_SECONDS, TICKLE_FRAME_SECONDS, TICKLE_TWIST_DEGREES,
     TICKLE_TWIST_PERIOD, TICKLE_SPEECH_SECONDS, BELLY_LIFT_DISTANCE, TICKLE_MOVE_DISTANCE,
     ReleaseVelocity, RELEASE_FAST_SPEED,
@@ -39,8 +39,8 @@ STATES = [
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
 ]
 PROP_STATES = ("bed", "desk")
-SEQUENCE_GROUPS = ("jump", "drag", "turn", "tickle", "cheek", "bed", "desk")
-EXACT_SEQUENCES = {"turn": 8, "tickle": 3, "cheek": 3, "bed": 2, "desk": 3}
+SEQUENCE_GROUPS = ("jump", "drag", "tickle", "cheek", "bed", "desk")
+EXACT_SEQUENCES = {"tickle": 3, "cheek": 3, "bed": 2, "desk": 3}
 
 DEFAULT_HEIGHT = 200
 # 依据 idle 448×512 画布测量；不包含窗口留边，各尺寸使用相同比例。
@@ -156,7 +156,6 @@ class PetWindow(QWidget):
         self._shake = ShakeTracker()
         self._pose: str | None = None
         self._pose_until = 0.0
-        self._automatic_pose = False
         self._cheek_mode = False
         self._cheek_pulling = False
         self._belly_mode = False
@@ -845,17 +844,6 @@ class PetWindow(QWidget):
         self.menu_requested.emit(e.globalPos())
 
     # ---- 原地动作 ----
-    def face(self, direction: int, *, automatic: bool = False) -> None:
-        if self._dragging or self._falling or "turn" not in self._sequences:
-            return
-        self.stop_motion()
-        self._end_tickle()
-        self._begin_action_fade(self._clock())
-        self._automatic_pose = automatic
-        self._pose = self._gesture_sprite("turn", 2 if direction >= 0 else 8, "idle")
-        self._pose_until = self._clock() + FACE_SECONDS
-        self._refresh(self._clock())
-
     def set_calm(self, calm: bool) -> None:
         self._animator.calm = calm
 
@@ -869,8 +857,7 @@ class PetWindow(QWidget):
 
     @property
     def idle_motion_active(self) -> bool:
-        return ((self._jump_start is not None and self._automatic_jump)
-                or (self._automatic_pose and self._pose is not None))
+        return self._jump_start is not None and self._automatic_jump
 
     @property
     def is_pressed(self) -> bool:
@@ -882,7 +869,6 @@ class PetWindow(QWidget):
             self._finish_action_fade(self._clock())
         if not self._cheek_pulling:
             self._pose = None
-        self._automatic_pose = False
         self._jump_start = None
         self._jump_offset = 0.0
         self._refresh(self._clock())

@@ -544,3 +544,13 @@ def test_feedback_line_depends_on_working(pet):
     pet.claude_event("working", None, T0, "s", "t")
     assert keys(pet.feedback_good(T0 + sec(1))) == ["praise_menu_working"]
     assert keys(pet.feedback_bad("x", T0 + sec(1))) == ["feedback_bad_working"]
+
+
+def test_old_save_with_face_or_turn_fields_still_loads():
+    # 存档从未有过 face/turn 字段；即使旧档里出现这类陌生字段，也只是被忽略。
+    raw = {"activity_level": "lively", "affection": 12, "idle_action": "face",
+           "last_action": "turn", "actions": ["face", "turn"]}
+    data = SaveData.from_dict(raw)
+    assert data.activity_level == "lively" and data.affection == 12
+    saved = data.to_dict()
+    assert not {"idle_action", "last_action", "actions"} & set(saved)

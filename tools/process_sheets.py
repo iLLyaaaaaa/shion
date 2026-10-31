@@ -23,13 +23,12 @@ import process_sprites as ps
 # 每张分帧图：(输出前缀, 缩放方式, 是否保留帧间高低差)
 #   height：人物高度和 idle 一致（站立类动作，例如走路）
 #   head  ：头部宽度和 idle 一致（姿势高度变化大的动作，例如下蹲、腾空）
-#   first_head：第 1 帧头宽和整组身高的折中（转身这类各帧头宽不同的动作），保证不超出画布
+#   first_head：第 1 帧头宽和整组身高的折中（各帧头宽不同或带道具的动作，例如趴桌），保证不超出画布
 #   跳跃的升空由程序做，所以 jump 不保留高低差，全部脚底贴地
 SHEETS = {
     "walk_sheet": ("walk", "height", True),
     "jump_sheet": ("jump", "head", False),
     "drag_sheet": ("drag", "head", False),
-    "turn_sheet": ("turn", "first_head", False),  # 原地转一圈（侧面、背面头宽不同，只用第 1 帧正面的头宽来定比例）：正面→右前→右侧→…→左前
     "tickle_sheet": ("tickle", "height", False),   # 被挠痒痒
     "cheek_sheet": ("cheek", "height", False),   # 捏脸：1 往画面右拉、2 往画面左拉、3 松手后鼓腮生气
     "bed_sheet": ("bed", "head", False),         # 床上睡觉（带道具）：1 吸气、2 呼气
@@ -38,7 +37,7 @@ SHEETS = {
 # 带道具的动作比人宽，单独指定画布宽度（高度和脚底位置不变），并按整体边界居中而不是按头居中
 WIDE = {"bed_sheet": 640, "desk_sheet": 448}
 # 每张分帧图应有的帧数；切出来的帧数不对时报错，避免生成错乱的动画
-EXPECTED = {"walk_sheet": 8, "jump_sheet": 4, "drag_sheet": 4, "turn_sheet": 8, "tickle_sheet": 3, "cheek_sheet": 3, "bed_sheet": 2, "desk_sheet": 3}
+EXPECTED = {"walk_sheet": 8, "jump_sheet": 4, "drag_sheet": 4, "tickle_sheet": 3, "cheek_sheet": 3, "bed_sheet": 2, "desk_sheet": 3}
 HEAD_TOP = 0.28     # 头部宽度测量范围：人物上部 28%（避开举起的手臂）
 MIN_FRAME_AREA = 5000  # 像素数大于这个值的连通块才算一帧
 

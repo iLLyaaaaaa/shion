@@ -30,37 +30,22 @@ def belly_click(e):
     QTest.mouseClick(e.win, Qt.LeftButton, Qt.NoModifier, point(e.win, y=.69))
 
 
-def test_idle_scheduler_uses_side_pose(env, monkeypatch):
-    monkeypatch.setattr(env.ctl._idle, "step", lambda *args: "face")
-    env.ctl.tick()
-    assert env.win.idle_motion_active
-    assert env.win.displayed_sprite in {"turn_2", "turn_8"}
-
-
-def test_turn_around_action_is_removed_but_turn_frames_stay_loaded(env):
-    assert not hasattr(env.win, "turn") and not hasattr(env.win, "_turn_start")
-    assert len(env.win._sequences["turn"]) == 8  # face() 用 turn_2 / turn_8
-    env.ctl.do_action("turn")  # 旧名字：什么也不做，不报错
-    assert not env.win.motion_active
-
-
-@pytest.mark.parametrize("direction,sprite", [(1, "turn_2"), (-1, "turn_8")])
-def test_side_pose_times_out_and_never_builds_mirror_cache(env, direction, sprite):
+@pytest.mark.parametrize("old", ["face", "turn"])
+def test_face_and_turn_are_removed_and_turn_frames_are_not_loaded(env, monkeypatch, old):
     w = env.win
-    pos = w.pos()
-    w.face(direction)
-    assert w.displayed_sprite == sprite and not hasattr(w, "_mirrored_pixmaps")
-    env.advance(b.FACE_SECONDS - .001)
-    assert w.displayed_sprite == sprite
-    env.advance(.001)
-    assert w.displayed_sprite == "idle" and w.pos() == pos
-    assert "walk" not in w._sequences
-    assert not any(name.startswith("walk_") for name in w._pixmaps)
+    assert not hasattr(w, "face") and not hasattr(w, "turn")
+    assert "turn" not in w._sequences
+    assert not any(name.startswith(("turn_", "walk_")) for name in w._pixmaps)
+    env.ctl.do_action(old)  # 旧名字：什么也不做，不报错
+    assert not w.motion_active
+    monkeypatch.setattr(env.ctl._idle, "step", lambda *args: old)
+    env.ctl.tick()  # 旧的待机动作名同样被忽略
+    assert not w.motion_active
 
 
 def test_press_interrupts_pose_and_work_interrupts_only_automatic_pose(env):
     def start(automatic):
-        env.win.face(1, automatic=automatic)
+        env.win.jump(automatic=automatic)
     start(True)
     env.ctl.handle_event("working")
     assert not env.win.motion_active
@@ -322,8 +307,23 @@ def test_belly_double_click_is_consumed_without_status_query(env):
     assert env.win._tickle_start is not None
 
 
-@pytest.mark.parametrize("group,count", [("turn", 7), ("turn", 9), ("tickle", 2),
-                                         ("tickle", 4), ("cheek", 2), ("cheek", 4)])
+def test_leftover_turn_files_are_ignored(qapp, tmp_path, monkeypatch):
+    import shutil
+    from shion import pet_window as module
+    for name in module.STATES:
+        shutil.copyfile(module.SPRITE_DIR / f"{name}.png", tmp_path / f"{name}.png")
+    for i in range(1, 9):  # 旧安装目录里可能还留着 turn_1～8
+        shutil.copyfile(module.SPRITE_DIR / "idle.png", tmp_path / f"turn_{i}.png")
+    monkeypatch.setattr(module, "SPRITE_DIR", tmp_path)
+    w = module.PetWindow(autostart=False)
+    try:
+        assert "turn" not in w._sequences
+        assert not any(n.startswith("turn_") for n in w._pixmaps)
+    finally:
+        w.close()
+
+
+@pytest.mark.parametrize("group,count", [("tickle", 2), ("tickle", 4), ("cheek", 2), ("cheek", 4)])
 def test_new_sequences_reject_incomplete_or_extra_frames(qapp, tmp_path, monkeypatch, group, count):
     import shutil
     from shion import pet_window as module
@@ -340,7 +340,14 @@ def test_new_sequences_reject_incomplete_or_extra_frames(qapp, tmp_path, monkeyp
         w.close()
 
 
-@pytest.mark.parametrize("args", [["--face", "left"], ["--face", "right"], ["--cheek", "left"],
+def test_snapshot_cli_rejects_removed_face_flag(qapp, tmp_path):
+    from shion.__main__ import main
+    with pytest.raises(SystemExit) as exc:
+        main(["--snapshot", str(tmp_path / "x.png"), "--face", "left"])
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("args", [["--cheek", "left"],
                                   ["--cheek", "right"], ["--cheek", "release"], ["--tickle"]])
 def test_snapshot_cli_accepts_new_gesture_previews(qapp, tmp_path, args):
     from shion.__main__ import main

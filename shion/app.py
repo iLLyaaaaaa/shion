@@ -287,7 +287,6 @@ def render_snapshot(
     from_state: str | None = None,
     jump: bool = False,
     drag: bool = False,
-    face: str | None = None,
     cheek: str | None = None,
     tickle: bool = False,
     badge: bool = False,
@@ -313,8 +312,6 @@ def render_snapshot(
         win._animator.squash(t[0], squash)
     if jump:
         win.jump()
-    elif face:
-        win.face(1 if face == "right" else -1)
     elif cheek:
         from shion.behavior import CHEEK_RELEASE_SECONDS
         win._begin_action_fade(t[0])
@@ -395,14 +392,14 @@ def render_snapshot(
 def snapshot(
     out: str, state: str = "idle", bubble: str | None = None, at: float = 0.0,
     squash: str | None = None, lang: str = "zh", from_state: str | None = None,
-    jump: bool = False, drag: bool = False, face: str | None = None,
+    jump: bool = False, drag: bool = False,
     cheek: str | None = None, tickle: bool = False, badge: bool = False, height: int = 200,
     activity: str = "normal", weight_shift: str | None = None, nod: bool = False,
     desk_blink: str | None = None,
 ) -> int:
     """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
     img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, drag,
-                          face, cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
+                          cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
 
     ok = img.save(out, "PNG")
     if not ok:

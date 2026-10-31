@@ -66,17 +66,13 @@ def test_activity_menu_saves_and_checked_item_restores(env):
     assert find_action(find_action(again, "活跃度").menu(), "活泼").isChecked()
 
 
-@pytest.mark.parametrize("label,kind", [("跳一跳", "jump"), ("朝向鼠标", "face")])
-def test_action_menu_dispatches_the_selected_action(env, label, kind):
+def test_action_menu_dispatches_the_selected_action(env):
     menu = env.ctl.build_menu()
     actions = find_action(menu, "动作").menu()
-    assert [a.text() for a in actions.actions()] == ["跳一跳", "朝向鼠标", "去睡觉", "趴一会儿"]
-    find_action(actions, label).trigger()
+    assert [a.text() for a in actions.actions()] == ["跳一跳", "去睡觉", "趴一会儿"]
+    find_action(actions, "跳一跳").trigger()
     assert env.win.motion_active
-    if kind == "jump":
-        assert env.win._jump_start is not None
-    else:
-        assert env.win.displayed_sprite in ("turn_2", "turn_8")
+    assert env.win._jump_start is not None
 
 
 def test_fixed_expression_keeps_nudge_dialogue_without_autonomous_motion(env, monkeypatch):
@@ -109,7 +105,7 @@ def test_idle_actions_pause_in_blocked_states(env, block):
     assert env.win._animator.calm
 
 
-@pytest.mark.parametrize("action", ["face", "jump", "expression", "talk"])
+@pytest.mark.parametrize("action", ["jump", "expression", "talk"])
 def test_idle_actions_keep_final_window_position(env, action, monkeypatch):
     env.win.place_default()
     original = env.win.pos()

@@ -19,7 +19,7 @@ from tests.test_controller import BODY, env, qapp
 from tests.test_feedback_ui import pixels
 
 SEQUENCES = {group: tuple(f"{group}_{i}" for i in range(1, count + 1))
-             for group, count in (("turn", 8), ("jump", 4), ("drag", 4), ("cheek", 3), ("tickle", 3))}
+             for group, count in (("jump", 4), ("drag", 4), ("cheek", 3), ("tickle", 3))}
 
 
 def working_breath(elapsed):
@@ -79,7 +79,7 @@ def test_motion_does_not_depend_on_dropped_frames(qapp, action, elapsed):
             w.close()
 
 
-@pytest.mark.parametrize("missing", ["turn_2", "turn_8", "tickle_3", "cheek_3", "jump_1", "jump_2", "drag_2"])
+@pytest.mark.parametrize("missing", ["tickle_3", "cheek_3", "jump_1", "jump_2", "drag_2"])
 @pytest.mark.parametrize("problem", ["absent", "corrupt", "wrong_canvas"])
 def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missing, problem):
     import shion.pet_window as module
@@ -99,7 +99,8 @@ def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missi
         group = missing.split("_")[0]
         assert group not in w._sequences
         assert all(name not in w._pixmaps for name in SEQUENCES[group])
-        assert ("jump" if group == "turn" else "turn") in w._sequences
+        assert ("tickle" if group == "jump" else "jump") in w._sequences
+        assert "turn" not in w._sequences
         w.set_state("working", animate=False)
         if group == "jump":
             w.jump()
@@ -108,11 +109,8 @@ def test_optional_group_falls_back_as_a_whole(qapp, tmp_path, monkeypatch, missi
             assert w._jump_offset == pytest.approx(LEGACY_JUMP_HEIGHT)
             w.advance_to(100 + LEGACY_JUMP_DURATION)
             assert not w.motion_active and w._jump_offset == 0
-        elif group in ("turn", "tickle", "cheek"):
-            if group == "turn":
-                w.face(1)  # 侧身用 turn_2 / turn_8，缺组时不执行
-                assert not w.motion_active and w.displayed_sprite == "working"
-            elif group == "tickle":
+        elif group in ("tickle", "cheek"):
+            if group == "tickle":
                 w._feed_tickle(100)
                 assert w.displayed_sprite == "happy"
             else:
@@ -133,9 +131,8 @@ def test_motion_pixels_are_not_clipped_and_masks_cover_visible_pixels(env, heigh
     w.set_height(height)
     w.set_state("working", animate=False)
     w.place_default()
-    for action, times in (("face", [0, 0.05, 0.1, 1.0]),
-                          ("jump", [0, 0.075, 0.15, 0.24, 0.35, 0.44, 0.495, 0.625])):
-        w.face(1) if action == "face" else w.jump()
+    for action, times in (("jump", [0, 0.075, 0.15, 0.24, 0.35, 0.44, 0.495, 0.625]),):
+        w.jump()
         start = env.mono[0]
         for elapsed in times:
             env.mono[0] = start + elapsed

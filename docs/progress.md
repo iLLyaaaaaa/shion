@@ -11,6 +11,7 @@
 - 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
 - 分支 `feature/menu-parity`（从 `dc9fe3d` 派生）：右键菜单 Claude Code / ChatGPT 连接管理对齐，并新增 Claude 的“临时关闭联动”。未合并、未部署、未 push；本分支全量结果见下方 2026-10-30 记录。
 - 分支 `feature/remove-codex-autolaunch`（从 `fad0e3a` 派生）：删除 Codex 新开会话自动拉起诗音，保留 Claude 拉起、单实例互斥锁和 Codex 窗口层级跟随。未合并、未 push，详见下方 2026-10-31 记录。
+- 分支 `feature/remove-face`（从 `5062919` 派生）：删除“朝向鼠标”动作并停用 turn 帧，待机动作只剩小跳 : 表情 = 1 : 2。未合并、未 push，详见下方 2026-10-31 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -37,6 +38,7 @@
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
 - `feature/menu-parity` 待用户审核、真机验收后决定是否合并到当前分支。
 - `feature/remove-codex-autolaunch` 待用户审核后合并到当前分支；Codex 自动拉起相关验收项已取消。
+- `feature/remove-face` 待用户真机验收后合并到当前分支。
 - 下一步由用户审核开发分支及下方清单，再安排真实客户端适配与 GUI 人工验收；部署、打包、用户开关开放、真实配置写入与发布须有对应授权。本任务不推进这些步骤。
 - 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。
 
@@ -64,6 +66,8 @@
 - [ ] 单实例互斥锁（`feature/codex-autolaunch`）：多个 Claude 会话同时新开只剩一个诗音；Claude 临时关闭联动后新开 CC 会话不拉起诗音（源码版与打包版各验一次；原属上面已取消的条目，Claude 侧保留）；旧版诗音（无互斥锁）运行时新版不会重复启动；诗音被强制结束后能正常重新启动；退出后再启动正常。
 - [x] 单实例互斥锁（2026-10-31 真机通过）：同时新开两个 CC 会话只出现一个诗音。
 
+- [ ] 删除朝向鼠标（`feature/remove-face`）：右键“动作”只剩跳一跳 / 去睡觉 / 趴一会儿（三语）；普通/活泼档待机时不再出现侧身，只有小跳和开心/发呆表情，表情明显多于小跳；旧存档正常加载。
+
 ## v1.1 待办
 - [ ] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）
 - [x] hook 耗时：诗音没开时的等待已在 v1.0.1 热修里去掉（见当前状态）。诗音运行时 PreToolUse 仍约 354 ms（源码）/ 435 ms（exe）：主要是进程启动，`find_cc_process` 只占约 26 ms；是否继续降另议
@@ -75,6 +79,7 @@
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-10-31 删除朝向鼠标（face）并停用 turn 帧**（分支 `feature/remove-face`，从 `5062919` 派生，worktree `..\claude-pet-wtemove-face`，本地提交、未合并、未 push）：face 借用 turn_2 / turn_8 侧身，看起来仍像转身，一并删除。删去 `behavior.FACE_SECONDS`、`PetWindow.face()` 及只为它服务的 `_automatic_pose`（`idle_motion_active` 现只看自动跳跃）、controller 待机与菜单两处分支、三语 `action_face`、截图 `--face` 参数（现在传入会被 argparse 拒绝）；`SEQUENCE_GROUPS` / `EXACT_SEQUENCES` 去掉 turn，`assets/sprites/turn_1～8.png` 已删除，旧目录残留的 turn_*.png 会被忽略；`tools/process_sheets.py` 的 `SHEETS` / `EXPECTED` 去掉 `turn_sheet`（raw 里的 turn_sheet.png 保留不动，脚本不再读取也不再生成 turn 帧，`--only turn` 不再是合法选项；`process_sprites.py` 本就跳过 `*_sheet`）。待机动作 `IDLE_ACTIONS = ("jump", "expression")`，权重 1 : 2：自言自语可抽时 talk 10% / jump 30% / expression 60%（原 face/jump/expression 各 30%），冷却中 jump 33.3% / expression 66.7%（原各 33.3%）。存档从未有 face/turn 字段，新增测试确认带陌生字段的旧档照常加载。原来以 face 为载体的淡化/遮罩/中断测试改用跳跃或静止的捏脸松手姿势。`scheduler_disabled_a55825f.json` 只刷新 21 个 `menu_sha256`，其余字段逐项比对一致。验证：全量 pytest（`--basetemp=build\pytest-tmp-face`，在 worktree 内，`PYTHONUTF8=1`）汇总原文：`1877 passed, 8 skipped, 2 warnings in 517.70s (0:08:37)`，退出码 0；两条为既有 Pillow `getdata()` 弃用警告。截图 `--snapshot --jump --at .24` 正常。
 - **2026-10-31 删除 Codex 新开会话自动拉起**（分支 `feature/remove-codex-autolaunch`，从 `fad0e3a` 派生，worktree `..\claude-pet-wt\remove-codex-autolaunch`，本地提交、未合并、未 push）：诊断结论是 Codex 把 MCP 观察端放进 `KILL_ON_JOB_CLOSE` 且不允许脱离的 Job，观察端拉起的诗音会随 Codex 退出或关闭 MCP 一起被结束，所以决定不再由 Codex 拉起，Codex 用户改用“开机自启”。删除 `codex_mcp.py` 的 `autolaunch()`、`codex_link_enabled()`、`_AUTOLAUNCH`、`dispatch()` 中的调用及相关 import，`git diff d907e33 -- shion/codex_mcp.py` 为空（观察端转发、心跳、租约与 668962c 之前一致）；`launcher.py` 删除 `AutoLaunch`、`AUTOLAUNCH_COOLDOWN` 及不再用的 `logging`/`time`，保留 `shion_running()`、`launch_shion()`、`INSTANCE_NAME`；`tests/test_autolaunch.py` 删掉 Codex 观察端拉起的全部用例，Claude 拉起、公共函数、Claude 联动开关、单实例竞争用例保留；三语 README 常见问题各加一条“用 Codex 时诗音不会被自动拉起，建议右键 → 设置 → 开启开机自启”；spec.md 末节记录决定与原因。Claude hook 的 `claude_link_enabled` 判断、单实例互斥锁（`fad0e3a`）、Codex 窗口层级跟随（`4a6e9eb`）均未改动。验证：全量 pytest（`--basetemp=build/pytest-tmp4`，在 worktree 内）汇总原文：`1913 passed, 8 skipped, 2 warnings in 648.08s (0:10:48)`，退出码 0。首轮为 `11 failed, 1902 passed, 8 skipped, 6 warnings in 628.37s (0:10:28)`：其中 10 个是 `tests/test_process_sheets.py`，原因是新 worktree 没有 `assets/sprites/raw` junction（补上后通过）；另 1 个 `tests/test_install_hooks.py::test_corrupt_json_not_touched` 是子进程 stderr 按本机 GBK 解码失败，主仓库未改动的 `fad0e3a` 上同样失败，设 `PYTHONUTF8=1` 后通过，与本次改动无关。`tools/check_private.py` 暂存区通过，作者与提交者邮箱均为 noreply 邮箱。
 - **2026-10-30 单实例改用命名互斥锁**（分支 `feature/codex-autolaunch`，本地提交、未合并、未 push）：`SingleInstance.acquire()` 在 Windows 上先 `CreateMutexW("Local\\" + 实例名)`（原子，实例名仍支持 `SHION_INSTANCE_NAME` 覆盖），返回 `ERROR_ALREADY_EXISTS` 就关掉本次句柄、照原样连一下已有实例的管道后返回 False；拿到锁的实例在整个生命周期内持有句柄，`release()` 才关闭，崩溃由系统回收。拿到锁后仍做原来的管道连接检查（兼容没有互斥锁的旧版诗音），再 `listen`，listen 失败会释放锁。命名管道服务保留，`launcher.shion_running()` 和 hook/观察端接口不变；非 Windows、创建锁失败时行为与原来一致。上一条的 xfail 竞态用例改为必须只剩一个：4 个进程对齐到同一时刻、一个测试里连跑 3 轮，另独立连续跑 5 次全部通过；另有 `tests/test_single_instance.py` 覆盖锁语义。
 - **2026-10-30 Codex 桌面端窗口层级跟随**（分支 `feature/codex-autolaunch`，本地提交、未合并、未 push）：未开“置于最上层”时，`shion/foreground.py` 原来只在 `claude.exe` 前台时让诗音紧邻其上，Codex 桌面端窗口会盖住诗音。跟随目标改成常量集合 `CLAUDE_IMAGES={"claude.exe"}`、`CODEX_IMAGES={"chatgpt.exe"}`；Codex 只在控制器的 `_follow_codex_window()` 为真时才跟随（ChatGPT 联动 `connection_state()=="installed"`，即已安装且未临时关闭；关闭/未安装/读失败都不跟随，判断在每次前台事件时动态进行）。不加任何终端程序；重验、不激活、不绑定 owner、置顶时不跟随都不变，日志与注释改为中性说法。Codex 桌面端实际映像：已装包 `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0`，主窗口（Chrome_WidgetWin_1，标题 ChatGPT）属于该包 `app\ChatGPT.exe`，只读枚举进程与可见窗口确认。局限：按映像名匹配，另一个同名 `ChatGPT.exe`（独立 ChatGPT 桌面应用）也会命中。

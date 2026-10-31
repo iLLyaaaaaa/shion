@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QProcess, QRect, QTimer, Qt, Signal
-from PySide6.QtGui import QActionGroup, QCursor, QGuiApplication
+from PySide6.QtGui import QActionGroup, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
 
 from shion import __version__
@@ -230,10 +230,7 @@ class PetController(QObject):
             # 引导/确认期间不做自动动作，仍继续处理工作和授权事件。
             self.state.save.activity_level,
         )
-        if action == "face":
-            self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1,
-                             automatic=True)
-        elif action == "jump":
+        if action == "jump":
             self.window.jump(automatic=True)
         elif action == "expression":
             self.state.idle_expression(
@@ -530,8 +527,6 @@ class PetController(QObject):
         self._idle.next_at = None
         if name == "jump":
             self.window.jump()
-        elif name == "face":
-            self.window.face(1 if QCursor.pos().x() >= self.window.geometry().center().x() else -1)
         elif name == "bed":
             self.state.menu_talk(self._now(), sleep=True)
             self.say_key("bedtime", category="dialogue")
@@ -1259,7 +1254,7 @@ class PetController(QObject):
             act.triggered.connect(lambda _=False, lv=level: self.set_activity(lv))
 
         action_menu = pet_menu.addMenu(ui("menu_action"))
-        for name in ("jump", "face", "bed", "desk"):
+        for name in ("jump", "bed", "desk"):
             action_menu.addAction(ui("action_" + name)).triggered.connect(lambda _=False, n=name: self.do_action(n))
 
         size_menu = pet_menu.addMenu(ui("menu_size"))

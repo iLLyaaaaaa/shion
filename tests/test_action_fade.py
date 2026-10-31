@@ -10,7 +10,7 @@ from PySide6.QtTest import QTest
 
 from shion.animator import Frame, TRANSITION, ease_out
 from shion.behavior import (
-    CHEEK_RELEASE_SECONDS, FACE_SECONDS, JUMP_DURATION,
+    CHEEK_RELEASE_SECONDS, JUMP_DURATION,
 )
 from shion.pet_window import ACTION_FADE_SECONDS, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, PetWindow
 from tests.test_controller import BODY, qapp
@@ -35,12 +35,7 @@ def scene(qapp):
 
 
 def start(w, action):
-    if action == "face_left":
-        w.face(-1)
-    elif action == "face_right":
-        w.face(1)
-    else:
-        getattr(w, action)()
+    getattr(w, action)()
 
 
 def layers(frame):
@@ -49,8 +44,6 @@ def layers(frame):
 
 @pytest.mark.parametrize("action,first,end,last", [
     ("jump", "jump_1", JUMP_DURATION, "jump_4"),
-    ("face_left", "turn_8", FACE_SECONDS, "turn_8"),
-    ("face_right", "turn_2", FACE_SECONDS, "turn_2"),
 ])
 def test_both_boundaries_have_exact_duration_without_delaying_action(scene, action, first, end, last):
     w, _, advance = scene
@@ -71,8 +64,7 @@ def test_both_boundaries_have_exact_duration_without_delaying_action(scene, acti
     assert layers(w.frame) == {"idle": 1.0} and w._action_fade is None
 
 
-@pytest.mark.parametrize("action,end,last", [("jump", JUMP_DURATION, "jump_4"),
-                                           ("face_right", FACE_SECONDS, "turn_2")])
+@pytest.mark.parametrize("action,end,last", [("jump", JUMP_DURATION, "jump_4")])
 def test_sparse_end_uses_scheduled_last_frame_and_never_replays_fade(scene, action, end, last):
     w, _, advance = scene
     start(w, action)
@@ -83,7 +75,7 @@ def test_sparse_end_uses_scheduled_last_frame_and_never_replays_fade(scene, acti
     assert layers(w.frame) == {"idle": 1.0} and w._action_fade is None
 
 
-@pytest.mark.parametrize("action", ["jump", "face_left"])
+@pytest.mark.parametrize("action", ["jump"])
 def test_interrupt_and_fast_restart_continue_the_current_mix(scene, action):
     w, clock, advance = scene
     start(w, action)
@@ -95,10 +87,10 @@ def test_interrupt_and_fast_restart_continue_the_current_mix(scene, action):
     outgoing = {name: weight * .75 for name, weight in before.items()}
     outgoing["idle"] += .25
     assert layers(w.frame) == pytest.approx(outgoing)
-    w.face(1)
+    w.jump()
     assert layers(w.frame) == pytest.approx(outgoing)
     advance(clock[0] - 100 + ACTION_FADE_SECONDS)
-    assert layers(w.frame) == {"turn_2": 1.0}
+    assert layers(w.frame) == {w.displayed_sprite: 1.0}
     assert w._action_fade is None
 
 
@@ -109,23 +101,23 @@ def test_blink_source_is_preserved_but_blink_itself_has_no_action_fade(scene):
     advance(.06)
     source = layers(w.frame)
     assert set(source) == {"idle", "blink"} and w._action_fade is None
-    w.face(1)
+    w.jump()
     assert layers(w.frame) == pytest.approx(source)
     advance(.06 + ACTION_FADE_SECONDS / 2)
     expected = {name: weight * .5 for name, weight in source.items()}
-    expected["turn_2"] = .5
+    expected[w.displayed_sprite] = .5
     assert layers(w.frame) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("state", ["working", "happy", "proud", "sleep", "bed"])
 def test_expression_switch_cancels_boundary_fade_and_keeps_original_transition(scene, state):
     w, clock, advance = scene
-    w.face(1)
+    w.jump()
     advance(.04)
     w.stop_motion()
     w.set_state(state)
     assert w._action_fade is None
-    assert not any(name.startswith("turn_") for name in layers(w.frame))
+    assert not any(name.startswith("jump_") for name in layers(w.frame))
     advance(clock[0] - 100 + TRANSITION / 2)
     target = "bed_1" if state == "bed" else state
     assert layers(w.frame) == pytest.approx({"idle": 1 - ease_out(.5), target: ease_out(.5)})
@@ -135,15 +127,15 @@ def test_expression_switch_cancels_boundary_fade_and_keeps_original_transition(s
 def test_actions_on_other_expressions_do_not_add_boundary_fade(scene, state):
     w, _, advance = scene
     w.set_state(state, animate=False)
-    w.face(1)
-    assert layers(w.frame) == {"turn_2": 1.0} and w._action_fade is None
-    advance(FACE_SECONDS)
+    w.jump()
+    assert layers(w.frame) == {w.displayed_sprite: 1.0} and w._action_fade is None
+    advance(JUMP_DURATION)
     assert layers(w.frame) == {state: 1.0} and w._action_fade is None
 
 
 def test_real_drag_clears_interrupted_action_and_stays_immediate_on_release(scene):
     w, _, advance = scene
-    w.face(1)
+    w.jump()
     advance(.04)
     QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)
     gp = w.mapToGlobal(BODY)
@@ -154,7 +146,7 @@ def test_real_drag_clears_interrupted_action_and_stays_immediate_on_release(scen
     advance(.30)  # 原地停住再慢放，避免触发甩出。
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, w.mapFromGlobal(gp + QPoint(25, -25)))
     assert not w.is_falling and not w.is_dragging
-    assert not any(name.startswith(("turn_", "drag_")) for name in layers(w.frame))
+    assert not any(name.startswith(("jump_", "drag_")) for name in layers(w.frame))
     assert w._action_fade is None
 
 
@@ -198,7 +190,7 @@ def test_tickle_loop_and_scheduled_end_use_only_boundary_fades(scene):
 
 
 @pytest.mark.parametrize("height", [160, 200, 260, 320])
-@pytest.mark.parametrize("action,end", [("jump", JUMP_DURATION), ("face_right", FACE_SECONDS)])
+@pytest.mark.parametrize("action,end", [("jump", JUMP_DURATION)])
 def test_transition_mask_is_full_union_and_covers_all_pixels_without_moving_feet(scene, height, action, end):
     w, _, advance = scene
     w.set_height(height)
@@ -225,10 +217,13 @@ def test_transition_mask_is_full_union_and_covers_all_pixels_without_moving_feet
 def test_opacity_only_changes_reuse_union_mask_and_opaque_overlap_does_not_flash(scene):
     w, _, advance = scene
     w._pixmaps["idle"].fill(QColor("red"))
-    w._pixmaps["turn_2"].fill(QColor("blue"))
+    w._pixmaps["cheek_3"].fill(QColor("blue"))
     w._mask_cache.clear()
     w._mask_key = None
-    w.face(1)
+    # 静止姿势（捏脸松手）：进入淡化期间只有透明度在变。
+    w._begin_action_fade(100.0)
+    w._pose = "cheek_3"
+    w._pose_until = 100.0 + CHEEK_RELEASE_SECONDS
     advance(.025)
     mask, count = w.mask(), len(w._mask_cache)
     advance(.05)
@@ -237,10 +232,10 @@ def test_opacity_only_changes_reuse_union_mask_and_opaque_overlap_does_not_flash
     assert color.alpha() == 255 and abs(color.red() - color.blue()) <= 1
 
 
-@pytest.mark.parametrize("motion,end", [("--jump", JUMP_DURATION), ("--face", FACE_SECONDS)])
+@pytest.mark.parametrize("motion,end", [("--jump", JUMP_DURATION)])
 def test_snapshot_cli_captures_both_boundary_midpoints(qapp, tmp_path, motion, end):
     from shion.__main__ import main
-    args = [motion, "right"] if motion == "--face" else [motion]
+    args = [motion]
     images = []
     for t in (0, .05, .1, end, end + .05, end + .1):
         out = tmp_path / f"{motion}-{t}.png"

@@ -33,7 +33,7 @@ def hover(w):
 SCENARIOS = [
     "sleep", "night", "bed", "goodnight", "desk", "auto_desk", "neglect1", "neglect2",
     "working", "paused", "temporary", "idle_expression", "snack",
-    "face", "jump", "auto_face", "auto_jump", "cheek", "tickle",
+    "jump", "auto_jump", "cheek", "tickle",
 ] + ["fixed_" + name for name in EXPRESSIONS]
 
 
@@ -79,8 +79,7 @@ def prepare(e, scenario):
     else:
         automatic = scenario.startswith("auto_")
         name = scenario.removeprefix("auto_")
-        args = (1,) if name == "face" else ()
-        getattr(e.win, name)(*args, automatic=automatic)
+        getattr(e.win, name)(automatic=automatic)
         assert e.win.motion_active
 
 
@@ -133,7 +132,7 @@ def test_enter_leave_during_drag_keep_closed_hand_and_dragging(env):
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, w.mapFromGlobal(gp))
 
 
-@pytest.mark.parametrize("scenario", ["sleep", "night", "bed", "desk", "auto_desk", "face", "auto_jump"])
+@pytest.mark.parametrize("scenario", ["sleep", "night", "bed", "desk", "auto_desk", "jump", "auto_jump"])
 def test_browsing_or_cancelling_context_menu_preserves_state_and_motion(env, scenario, monkeypatch):
     prepare(env, scenario)
     before = snapshot(env)

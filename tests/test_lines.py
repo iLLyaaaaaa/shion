@@ -101,8 +101,8 @@ def test_shipped_languages_are_zh_en_ja_with_zh_first():
 def test_english_expression_and_action_menu_labels():
     lines = Lines("en")
     assert [lines.ui(key) for key in (
-        "expression_stop", "expression_neglect2", "menu_auto_expression", "action_face"
-    )] == ["Flustered", "Teary", "Auto expressions", "Face the mouse"]
+        "expression_stop", "expression_neglect2", "menu_auto_expression", "action_jump"
+    )] == ["Flustered", "Teary", "Auto expressions", "Jump"]
 
 
 # ---- 切换与回退 ----
