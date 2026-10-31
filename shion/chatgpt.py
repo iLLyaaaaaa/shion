@@ -124,7 +124,7 @@ class ChatGPTConnection:
         if self._disconnect_notice_pending and time.monotonic() - self._last_notice >= 2:
             self._disconnect_notice_pending = False
             self._last_notice = time.monotonic()
-            return "chatgpt_disconnected"
+            return "chatgpt_disconnected_say"  # 气泡用诗音口吻；菜单状态仍用 chatgpt_disconnected
         if notices and time.monotonic() - self._last_notice >= 2:
             self._last_notice = time.monotonic()
             return "chatgpt_interrupted" if "interrupted" in notices else "chatgpt_ended"

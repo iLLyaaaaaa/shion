@@ -1,3 +1,5 @@
+import pytest
+
 from shion.chatgpt import ChatGPTConnection
 from shion.events import parse_observation
 from tests.test_controller import env, qapp
@@ -76,9 +78,22 @@ def test_lease_loss_is_neutral_and_does_not_stop_claude(env, tmp_path, monkeypat
     ctl.tick()
     assert not env.state.observed_working and env.state.working_sessions(env.now) == ["claude"]
     assert before == (env.data.stats["claude_tasks"], env.data.affection)
-    assert ctl.lines.ui("chatgpt_disconnected") in ctl.chatgpt.status(ctl.lines.ui)
-    assert ctl.lines.ui("chatgpt_disconnected") in notices
+    assert ctl.lines.ui("chatgpt_disconnected") in ctl.chatgpt.status(ctl.lines.ui)  # 菜单仍是简洁状态
+    assert ctl.lines.ui("chatgpt_disconnected_say") in notices  # 气泡是诗音的话
+    assert ctl.lines.ui("chatgpt_disconnected") not in notices
     assert ctl.lines.ui("chatgpt_ended") not in notices
     count = len(notices)
     ctl.tick()
     assert len(notices) == count
+
+
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+def test_chatgpt_speech_lines_are_shion_voice_without_claude(lang):
+    import json
+    from shion.lines import LINES_DIR
+    ui = json.loads((LINES_DIR / f"{lang}.json").read_text(encoding="utf-8"))["ui"]
+    speech = ("chatgpt_ended", "chatgpt_interrupted", "chatgpt_disconnected_say", "v2_chatgpt_permission")
+    for key in speech:
+        assert ui[key] and "ChatGPT" in ui[key] and "Claude" not in ui[key]
+    # 菜单状态行和气泡分开：失联的菜单文字不是气泡台词
+    assert ui["chatgpt_disconnected"] != ui["chatgpt_disconnected_say"]

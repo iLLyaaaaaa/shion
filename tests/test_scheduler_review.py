@@ -126,7 +126,7 @@ def test_switch_marks_unknown_without_chatgpt_disconnect_notice(env, tmp_path, m
     assert ctl.chatgpt.working == 0
     assert ctl.v2.display.state == "uncertain"
     assert env.win.sprite_name == "idle"
-    assert not any(ctl.lines.ui("chatgpt_disconnected") in s for s in said)
+    assert not any(ctl.lines.ui(k) in s for s in said for k in ("chatgpt_disconnected", "chatgpt_disconnected_say"))
 
 
 @pytest.mark.parametrize("entry", ["tick", "switch", "observe"])
