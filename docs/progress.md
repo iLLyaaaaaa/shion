@@ -55,10 +55,14 @@
 - [ ] v1 Claude 实际联动：授权自动收起、暂停/继续、中断文字与工具分支、超时/静音、终端草稿与确认框保护、桌面复制“继续”、连接迁移不重复事件和登录自启。
 - [ ] 三语菜单/台词/气泡、对话数字键与焦点、每日额度/时段问候/等级与存档迁移；逐项条件见归档，自动化通过不能替代用户观感。
 - [ ] 菜单对齐与临时关闭联动（`feature/menu-parity`）：真机右键看两个子菜单的结构、截断与 tooltip；Claude 临时关闭后真实 CC 的授权框、停下中的 hook、反馈注入与重新开启的表现；离屏渲染和合成测试不代替真机。
+- [x] Claude 临时关闭联动（2026-10-31 真机通过）：关闭时不弹面板、交回 CC 授权框；重新开启后授权面板同意/拒绝生效。
 - [ ] 菜单标名（`feature/menu-claude-label`）：真机右键看顶层“Claude Code：…”状态行，以及“AI 连接 › Claude Code › / ChatGPT ›”两个子菜单的展开位置、宽度和 tooltip（高 DPI、多屏）；离屏渲染截图不代替真机观感。
 - [x] ~~Codex 自动拉起（`feature/codex-autolaunch`）~~ **已取消（2026-10-31）**：功能已在 `feature/remove-codex-autolaunch` 删除，不再验收；Codex 用户改用“开机自启”。原因（Codex 的 KILL_ON_JOB_CLOSE Job）见下方记录和 spec.md 末节。
+- [x] Codex 不再自动拉起（2026-10-31 真机通过）：诗音没开时新开 Codex 对话，诗音不出现，Codex 正常工作。
 - [ ] Codex 窗口层级跟随（`feature/codex-autolaunch`）：关闭“置于最上层”后，Codex 桌面端窗口在前台时诗音浮在其上方且不抢焦点；在 Codex 里临时关闭 ChatGPT 联动或未安装联动时不再跟随；终端窗口（Windows Terminal 等）前台时不跟随；Claude 桌面端跟随不变；高 DPI/多屏观感。
+- [x] Codex 桌面端窗口层级跟随（2026-10-31 真机通过）：未置顶时诗音浮在 Codex 窗口上方，其他程序照常遮挡。
 - [ ] 单实例互斥锁（`feature/codex-autolaunch`）：多个 Claude 会话同时新开只剩一个诗音；Claude 临时关闭联动后新开 CC 会话不拉起诗音（源码版与打包版各验一次；原属上面已取消的条目，Claude 侧保留）；旧版诗音（无互斥锁）运行时新版不会重复启动；诗音被强制结束后能正常重新启动；退出后再启动正常。
+- [x] 单实例互斥锁（2026-10-31 真机通过）：同时新开两个 CC 会话只出现一个诗音。
 
 ## v1.1 待办
 - [ ] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）
