@@ -26,6 +26,7 @@ class _TakeRequest:
         self.done = threading.Event()
         self.cancelled = False
         self.text = ""
+        self.session: Optional[str] = None  # 请求者的会话；None = 旧 hook，只能取无归属的反馈
 
 
 class ServerBridge(QObject):
@@ -44,8 +45,9 @@ class ServerBridge(QObject):
     def on_event(self, etype: str, detail: Optional[str], meta: Optional[dict] = None) -> None:
         self.event_received.emit(etype, detail, meta)
 
-    def on_take_feedback(self) -> str:
+    def on_take_feedback(self, session: Optional[str] = None) -> str:
         req = _TakeRequest()
+        req.session = session
         self.feedback_requested.emit(req)
         req.done.wait(self._take_timeout)
         with req.lock:
@@ -65,5 +67,5 @@ class ServerBridge(QObject):
         with req.lock:
             if req.cancelled:
                 return
-            req.text = self._controller.take_feedback_text()
+            req.text = self._controller.take_feedback_text(req.session)
             req.done.set()

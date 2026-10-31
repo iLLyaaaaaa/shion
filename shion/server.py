@@ -1,7 +1,8 @@
 """Shion 的本地 HTTP 服务。
 
 只用标准库，不 import Qt。通过两个回调和外界交互：
-``on_event(type, detail[, meta])`` 收到事件时调用（带会话信息时才传 meta），``on_take_feedback()`` 取走并清空反馈队列（返回要注入的文字）。
+``on_event(type, detail[, meta])`` 收到事件时调用（带会话信息时才传 meta），``on_take_feedback([session])`` 取走反馈队列
+（返回要注入的文字；带 session 时只取这个会话的和无归属的，不带只取无归属的）。
 这两个回调都在服务线程里被调用；接到界面时由界面层负责切回 GUI 线程。
 """
 from __future__ import annotations
@@ -11,6 +12,7 @@ import logging
 import math
 import re
 import threading
+import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
@@ -29,6 +31,18 @@ ID_MAX = 128  # session_id / tool_use_id 的长度上限
 PROC_NAMES = ("claude.exe", "node.exe", "bun.exe")  # hook 报来的工作进程只认这些名字
 PERM_KEY_RE = re.compile(r"[0-9a-f]{1,64}")  # 授权请求的指纹：工具名 + 参数的哈希（十六进制）
 IDLE_PROMPT = "idle_prompt"  # Notification 的 notification_type：CC 回复完约 60 秒用户没输入
+PROJECT_MAX = 64  # 项目文件夹名（只给菜单显示用）的长度上限
+
+
+def clean_project(value) -> Optional[str]:
+    """hook 报来的工作目录文件夹名（只是 basename）。去掉控制字符和格式字符（如 RTL 覆盖）、首尾空白；
+    不是字符串、含路径分隔符、清理后为空或超过 64 字时返回 None（只忽略这个字段，不影响事件）。"""
+    if not isinstance(value, str):
+        return None
+    text = "".join(c for c in value if unicodedata.category(c) not in ("Cc", "Cf")).strip()
+    if not text or len(text) > PROJECT_MAX or "/" in text or "\\" in text:
+        return None
+    return text
 
 
 def _opt_id(value) -> tuple[bool, str]:
@@ -77,6 +91,9 @@ def parse_meta(data: dict) -> Optional[dict]:
                 or not all(is_int(h) and h > 0 for h in hooks)):
             return None
         meta["proc"] = {"pid": pid, "created": created, "name": name.lower(), "entry": entry, "hooks": list(hooks)}
+    project = clean_project(data.get("project"))
+    if project is not None:
+        meta["project"] = project  # 不合法只丢掉这个字段，事件照常
     return meta
 
 
@@ -194,12 +211,14 @@ class _Handler(BaseHTTPRequestHandler):
         if "session" in meta and (etype in ("prompt", "stop") or (etype == "notification" and detail == IDLE_PROMPT)):
             # 这一轮结束了 / 用户又说话了 / 空闲等输入：这个会话还挂着的授权一定已经在 CC 里答过了
             hub.permissions.settle(meta["session"])
+        session = meta.get("session")
         if etype == "prompt":
-            # 用户在 CC 里说话就解除暂停；在服务线程里直接做，紧接着的工具调用不会再被误挡
-            hub.resume()
-        elif etype == "stop" and not hub.is_holding:
+            # 用户在 CC 里说话就解除这个会话自己的暂停（旧 hook 没带 session：解除全部）；
+            # 在服务线程里直接做，紧接着的工具调用不会再被误挡
+            hub.resume(session)
+        elif etype == "stop" and not (hub.is_session_holding(session) if session else hub.is_holding):
             # 这一轮没碰到检查点就自己结束了：没用上的“停下”作废，不能挡住下一轮
-            hub.resume()
+            hub.resume(session)
         try:
             self.server.emit_event(etype, detail, meta)
         except Exception:
@@ -210,14 +229,18 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _post_take_feedback(self):
         # 读取 body（即使不用），避免连接被意外重置
-        if self._read_json() is None:
+        data = self._read_json()
+        if data is None:
             return
         if not self.server.hub.link_enabled:
             self._send(200, {"text": ""})  # 临时关闭联动：反馈留在队列里，不取走
             return
+        ok, session = _opt_id(data.get("session") if isinstance(data, dict) else None)
+        session = session if ok else ""  # 不合法按没带处理：只能取到无归属的反馈
         try:
             with self.server.feedback_lock:
-                text = str(self.server.on_take_feedback())
+                take = self.server.on_take_feedback
+                text = str(take(session) if session else take())
         except Exception:
             log.exception("on_take_feedback 回调出错")
             self._send(500, {"error": "internal error"})
@@ -392,9 +415,9 @@ def main() -> None:
             reactions = pet.claude_event(etype, detail, now, meta.get("session"), meta.get("tool_id"))
             print(f"事件 {etype!r} {detail!r} -> {reactions}  当前：{pet.current(now)}", flush=True)
 
-    def on_take():
+    def on_take(session=None):
         with lock:
-            return "\n".join(i["kind"] + ":" + i["text"] for i in pet.take_feedback())
+            return "\n".join(i["kind"] + ":" + i["text"] for i in pet.take_feedback(session=session))
 
     srv = ShionServer(on_event, on_take)
     srv.start()

@@ -31,6 +31,7 @@ from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
 from shion.remote import RemoteHub
+from shion.sessions import SessionNames
 from shion.runtime import console_send_command, hook_process_images
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
@@ -101,6 +102,9 @@ class PetController(QObject):
         # 最近一个被诗音结束了这一轮（立即中断 / 停太久）的会话：(会话, CC 进程或 None)，菜单上可以“继续”
         self._ended: Optional[tuple[str, Optional[interrupt.CCProcess]]] = None
         self._continue_sending = False
+        self.session_names = SessionNames()  # 工作遥控菜单 / 检查点面板里的会话显示名
+        self._bad_targets: Optional[list[str]] = None  # “有问题……”选了哪些会话（None = 无归属）
+        self._checkpoint = None  # 多个会话同时停住时的检查点面板（badge.CheckpointPanel，按需创建）
         self.continue_runner: Callable[[interrupt.CCProcess, str, Callable[[dict], None]], None] =             self._run_console_send
         self.process_view = interrupt.ProcessView()
         self.hook_images: tuple[str, ...] = hook_process_images(ROOT)
@@ -149,7 +153,7 @@ class PetController(QObject):
         w.menu_requested.connect(self.show_menu)
         w.moved.connect(self._on_window_moved)
         w.pressed.connect(self._on_pressed)
-        w.resume_requested.connect(self.resume_work)
+        w.resume_requested.connect(self._resume_from_badge)
 
         self._watch_screens()
 
@@ -192,9 +196,7 @@ class PetController(QObject):
         )
         self.window.set_calm(calm)
         self.window.set_activity(self.state.save.activity_level)
-        self.window.set_paused_badge(self.state.paused and self._held_seen,
-                                     text=self.lines.ui("pause_label"), tooltip=self.lines.ui("pause_label_hint"),
-                                     fallback=self.lines.font_fallback)
+        self._sync_checkpoint_display()
         if calm and self.window.idle_motion_active:
             self.window.stop_motion()
         if cur == "sleep" and self.state.sleep_in_bed(now):
@@ -544,7 +546,7 @@ class PetController(QObject):
 
     def _pet_windows(self):
         return (self.window, self.bubble, self.overlay, self._crumbs,
-                self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z)
+                self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z, self._checkpoint)
 
     def _dialog_windows(self):
         return (self._dialogue, self._input_panel, self._perm_panel, self._about, self._connection_panel,
@@ -585,6 +587,7 @@ class PetController(QObject):
             detail = None  # 兼容旧 hook：回复/计划内容不显示、不记录
         meta = meta or {}
         session, tool_id = meta.get("session"), meta.get("tool_id")
+        self.session_names.note(session, meta.get("project"))
         private = self.state.save.privacy_mode
         log.info("收到事件：%s %r %s", etype, None if private else detail, session or "")
         now = self._now()
@@ -594,7 +597,7 @@ class PetController(QObject):
             self._remember_ended(session)
             self.state.end_session(session)  # 这个会话的这一轮已经被 hook 结束了
             self._forget_session(session)
-            self._on_pause_timeout()
+            self._on_pause_timeout(session)
             self.sync()
             return
         if etype == "work_stopped":
@@ -695,28 +698,84 @@ class PetController(QObject):
             self._tool_wall.pop(session, None)
 
     # ------------------------------------------------------------ 遥控：停下
-    def stop_work(self) -> None:
-        """“停下”：下一个检查点（工具调用前或做完后）hook 原地等待，直到点“继续”或在 CC 里说话。"""
-        if self.state.paused or not self.hub.link_enabled:
+    def remote_sessions(self) -> list[str]:
+        """工作遥控能选的 Claude 会话：此刻工作中或已停在检查点等待的，按首次出现顺序（ChatGPT 不参与）。"""
+        now = self._now()
+        return self.session_names.ordered([*self.state.working_sessions(now), *self.hub.holding_sessions()])
+
+    def session_labels(self, sessions) -> dict[str, str]:
+        return self.session_names.labels(sessions, self.state.save.privacy_mode, self.lines.ui)
+
+    def stop_work(self, session: Optional[str] = None) -> None:
+        """“停下”：下一个检查点（工具调用前或做完后）hook 原地等待，直到点“继续”或在 CC 里说话。
+        session=None：全局（原行为）；给了会话：只停这个会话。"""
+        if not self.hub.link_enabled:
             return
+        if session is None:
+            if self.state.paused:
+                return
+            self._begin_stop(self.hub.pause)
+        elif not self.hub.is_session_paused(session):
+            self._begin_stop(lambda: self.hub.pause(session))
+
+    def stop_all(self, sessions) -> None:
+        """多会话菜单里的“全部”：全局停下（之后才开始工作的会话也停），并给此刻每个会话单独打上停下，
+        这样某个会话在 CC 里说话只放行它自己。"""
+        if not self.hub.link_enabled or self.hub.is_global_paused:
+            return
+
+        def apply():
+            self.hub.pause()
+            for s in sessions:
+                self.hub.pause(s)
+        self._begin_stop(apply)
+
+    def _begin_stop(self, apply: Callable[[], None]) -> None:
         self.react(self.state.interact(self._now()))
-        self._held_said = self._held_seen = False
-        self.hub.pause()
+        if not self.state.paused:
+            self._held_said = self._held_seen = False
+        apply()
         self.state.paused = True
         if not self.state.save.bubble_muted:
             self._speech.dismiss()
             self.say(self.lines.ui("stop_requested"), priority=Priority.MEDIUM, category="stop_requested")
         self.sync()
 
-    def resume_work(self, *, quiet: bool = False) -> None:
-        """菜单上的“继续”：放行等待的 hook，无缝接着干（还没到检查点就点 = 取消停下）。"""
+    def resume_work(self, session: Optional[str] = None, *, quiet: bool = False) -> None:
+        """菜单上的“继续”：放行等待的 hook，无缝接着干（还没到检查点就点 = 取消停下）。
+        session=None：全部（原行为）；给了会话：只放行这个会话，其他会话照旧停着。"""
         was_paused = self.state.paused
-        self.hub.resume()
-        self._leave_pause()
+        if session is None:
+            self.hub.resume()
+            self._leave_pause()
+        else:
+            self.hub.resume(session)
+            if not self.hub.is_paused:
+                self._leave_pause()
         if not quiet and was_paused:
             self._speech.dismiss()
             self.say_key("resumed")
         self.sync()
+
+    def end_turn(self, session: str) -> None:
+        """检查点面板上的“结束这一轮”：只让此刻正在等的、属于这个会话的 hook 带着停下返回（之后照常走 work_stopped）。"""
+        if not self.hub.link_enabled or not session:
+            return
+        self.hub.end(session)
+        if not self.hub.is_paused:
+            self._leave_pause()
+        if not self.state.save.bubble_muted:
+            self._speech.dismiss()
+            self.say(self.lines.ui("checkpoint_ended"), priority=Priority.MEDIUM, category="stop_requested")
+        self.sync()
+
+    def _resume_from_badge(self) -> None:
+        """暂停标签被点了：只有一个会话停在检查点、而别的会话还被单独停着时，只放行它；否则与原来一样放行全部。"""
+        holding = self.hub.holding_sessions()
+        if len(holding) == 1 and self.hub.paused_sessions() - set(holding):
+            self.resume_work(holding[0])
+        else:
+            self.resume_work()
 
     def _leave_pause(self) -> None:
         self.state.paused = False
@@ -740,12 +799,42 @@ class PetController(QObject):
             self.sync()  # 先创建/显示暂停标签，再将整个提示前移一次
             self._bring_forward()
 
-    def _on_pause_timeout(self) -> None:
-        """hook 停满上限后已返回 continue: false：放掉其他并行等待的 hook，提醒一次。只在停下等待中有效。"""
+    def _sync_checkpoint_display(self) -> None:
+        """检查点上的停下提示：一个会话停住 = 原来的暂停标签（知道项目名时写上名字）；
+        两个及以上同时停住 = 检查点面板，每个会话一行，可分别“继续 / 结束这一轮”。"""
+        ui = self.lines.ui
+        shown = self.state.paused and self._held_seen
+        holding = self.hub.holding_sessions() if shown else []
+        multi = len(holding) >= 2
+        labels = self.session_labels(self.session_names.ordered([*self.remote_sessions(), *holding])) if holding else {}
+        text = ui("pause_label")
+        if len(holding) == 1 and not self.state.save.privacy_mode and self.session_names.project(holding[0]):
+            text = ui("pause_label_named", name=labels[holding[0]])  # 隐私模式 / 不知道名字：仍是原来的“暂停中”
+        self.window.set_paused_badge(shown and not multi, text=text, tooltip=ui("pause_label_hint"),
+                                     fallback=self.lines.font_fallback)
+        if multi:
+            if self._checkpoint is None:
+                from shion.badge import CheckpointPanel
+                self._checkpoint = CheckpointPanel(self.window, self.lines.font_fallback)
+                self._checkpoint.resume_clicked.connect(lambda s: self.resume_work(s))
+                self._checkpoint.end_clicked.connect(self.end_turn)
+            self._checkpoint.present([(s, labels[s]) for s in holding], {
+                "title": ui("checkpoint_title"), "resume": ui("checkpoint_resume"), "end": ui("checkpoint_end")})
+        elif self._checkpoint is not None and self._checkpoint.wanted:
+            self._checkpoint.withdraw()
+
+    def _on_pause_timeout(self, session: Optional[str] = None) -> None:
+        """hook 停满上限后已返回 continue: false：放掉其他并行等待的 hook，提醒一次。只在停下等待中有效。
+        全局停下中（或旧 hook 没带会话）：和原来一样结束所有正在等的 hook；只是这个会话被单独停下：只结束它的。"""
         if not self.state.paused:
             return
-        self.hub.end()
-        self._leave_pause()
+        if session is None or self.hub.is_global_paused:
+            self.hub.end()
+            self._leave_pause()
+        else:
+            self.hub.end(session)
+            if not self.hub.is_paused:
+                self._leave_pause()
         if not self.state.save.bubble_muted:
             self._speech.dismiss()
             self.say(self.lines.ui("work_stopped_timeout"), priority=Priority.HIGH, category="stop_requested")
@@ -755,16 +844,20 @@ class PetController(QObject):
     def can_interrupt(self) -> bool:
         return self.hub.link_enabled and bool(self.state.working_sessions(self._now()))
 
-    def interrupt_work(self) -> None:
+    def interrupt_work(self, only: Optional[list] = None) -> None:
         """“立即中断”：结束所有工作中会话正在跑的工具进程，并让它们下一个检查点结束这一轮。
 
+        only=None：所有工作中的会话（原行为）；给了会话：只碰这些会话，别的会话的进程和停下状态不动。
         只对工作中的会话做；做完把会话标成空闲（下一次 prompt / PreToolUse 之前不会再发）。
-        一个都找不到对应进程时说明原因，退回普通的“停下”。
+        一个都找不到对应进程时说明原因，退回普通的“停下”（选了会话时只停这些会话）。
         """
         if not self.hub.link_enabled:
             return
         now = self._now()
         sessions = self.state.working_sessions(now)
+        scoped = only is not None
+        if scoped:
+            sessions = [s for s in sessions if s in set(only)]
         ui = self.lines.ui
         if not sessions:
             self.say(ui("interrupt_idle"), priority=Priority.MEDIUM, category="stop_requested")
@@ -789,7 +882,13 @@ class PetController(QObject):
             log.info("立即中断：没有找到对应的进程（会话 %s）", sessions)
             self._speech.dismiss()
             self.say(ui("interrupt_no_process"), priority=Priority.MEDIUM, category="stop_requested")
-            if not self.state.paused:
+            if scoped:
+                if not self.state.paused:
+                    self._held_said = self._held_seen = False
+                for s in sessions:
+                    self.hub.pause(s)
+                self.state.paused = self.hub.is_paused
+            elif not self.state.paused:
                 self.hub.pause()
                 self.state.paused = True
                 self._held_said = self._held_seen = False
@@ -802,7 +901,12 @@ class PetController(QObject):
         for session in done:
             self.state.end_session(session)
             self._tool_wall.pop(session, None)
-        if self.state.paused and not self.state.working_sessions(now):
+        if scoped:
+            for s in done:
+                self.hub.resume(s)  # 只解除被中断的会话；在等的 hook 先看到中断标记，返回 stop
+            if self.state.paused and not self.hub.is_paused:
+                self._leave_pause()
+        elif self.state.paused and not self.state.working_sessions(now):
             self.hub.resume()  # 在等的 hook 先看到中断标记，返回 stop
             self._leave_pause()
         self.state.menu_talk(now, "stop")
@@ -970,13 +1074,15 @@ class PetController(QObject):
         elif self._observation_hint is not None:
             self._observation_hint.hide()
 
-    def feedback_good(self) -> None:
-        self.react(self.state.feedback_good(self._now()))
+    def feedback_good(self, sessions: Optional[list] = None) -> None:
+        """sessions：送给哪些会话（“全部”= 点击那一刻的每个相关会话各一份）；None = 无归属（原行为）。"""
+        self.react(self.state.feedback_good(self._now(), sessions))
         self.sync()
         self._try_time_speech()
 
-    def open_bad_feedback(self) -> None:
-        """“有问题……”：弹出一行输入框，发送后加入反馈队列。"""
+    def open_bad_feedback(self, sessions: Optional[list] = None) -> None:
+        """“有问题……”：弹出一行输入框，发送后加入反馈队列（sessions 同 feedback_good，在弹框时就定下）。"""
+        self._bad_targets = list(sessions) if sessions else None
         self.window.stop_motion()
         if self._input_panel is None:
             family = self.bubble.font_family if self.bubble is not None else "Consolas"
@@ -988,13 +1094,15 @@ class PetController(QObject):
         )
 
     def feedback_bad(self, text: str = "") -> None:
-        self.react(self.state.feedback_bad(text, self._now()))
+        targets, self._bad_targets = self._bad_targets, None
+        self.react(self.state.feedback_bad(text, self._now(), targets))
         self.sync()
         self._try_time_speech()
 
-    def take_feedback_text(self) -> str:
-        """取走反馈队列，合成要注入给 Claude 的文字（给 /feedback/take 用）；没有就返回空串。"""
-        items = self.state.take_feedback(self._now())
+    def take_feedback_text(self, session: Optional[str] = None) -> str:
+        """取走反馈，合成要注入给 Claude 的文字（给 /feedback/take 用）；没有就返回空串。
+        session：请求者的会话，只取给它的和无归属的；None（旧 hook）只取无归属的。"""
+        items = self.state.take_feedback(self._now(), session=session)
         log.info("取走反馈：%d 条", len(items))
         if not items:
             return ""
@@ -1209,22 +1317,86 @@ class PetController(QObject):
         ui = self.lines.ui
         menu.addAction(ui("menu_talk")).triggered.connect(self.open_dialogue)
         remote_menu = menu.addMenu(ui("menu_remote"))
+        sessions = self.remote_sessions() if self.hub.link_enabled else []
+        if len(sessions) >= 2:
+            self._build_remote_multi(remote_menu, sessions)
+        else:
+            self._build_remote_single(remote_menu)
+        remote_menu.setEnabled(self.hub.link_enabled)  # 临时关闭联动：整个子菜单置灰
+        self._build_rest_of_menu(menu)
+        return menu
+
+    def _build_remote_single(self, remote_menu: QMenu) -> None:
+        """0 或 1 个相关会话：与按会话区分之前完全一样（停下是全局暂停，反馈无归属）。"""
+        ui = self.lines.ui
         if self.state.paused:
-            remote_menu.addAction(ui("menu_resume")).triggered.connect(self.resume_work)
+            remote_menu.addAction(ui("menu_resume")).triggered.connect(lambda: self.resume_work())
         else:
             if self._ended is not None:  # 这一轮已经结束：终端发送“继续”，桌面端复制
                 label = ui("menu_continue_send") if self.ended_is_terminal() else ui("menu_resume")
                 act = remote_menu.addAction(label)
                 act.setEnabled(not self._continue_sending)
                 act.triggered.connect(self.continue_ended)
-            remote_menu.addAction(ui("menu_stop")).triggered.connect(self.stop_work)
+            remote_menu.addAction(ui("menu_stop")).triggered.connect(lambda: self.stop_work())
         interrupt_action = remote_menu.addAction(ui("menu_interrupt"))
         interrupt_action.setEnabled(self.can_interrupt())
-        interrupt_action.triggered.connect(self.interrupt_work)
-        remote_menu.addAction(ui("menu_good")).triggered.connect(self.feedback_good)
-        remote_menu.addAction(ui("menu_bad")).triggered.connect(self.open_bad_feedback)
-        remote_menu.setEnabled(self.hub.link_enabled)  # 临时关闭联动：整个子菜单置灰
+        interrupt_action.triggered.connect(lambda: self.interrupt_work())
+        remote_menu.addAction(ui("menu_good")).triggered.connect(lambda: self.feedback_good())
+        remote_menu.addAction(ui("menu_bad")).triggered.connect(lambda: self.open_bad_feedback())
 
+    def _build_remote_multi(self, remote_menu: QMenu, sessions: list[str]) -> None:
+        """2 个及以上相关会话：每个按钮各自成子菜单，列出各会话，最后一项“全部”；只有一个对象的按钮直接生效。"""
+        ui = self.lines.ui
+        labels = self.session_labels(sessions)
+        now = self._now()
+        working = set(self.state.working_sessions(now))
+        paused = [s for s in sessions if self.hub.is_session_paused(s)]
+        if paused:
+            self._targets_item(remote_menu, ui("menu_resume"), paused, labels,
+                               lambda s: self.resume_work(s), lambda: self.resume_work())
+        else:
+            if self._ended is not None:  # 只记最近一个会话：一个对象，直接一项
+                label = ui("menu_continue_send") if self.ended_is_terminal() else ui("menu_resume")
+                act = remote_menu.addAction(label)
+                act.setEnabled(not self._continue_sending)
+                act.triggered.connect(self.continue_ended)
+        if not self.hub.is_global_paused:
+            self._targets_item(remote_menu, ui("menu_stop"), sessions, labels,
+                               lambda s: self.stop_work(s), lambda: self.stop_all(sessions),
+                               enabled=lambda s: not self.hub.is_session_paused(s))
+        busy = [s for s in sessions if s in working]
+        if busy:
+            self._targets_item(remote_menu, ui("menu_interrupt"), sessions, labels,
+                               lambda s: self.interrupt_work([s]), lambda: self.interrupt_work(),
+                               enabled=lambda s: s in working)
+        else:
+            remote_menu.addAction(ui("menu_interrupt")).setEnabled(False)  # 同原来：没有工作中的会话时置灰
+        self._targets_item(remote_menu, ui("menu_good"), sessions, labels,
+                           lambda s: self.feedback_good([s]), lambda: self.feedback_good(list(sessions)))
+        self._targets_item(remote_menu, ui("menu_bad"), sessions, labels,
+                           lambda s: self.open_bad_feedback([s]), lambda: self.open_bad_feedback(list(sessions)))
+
+    def _targets_item(self, parent: QMenu, label: str, targets: list[str], labels: dict[str, str],
+                      one: Callable[[str], None], everyone: Callable[[], None],
+                      enabled: Optional[Callable[[str], bool]] = None) -> None:
+        """目标只有一个：直接一项，作用于它；多个：子菜单（各会话 + 分隔线 + “全部”）。"""
+        if len(targets) == 1:
+            s = targets[0]
+            act = parent.addAction(label)
+            act.setEnabled(enabled is None or enabled(s))
+            act.triggered.connect(lambda _=False, s=s: one(s))
+            return
+        sub = parent.addMenu(label)
+        sub.setToolTipsVisible(True)
+        for s in targets:
+            act = sub.addAction(labels.get(s, s))
+            act.setEnabled(enabled is None or enabled(s))
+            act.triggered.connect(lambda _=False, s=s: one(s))
+        sub.addSeparator()
+        sub.addAction(self.lines.ui("menu_all")).triggered.connect(lambda _=False: everyone())
+
+    def _build_rest_of_menu(self, menu: QMenu) -> None:
+        ui = self.lines.ui
         pet_menu = menu.addMenu(ui("menu_pet"))
         expression_menu = pet_menu.addMenu(ui("menu_expression"))
         expression_group = QActionGroup(expression_menu)

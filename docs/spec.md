@@ -249,8 +249,8 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 | `notification` | Notification hook | 气泡提示“有事情等你确认哦”（只有终端版会触发）。`detail` 是官方字段 `notification_type`；为 `idle_prompt`（CC 回复完约 60 秒用户没输入）时，清掉这个会话的“工具在执行中”和 working（在提问框上按 Esc 等情况 CC 不发 PostToolUse / Stop），并收起这个会话还挂着的授权面板 |
 | `react` | 预留（目前没有调用方） | `detail` 是表情名，临时切换到该表情 3 秒 |
 
-- `POST /feedback/take` → 返回 `{"text": "…"}`：取走并清空反馈队列，按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
-- 会话字段（`/event` 可选，`server.parse_meta` 校验，不对就 400）：`session`（stdin 的 session_id）、`tool_id`（tool_use_id），以及 prompt / PreToolUse 附带的 `proc`：`{"pid", "created"(FILETIME), "name"(只认 claude.exe/node.exe/bun.exe), "entry"(CLAUDE_CODE_ENTRYPOINT), "hooks"(hook 自己到 CC 之间的 pid，最多 8 个)}`。带会话字段时回调为 `on_event(type, detail, meta)`，否则仍是两参数
+- `POST /feedback/take {"session": 可选}` → 返回 `{"text": "…"}`：取走反馈（带 session：取给这个会话的和无归属的；不带或不合法：只取无归属的，旧 hook 兼容），按存档语言合成要注入的文字（没有则为空串；`inject_praise` 为 false 时仍清空但返回空串）。读取和清空是同一个原子操作
+- 会话字段（`/event` 可选，`server.parse_meta` 校验，不对就 400）：`session`（stdin 的 session_id）、`tool_id`（tool_use_id），以及 prompt / PreToolUse 附带的 `proc`：`{"pid", "created"(FILETIME), "name"(只认 claude.exe/node.exe/bun.exe), "entry"(CLAUDE_CODE_ENTRYPOINT), "hooks"(hook 自己到 CC 之间的 pid，最多 8 个)}`。带会话字段时回调为 `on_event(type, detail, meta)`，否则仍是两参数。另有可选 `project`：hook 取 stdin `cwd` 的最后一段（只发文件夹名，不发完整路径）；服务端 `clean_project` 校验：必须是字符串，去掉控制字符（Unicode Cc）和格式字符（Cf，含 RTL 覆盖），去首尾空白，含 `/` `\`、为空或超过 64 字时**只丢掉这个字段，事件照常处理**（不 400）。只用于工作遥控菜单和检查点面板的显示名
 - `POST /pause/wait {"wait": 秒, "session": 可选}` → `{"paused": true|false, "stop": true|false}`：检查点长轮询。没在停下就立即返回；停下等待中最多等 `wait` 秒（上限 30），用户点“继续”立即返回 `paused: false`；等满上限（`pause_timeout`）时**此刻正在等的所有请求**都返回 `stop: true`（之后到达的请求不受影响，不留残余状态）；这个 `session` 被“立即中断”过时立即返回 `stop: true`（只生效一次，正在等的也会被唤醒）。拿到 stop 时服务线程向界面发内部事件 `work_stopped`（带 session）。hub 记录正在等的请求数，两段长轮询之间 2 秒内仍算“在等”。**没有任何接口能让 HTTP 调用方开始停下、结束这一轮或请求中断**，`/event` 里的 `work_stopped` 一律 400；`prompt` 事件到达时服务线程直接解除等待；`stop` 事件在没有 hook 正在等时作废没用上的停下；`prompt` / `stop` 带 session 时作废该会话没用上的中断标记
 - `POST /permission/open {"tool", "detail", "session"?, "key"?}` → `{"id"}`（请求体上限放宽到 64 KB；排队上限 20，满了返回 503；`session` ≤128 字，`key` 为 ≤64 位小写十六进制，不对就 400）；`POST /permission/settle {"session", "key"?}` → `{"settled": N}`：撤掉这个会话（给了 key 就只撤指纹相同的）还在等的请求，hook 之后拿到 `gone`、不给决定；`/event` 的 `prompt` / `stop` / `notification`（`idle_prompt`）带 session 时同样撤掉该会话全部未决请求；`POST /permission/wait {"id", "wait"}` → `{"id", "status"}`，`status` 是 `pending`/`allow`/`deny`/`gone`，`allow`/`deny` 只能取一次；`POST /permission/withdraw {"id"}` 撤回。**没有任何接口、任何字段能写入 allow/deny**，决定只来自诗音界面上的按钮（有测试往所有接口和事件类型里塞各种“同意”字段，请求始终保持 pending；另有源码级测试保证只有 controller 的按钮回调会写入决定）
 - `type = pause_timeout`（hook 等满上限后发来）：只在停下等待中有效，界面放掉其他并行等待的 hook（也返回 stop），提醒一次“停太久了，这一轮先结束啦，在 CC 里说一声就能接着做”（不常驻）
@@ -354,6 +354,19 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 - 对应会话随后收到 `work_stopped` 时，说“已经中断啦，在 CC 里说一声就能继续”；若文字写完直接结束、只收到 `stop`（没有后续检查点），说“说完啦，这一轮停下了，在 CC 里说一声就能继续”（`interrupt_done_after_text`），不冒充实际中断。两种收尾都用 stop 表情、遵守当前静音，每个待确认的中断会话只提醒一次；静音时也清除待确认提示，不补播。普通停下/超时、其他会话及重复事件不触发收尾；新 prompt 作废待确认提示。沿用不计完成任务、不说完成台词及保留“继续”入口的规则
 - 终端版和桌面端 Code 用同一种做法。**不用 Ctrl+C**：实测（2.1.289）用 `GenerateConsoleCtrlEvent` 向终端版 CC 的控制台发 Ctrl+C，CC 会在 1～4 秒内整个退出，而不是像按 Esc 那样只中断当前生成
 - 限制：正在写、后面没有工具调用的文字拦不住（写完就是这一轮结束）
+
+**按会话区分（2026-10-31，`feature/per-session-remote`）**
+- 相关会话 = 此刻“工作中”或“已停在检查点等待”的 Claude 会话（ChatGPT 不参与，仍只观察），按首次出现顺序。显示名 = 项目文件夹名；同一文件夹第 2、3 个会话加“ (2)”“ (3)”；隐私模式开启或拿不到文件夹名时用“会话 N / Session N / セッション N”（N 是在当前列表里的位置）。`shion/sessions.py`
+- **0 或 1 个相关会话**：工作遥控菜单的结构和行为与之前完全一样（停下是全局暂停，反馈无归属）
+- **2 个及以上**：“停下 / 立即中断 / 做得好 / 有问题……”各自变成子菜单：各会话 + 分隔线 + “全部”；“有问题……”选完会话再弹原来的输入框。“继续”按同样规则：被停下的会话只有一个时直接一项，多个时子菜单。“继续（这一轮已结束）”只记最近一个会话，仍是直接一项。停下子菜单里已停下的会话置灰；立即中断子菜单里不在工作中的会话置灰；全局停下（选了“全部”）期间不显示“停下”
+- “全部”：停下 = 全局停下（之后才开始工作的会话也停）并给此刻每个会话单独打上停下；立即中断 = 原行为；反馈 = 给点击那一刻的每个相关会话各放一份（好感度、表情、台词只算一次）
+- 暂停（`RemoteHub`）：全局暂停 + 单个会话暂停 + 全局暂停中被单独放行的会话。会话 s 的检查点在 s 被单独停下、或全局停下且 s 没被放行时等待；**没有 session 的旧请求只看全局暂停**。放行某个会话时，若全局停下中已没有别的会话被单独停下、也没有别的 hook 在等，就整个解除全局暂停（只有一个会话时与原来完全一样）
+- 结束这一轮：`end(session)` 只让此刻正在等的、属于这个会话的 hook 返回 stop（按会话的一次性代数），之后到达的不受影响；`end()` 仍是原来的全部结束。停满上限（`pause_timeout`）：全局停下中或旧 hook 没带会话时按原规则结束全部；只是这个会话被单独停下时只结束它
+- 在 CC 里说话（`prompt`）只解除这个会话自己的暂停；`stop` 在这个会话没有 hook 在等时只作废它自己没用上的停下。不带 session 的旧事件仍解除全部
+- 立即中断选了会话：只对这些会话找进程、结束工具、打中断标记、解除它们的暂停，别的会话的进程和停下不动；找不到进程时只把这些会话改成停下
+- 反馈：队列项带可选 `session`（旧存档、0/1 个会话时点的 = 无归属）；每个归属各自最多 5 条。`/feedback/take` 带 session 取它自己的和无归属的，不带只取无归属的
+- **检查点面板**：只有一个会话停在检查点时仍是原来的暂停标签，知道文件夹名且不在隐私模式时文字为“暂停中：{名称}”（否则仍是“暂停中”），点一下只放行这个会话（其他会话被单独停着时）或与原来一样放行全部。两个及以上会话同时停住时标签换成面板（`badge.CheckpointPanel`）：头顶右侧、底边落在标签中线向上展开、夹进可用屏；标题“暂停中”，每个停住的会话一行“名称（超过 24 字截断，全文在 tooltip）[继续] [结束这一轮]”，按开始停住的先后排。规则同授权面板：不抢焦点（`WindowDoesNotAcceptFocus`、`WA_ShowWithoutActivating`）、按钮只响应鼠标、出现或停住的会话变化后 0.6 秒内点击无效。“结束这一轮”之后照常走 `work_stopped`（不计完成任务、菜单可“继续”），诗音说“好，这一轮先结束啦，在 CC 里说一声就能接着做～”
+- 临时关闭联动、静音、授权面板等逻辑不变；关闭联动时清掉全部（含按会话的）暂停
 
 **这一轮结束后的继续**（实验见 `docs/experiments/send-continue.md`）
 - 什么时候出现：诗音结束了某个会话的这一轮之后——立即中断后 hook 在检查点拿到 stop（`work_stopped`），或中断时正在写字、这一轮自己结束（该会话的 `stop`），或停满上限（`pause_timeout`）。只记**最近一个**会话。该会话再来 `prompt` / `working`（用户自己在 CC 里接着说了）就收起；其他会话的事件不影响
