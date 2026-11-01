@@ -16,8 +16,8 @@
 - 分支 `feature/session-labels`（从 `e5fee12` 派生）：同一项目多个会话时，工作遥控菜单和检查点面板用各会话的第一句话摘要区分。2026-11-01 已快进合并到当前分支（`4ecaaaa`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-11-01 记录。
 - 2026-11-01 本机 Shion-dev 先替换为 `4ecaaaa` 的开发包（旧包 `Shion-dev-before-session-labels-20261101`），同日再替换为 `b016547` 的安全修复开发包（220 文件），旧包保留为 `Shion-dev-before-security-20261101`。
 - 分支 `feature/v2-security-fixes`（从 `1500086` 派生）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题和复审第二轮（hook ↔ 服务端令牌、令牌绑定诗音进程、独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。2026-11-01 已快进合并到当前分支（`f8ec0a6`），之后追加 bundle_smoke 修正 `b016547`；worktree 已移除，分支保留、未 push，详见下方 2026-11-01 记录。
-- 2026-11-01 v2.0.0 发布准备（当前分支本地提交，未合并 master、未打包、未 push）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。2026-11-02 追加：ChatGPT 未安装时顶层只显示“ChatGPT：未安装”、子菜单活动显示“—”；6 张菜单图改为原生 Windows 11 风格重新渲染。详见下方 2026-11-02 记录。
-- 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
+- 2026-11-01 v2.0.0 发布准备（2026-11-02 已快进合并到本地 `master`、打包、打本地标签；未 push、未发布）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。2026-11-02 追加：ChatGPT 未安装时顶层只显示“ChatGPT：未安装”、子菜单活动显示“—”；6 张菜单图改为原生 Windows 11 风格重新渲染。详见下方 2026-11-02 记录。
+- 公开稳定版为 v1.0.0（远端 `origin/master` 仍是 `74121dc`；本地 `master` 已含 v2.0.0 发布提交，未 push）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
 
@@ -41,11 +41,9 @@
 ## 正在进行的阶段与下一步
 
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
-- **下一步（v2.0.0 发布）**，按顺序、每步需用户授权：
-  1. 合并当前分支到 `master`；
-  2. `tools/build.py` 打包 `dist/Shion-2.0.0-win64.zip`；
-  3. 发布前专测：立即中断后工具进程是否结束（含按会话中断）、Codex 配置断开再重连、干净环境解压运行；
-  4. 用户确认后推送并发布（发布说明草稿 `build/release-notes-2.0.0.md`）。
+- **下一步（v2.0.0 发布）**：合并 `master`、本地标签 `v2.0.0`、打包 `dist/Shion-2.0.0-win64.zip` 和推送前审查已在 2026-11-02 完成（见下方记录）。剩余按顺序、每步需用户授权：
+  1. 发布前专测：立即中断后工具进程是否结束（含按会话中断）、Codex 配置断开再重连、真实干净环境解压运行；
+  2. 用户确认发布说明（`build/release-notes-2.0.0.md`）后，只向 `origin` 推送 `master` 和 `v2.0.0`，再创建 Release 并上传 zip。
 - 更正（2026-11-01 核对 `git branch --merged`）：`feature/menu-parity`、`feature/remove-codex-autolaunch` 均已在当前分支历史里，上方“未合并”的描述已过时；`feature/remove-face`、`feature/per-session-remote` 已合并并部署，真机验收按下方清单在日常试用中进行。
 - 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。（更正 2026-11-01：这个粘滞标志原先也让默认配置下的 ChatGPT 菜单“活动”一直显示“待确认”，不只影响调度器；`feature/v2-security-fixes` 已给显示层加时效，调度器语义仍是遗留。）
 - `feature/v2-security-fixes` 已合并并部署到 Shion-dev；bundle_smoke（99 项）和隔离实例验证已通过，剩余真机项按下方清单在日常使用中验收。
@@ -102,6 +100,13 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-02 合并 master、打包 v2.0.0、推送前审查**（只在本地，没有 push、没有创建 Release；证据在忽略目录 `build/release-2.0.0-check/`、`build/release-build-2.0.0.log`）：
+  - **合并与标签**：起点工作区干净、HEAD 为 `db5b58a`，`master`（`74121dc`，与 `origin/master` 一致）是其祖先；`git merge --ff-only` 快进到 `db5b58a`（38 个提交）。附注标签 `v2.0.0`（标签对象 `093f9c9`）打在发布提交 `db5b58a` 上，标签作者是 noreply 邮箱。**标签位置沿用 v1.0.0 的做法**：v1.0.0 标签指向发布内容提交 `7c34de6`，之后的“记录发布”文档提交（`3cc27ee`）排在标签之后；所以 v2.0.0 指向 `db5b58a`，本条进度记录是标签之后的单独提交，标签不移动。
+  - **打包**：`tools/build.py` 从 `master` 正常构建，`dist/Shion` 220 文件 / 104.44 MB（99.6 MiB），bundle_smoke **99 项全部通过**；`dist/Shion-2.0.0-win64.zip` **45,346,513 字节**（222 个条目），SHA-256 `9dde196aeedf267e844053eb643217a8fdafd223a92921c89ad03e4a403a1107`（另用 `sha256sum` 复核一致）。构建前把 `dist` 里旧的开发版残留 `Shion-1.0.0-win64.zip`（46,695,060 字节，SHA-256 `7a1410dc…602ca9`）挪到 `build/dist-archive-dev-20261102/`，没有删除。
+  - **烟测**：观察端 stdio 烟测（initialize / tools/list / ping / EOF 正常退出）通过，stderr 为空，响应与上一次替换逐项一致（`serverInfo.version` 仍是协议版本 `1.0.0`，有意保留）。解压自检：zip 解压到路径含中文和空格的临时目录，`testzip` 无错，根目录只有 `Shion/`、`LICENSE`、`assets/LICENSE`，解压出的 220 个文件与 `dist/Shion` 逐文件 SHA-256 一致，没有 `.venv`、`raw`、`build`、令牌或存档文件；对解压目录运行同一套 bundle_smoke 通过 99 项；临时目录已清理。这不等于干净机器验收。
+  - **推送前审查**（范围 `origin/master..master`，38 个提交加本条记录）：每个提交运行 `check_private.py --ref`，37 个无命中，`1f54cb6` 命中 1 处（`tests/test_check_private.py` 里虚构用户名的测试字面量，同一文件在后续提交已改写，未改写历史，与 11-01 记录一致）；用 `USERNAME`、`COMPUTERNAME` 的值对完整补丁（含二进制，约 7.1 MB）、全部提交信息、标签和文件路径做不区分大小写全文匹配，均 0 命中；所有提交的作者与提交者邮箱都是 noreply 邮箱，提交信息里唯一的邮箱是 `noreply@anthropic.com`；范围内没有超过 5 MB 的文件（树内最大是 `hero.gif` 1.4 MB），没有 `assets/sprites/raw/`、`build/`、`dist/`、`.venv` 内容，没有音频/字体/字幕类文件，`git ls-files -ci --exclude-standard` 为空。
+  - **待推送的引用**：`git push --dry-run origin master v2.0.0` 只显示 `74121dc..db5b58a master -> master`（快进，无需强推）和新标签 `v2.0.0`；`remote.origin.push` 未配置，不使用 `--all`/`--mirror`/`--tags`。本地存在的 `refs/codex/turn-diffs/*`、各 feature 分支、`v1.0.0` 都不会被推送；`backup` 远端不推。
 
 - **2026-11-02 ChatGPT 未安装状态显示 + 原生风格菜单截图**（本地提交，没合并 master、没打包、没 push）：
   - **状态显示**：`ChatGPTConnection.activity()` 在临时关闭**或未安装**时返回“—”（`activity_link_none`），子菜单显示“活动：—”。`build_menu` 的 `status_row` 在 not_installed 时改用新增三语 key `menu_link_status_bare`（“{name}：{state}”），顶层只显示“ChatGPT：未安装”，原来的多行全文仍放在 tooltip。已安装、临时关闭、出错时的显示不变（新增三语×三状态参数化测试）。Claude 未连接时仍显示“未连接 · 空闲”，按用户决定没有改。`test_chatgpt_ui.py` 的辅助函数把连接视为已安装，因为它测的是“待确认”时效。基线 `scheduler_disabled_a55825f.json` 只刷新 `menu_sha256`：21 项中 18 项变化，12 个不同哈希一一对应；不变的 3 项是 ChatGPT 临时关闭阶段，其余字段逐项比对一致。
