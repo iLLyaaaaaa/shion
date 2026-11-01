@@ -27,8 +27,14 @@ SCENARIOS = {
     "stale": ("stale", "路径失效 / path is stale", True, True, 0),
     "one_session": ("connected", "", False, False, 1),
     "two_sessions": ("connected", "", False, False, 2),
+    "same_project": ("connected", "", False, False, 2),
 }
 PROJECTS = ("shion-pet", "docs-site")  # 合成的项目文件夹名
+# 场景 → 合成会话的 (文件夹名, 第一句话)；没列出的场景用 PROJECTS、不发第一句话
+SESSION_SPECS = {
+    "same_project": (("shion-pet", "把菜单截断的问题修一下，顺便补测试"),
+                     ("shion-pet", "Write the README section about hooks")),
+}
 PAYLOAD = ("shion", "assets", "tools", "hooks")
 
 
@@ -159,9 +165,12 @@ def worker(source: Path, out: Path) -> int:
             if with_chatgpt:
                 ctl.chatgpt = ChatGPTConnection(path / "chatgpt", path / "codex")
             ctl.set_language(lang)
-            for i in range(n_sessions):  # 合成的工作中会话（只给菜单看，不碰真实 CC）
+            specs = SESSION_SPECS.get(scenario) or tuple((PROJECTS[i], None) for i in range(n_sessions))
+            for i, (project, prompt) in enumerate(specs):  # 合成的工作中会话（只给菜单看，不碰真实 CC）
+                if prompt:
+                    ctl.handle_event("prompt", None, {"session": f"s{i}", "project": project, "prompt_head": prompt})
                 ctl.handle_event("working", json.dumps({"tool": "bash", "target": ""}),
-                                 {"session": f"s{i}", "tool_id": f"t{i}", "project": PROJECTS[i]})
+                                 {"session": f"s{i}", "tool_id": f"t{i}", "project": project})
 
             ids = {}
             real_ui = ctl.lines.ui
@@ -207,6 +216,8 @@ def mapping_table(out: Path) -> str:
     rows, missing = [], []
     for scenario in SCENARIOS:
         for lang in ("zh",):
+            if not (out / "old" / "scale1" / f"{lang}-{scenario}.json").exists():
+                continue  # 旧版本没有这个场景
             old = json.loads((out / "old" / "scale1" / f"{lang}-{scenario}.json").read_text(encoding="utf-8"))
             new = json.loads((out / "new" / "scale1" / f"{lang}-{scenario}.json").read_text(encoding="utf-8"))
             index = {e["id"]: e for e in new["entries"]}

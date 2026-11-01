@@ -13,6 +13,7 @@
 - 分支 `feature/remove-codex-autolaunch`（从 `fad0e3a` 派生）：删除 Codex 新开会话自动拉起诗音，保留 Claude 拉起、单实例互斥锁和 Codex 窗口层级跟随。未合并、未 push，详见下方 2026-10-31 记录。
 - 分支 `feature/remove-face`（从 `5062919` 派生）：删除“朝向鼠标”动作并停用 turn 帧，待机动作只剩小跳 : 表情 = 1 : 2。2026-10-31 已快进合并到当前分支并部署到 Shion-dev，分支保留、未 push，详见下方 2026-10-31 记录。
 - 分支 `feature/per-session-remote`（从 `5062919` 派生）：工作遥控四个按钮按会话区分，多个会话同时停住时用检查点面板分别继续/结束。2026-10-31 已合并到当前分支（合并提交 `7abd815`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-10-31 记录。
+- 分支 `feature/session-labels`（从 `e5fee12` 派生）：同一项目多个会话时，工作遥控菜单和检查点面板用各会话的第一句话摘要区分。未合并、未部署、未 push，详见下方 2026-11-01 记录。
 - 2026-10-31 本机 Shion-dev 已替换为 `7abd815` 的开发包（220 文件），旧包保留为 `Shion-dev-before-per-session-20261031`。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
@@ -70,6 +71,7 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] 单实例互斥锁（`feature/codex-autolaunch`）：多个 Claude 会话同时新开只剩一个诗音；Claude 临时关闭联动后新开 CC 会话不拉起诗音（源码版与打包版各验一次；原属上面已取消的条目，Claude 侧保留）；旧版诗音（无互斥锁）运行时新版不会重复启动；诗音被强制结束后能正常重新启动；退出后再启动正常。
 - [x] 单实例互斥锁（2026-10-31 真机通过）：同时新开两个 CC 会话只出现一个诗音。
 - [ ] 工作遥控按会话区分（`feature/per-session-remote`），日常试用时留意：只开一个 CC 会话时右键菜单和以前一样；开两个项目同时工作时，“停下 / 立即中断 / 做得好 / 有问题……”展开成子菜单，名称是项目文件夹名（同名带“(2)”，隐私模式显示“会话 1 / 会话 2”）；停下 A 时 B 继续干活；A 停住时暂停标签写“暂停中：A 的文件夹名”，在 A 的 CC 里说话只放开 A；两个都停住时出现检查点面板，可分别“继续 / 结束这一轮”，面板不抢焦点、出现后 0.6 秒内点击无效；“做得好 / 有问题……”只在选中的会话下一次工具调用时注入，选“全部”时每个会话各收到一份、好感度只加一次。
+- [ ] 会话第一句话区分（`feature/session-labels`）：同一项目开两个 CC 会话并各说一句话，工作遥控子菜单显示“文件夹名 · 第一句话前 12 字…”；只开一个会话时仍只显示文件夹名；诗音启动前就开着、还没说话的会话显示原来的“(2)”编号；开隐私模式后显示“会话 1 / 会话 2”，关掉后不再出现之前的摘要；长名字被截断时鼠标悬停看到全文（高 DPI、多屏）；检查点面板的名字一致。
 - [ ] 发布前专门验收（按会话中断）：两个会话都在跑长命令时只中断 A，A 的工具进程结束、B 的不受影响；选“全部”时两边都结束。
 
 - [ ] 删除朝向鼠标（`feature/remove-face`）：右键“动作”只剩跳一跳 / 去睡觉 / 趴一会儿（三语）；普通/活泼档待机时不再出现侧身，只有小跳和开心/发呆表情，表情明显多于小跳；旧存档正常加载。
@@ -84,6 +86,8 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-01 同项目多会话用第一句话区分**（分支 `feature/session-labels`，从 `e5fee12` 派生，worktree `..\shion-session-labels`，本地提交、未合并、未 push）：原来 hook 的 UserPromptSubmit 不发提示词。现在 hook 新增 `prompt_head`（stdin 的 `prompt` 去掉 Cc/Cf 字符、压缩空白、最多 40 字），只在 UserPromptSubmit 且存档 `privacy_mode` 不是 true 时发送；服务端 `clean_prompt_head` 与 `clean_project` 同法清理，非字符串、为空或超过 40 字只忽略该字段（不 400）。控制器只对 `prompt` 事件把它交给 `SessionNames.note`，后者只记每个会话的第一句、截成 12 字 +“…”，存在内存字典里（随会话淘汰、`forget_all` 清除），隐私模式下不记录，打开隐私模式时 `forget_prompts()` 清掉已记的摘要。不写日志（控制器日志只有事件类型/detail/会话 ID，服务端只记请求路径）、不进存档。显示规则：文件夹只有一个会话 → 文件夹名；同文件夹多个 → “文件夹名 · 摘要”，摘要相同再加“(n)”，没有摘要的退回原来的“(n)”编号；隐私或无文件夹名仍是“会话 n”。工作遥控多会话子菜单的会话项按 240 逻辑像素截断、全文放 tooltip；检查点面板由 24 字截断改为同样 240 像素截断（`sessions.LABEL_W`）。`render_menu.py` 新增 `same_project` 场景（新场景在 `--baseline` 对照里跳过）。新测试 `tests/test_session_labels.py` 25 个。验证：全量 pytest（`--basetemp` 在 worktree 内 `build/pytest-tmp`）汇总原文：`10 failed, 1945 passed, 8 skipped, 2 warnings in 584.03s (0:09:44)`；10 个失败全在 `tests/test_process_sheets.py`，原因同前几次：新 worktree 缺 `assets/sprites/raw` junction，补上后单独重跑 `14 passed`。`render_menu.py --platform windows` 三语 `same_project` 子菜单已自查（显示“shion-pet · 把菜单截断的问题修一下，…”“shion-pet · Write the RE…”，不提交截图）。局限：摘要按字符截断，英文 12 字较短；同一会话第一句之后改名不跟随（按需求只记第一句）。
 
 - **2026-10-31 合并 remove-face 与 per-session-remote，替换 Shion-dev**：`git merge --ff-only feature/remove-face`（`242b5bc`），再 `git merge --no-ff feature/per-session-remote`，合并提交 `7abd815`。唯一冲突在 `docs/progress.md`：两边在同样位置各加了状态、下一步和记录行，两边都保留；另外 `242b5bc` 把这个文件存成了 CRLF（`.gitattributes` 是 `* text=auto`），而且 remove-face 记录里的 `..\claude-pet-wt\remove-face` 中 `\r` 被写成了回车字符，合并时已恢复路径，并按 LF 存储。快照 `scheduler_disabled_a55825f.json` 没有冲突（per-session 没改它），合并后快照测试直接通过，`menu_sha256` 不需要重算，文件与 `242b5bc` 一致。全量 pytest（`--basetemp=.venv/preview-run/merge-per-session`）汇总原文：`1 failed, 1929 passed, 8 skipped, 6 warnings in 517.01s (0:08:37)`；唯一失败是已知的 `test_install_hooks.py::test_corrupt_json_not_touched`（GBK 解码），`PYTHONUTF8=1` 单独重跑 `1 passed`。两个 worktree（`remove-face`、`per-session-remote`）扫描无 reparse point、无未提交改动，用 `git worktree remove`（未加 `--force`）移除，分支保留，空的 `claude-pet-wt` 目录已删除。打包沿用 `build/lines-turn-replacement-20261031/` 的脚本（证据在忽略目录 `build/per-session-replacement-20261031/`）：不生成 ZIP，bundle_smoke 97 项通过，观察端 stdio 烟测与上次替换响应完全一致；新包 220 文件，比旧包少的正好是 8 张 `turn_*.png`。替换器等用户退出旧诗音后原地替换，两次改名均一次成功，旧包 228 文件逐个核对后保留为 `D:\desktop\tools\Shion-dev-before-per-session-20261031`，新目录 220 文件逐个核对一致；Codex/CC 配置哈希与任务开始时一致（Codex `config.toml` 相比上次替换后有变化，是本任务开始前就有的），存档 `v2_scheduler_enabled=false`、`claude_link_enabled=true` 未变，`Shion-1.0.0-win64.zip` 未变，没有强制结束进程。旧 exe `f852c131…75fb8d`，新 exe `2c3f163b…81cd38`。用户启动新版后只读核对：PID 342244 来自 `Shion-dev\Shion.exe`，同时监听 127.0.0.1:47613 和 47614，22:48:07 启动后日志事件正常、无 WARNING/ERROR。未 push、未发布。
 

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QGridLayout, QLabel, QLayout, QVBoxLayout, QWidget
 
 from shion.bubble import BG, BORDER, FG, FONT_PX, PAD_X, PAD_Y, pick_font_family
 from shion.panel import ARM_DELAY, STYLE, MouseOnlyButton
+from shion.sessions import LABEL_W as SESSION_LABEL_W
 from shion.windowing import set_topmost
 
 BADGE_X = 0.76
@@ -164,7 +165,7 @@ class PauseBadge(QWidget):
         p.end()
 
 
-NAME_MAX = 24  # 面板里会话名最多显示几个字，超出加省略号（全文在 tooltip）
+LABEL_W = SESSION_LABEL_W  # 面板里会话名最多多宽（逻辑像素），超出加省略号（全文在 tooltip），同工作遥控菜单
 LINE_H = round(FONT_PX * 1.6)  # 文字行高下限：备选字体（中日文）的字形比等宽首选字体高，留够不被裁
 
 
@@ -272,7 +273,7 @@ class CheckpointPanel(QWidget):
         self.buttons = {}
         self._title.setText(self._texts.get("title", ""))
         for row, (session, name) in enumerate(self._rows):
-            label = QLabel(name if len(name) <= NAME_MAX else name[:NAME_MAX - 1] + "…")
+            label = QLabel(self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W))
             label.setTextFormat(Qt.PlainText)  # 文件夹名是外部文字，不能按富文本解析
             label.setToolTip(name)
             label.setMinimumHeight(LINE_H)

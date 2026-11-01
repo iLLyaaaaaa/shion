@@ -20,6 +20,7 @@ import sys
 import threading
 import re
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -400,8 +401,20 @@ def project_name(cwd) -> str:
     return name if 0 < len(name) <= PROJECT_MAX and not name.endswith(":") else ""
 
 
+PROMPT_HEAD_MAX = 40
+
+
+def prompt_head(text) -> str:
+    """提示词开头（去掉控制/格式字符、压缩空白，最多 40 字），只给诗音菜单区分同一项目的多个会话。拿不到返回空串。"""
+    if not isinstance(text, str):
+        return ""
+    text = "".join(c if unicodedata.category(c) not in ("Cc", "Cf") else " " for c in text[:400])
+    return " ".join(text.split())[:PROMPT_HEAD_MAX]
+
+
 def session_meta(name: str, data: dict) -> dict:
-    """事件里附带的会话信息：session_id、tool_use_id；prompt / PreToolUse 附带 CC 进程。"""
+    """事件里附带的会话信息：session_id、tool_use_id；prompt / PreToolUse 附带 CC 进程。
+    UserPromptSubmit 另带提示词开头 prompt_head（隐私模式下不发）。"""
     meta = {}
     for key, field in (("session", "session_id"), ("tool_id", "tool_use_id")):
         value = data.get(field)
@@ -410,6 +423,10 @@ def session_meta(name: str, data: dict) -> dict:
     project = project_name(data.get("cwd"))
     if project:
         meta["project"] = project
+    if name == "UserPromptSubmit" and read_save().get("privacy_mode") is not True:
+        head = prompt_head(data.get("prompt"))
+        if head:
+            meta["prompt_head"] = head
     if name in ("UserPromptSubmit", "PreToolUse"):
         try:
             proc = find_cc_process()

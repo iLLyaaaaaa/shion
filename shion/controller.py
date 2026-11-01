@@ -31,7 +31,7 @@ from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
 from shion.remote import RemoteHub
-from shion.sessions import SessionNames
+from shion.sessions import LABEL_W, SessionNames
 from shion.runtime import console_send_command, hook_process_images
 from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
@@ -490,6 +490,8 @@ class PetController(QObject):
     def set_privacy(self, private: bool) -> None:
         self.state.save.privacy_mode = private
         self.activity.clear()  # 之前记下的文件名等不会在切换后冒出来
+        if private:
+            self.session_names.forget_prompts()  # 已记的第一句话也丢掉，关掉隐私后不会再冒出来
         self.scheduler.mark_dirty(self._now())
         self._try_time_speech()
 
@@ -587,8 +589,10 @@ class PetController(QObject):
             detail = None  # 兼容旧 hook：回复/计划内容不显示、不记录
         meta = meta or {}
         session, tool_id = meta.get("session"), meta.get("tool_id")
-        self.session_names.note(session, meta.get("project"))
         private = self.state.save.privacy_mode
+        # 第一句话摘要只用于菜单区分会话：只存内存，不写日志；隐私模式下不记录
+        self.session_names.note(session, meta.get("project"),
+                                meta.get("prompt_head") if etype == "prompt" else None, private)
         log.info("收到事件：%s %r %s", etype, None if private else detail, session or "")
         now = self._now()
         if etype == "pause_timeout":
@@ -1389,7 +1393,9 @@ class PetController(QObject):
         sub = parent.addMenu(label)
         sub.setToolTipsVisible(True)
         for s in targets:
-            act = sub.addAction(labels.get(s, s))
+            full = labels.get(s, s)
+            act = sub.addAction(sub.fontMetrics().elidedText(full, Qt.ElideRight, LABEL_W))
+            act.setToolTip(full)  # 截断后的全文（子菜单已开 setToolTipsVisible）
             act.setEnabled(enabled is None or enabled(s))
             act.triggered.connect(lambda _=False, s=s: one(s))
         sub.addSeparator()
