@@ -242,9 +242,14 @@ class MockHooks:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     def link(self, directory: Path) -> None:
-        """像诗音一样把令牌写进 hook 读取的数据目录。"""
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "claude-link.json").write_text(json.dumps({"token": self.token}), encoding="utf-8")
+        """像诗音一样把令牌写进 hook 读取的数据目录：用正式的 shion.loopback.write_token，
+        写入者是当前（活着的）烟测进程，hook 的 read_link 核对进程号和启动时间能通过。"""
+        import sys
+        root = str(Path(__file__).resolve().parent.parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from shion.loopback import write_token
+        write_token(directory, self.token)
 
     def __enter__(self):
         self.thread.start()
