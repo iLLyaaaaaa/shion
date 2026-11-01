@@ -4,7 +4,7 @@
 
 ## 当前状态总览
 
-- 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修、调度 GUI 审查修复和菜单 Claude Code 标名均已合并。2026-10-30 已替换本机 Shion-dev 开发预览包；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
+- 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修、调度 GUI 审查修复、菜单 Claude Code 标名和 v2.0.0 发布前安全修复均已合并。2026-11-01 已替换本机 Shion-dev 开发预览包（安全修复版）；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
 - 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 更新为菜单标名开发包（替换记录核验 228 文件）。替换记录确认配置哈希未变，旧包保留为 `Shion-dev-before-menu-label-20261030`；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
 - 最近一次全量为 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
@@ -14,8 +14,8 @@
 - 分支 `feature/remove-face`（从 `5062919` 派生）：删除“朝向鼠标”动作并停用 turn 帧，待机动作只剩小跳 : 表情 = 1 : 2。2026-10-31 已快进合并到当前分支并部署到 Shion-dev，分支保留、未 push，详见下方 2026-10-31 记录。
 - 分支 `feature/per-session-remote`（从 `5062919` 派生）：工作遥控四个按钮按会话区分，多个会话同时停住时用检查点面板分别继续/结束。2026-10-31 已合并到当前分支（合并提交 `7abd815`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-10-31 记录。
 - 分支 `feature/session-labels`（从 `e5fee12` 派生）：同一项目多个会话时，工作遥控菜单和检查点面板用各会话的第一句话摘要区分。2026-11-01 已快进合并到当前分支（`4ecaaaa`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-11-01 记录。
-- 2026-11-01 本机 Shion-dev 已替换为 `4ecaaaa` 的开发包（220 文件），旧包保留为 `Shion-dev-before-session-labels-20261101`。
-- 分支 `feature/v2-security-fixes`（从 `1500086` 派生，worktree `..\shion-security-fixes`）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题（hook ↔ 服务端令牌与独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。未合并、未部署、未 push，详见下方 2026-11-01 记录。
+- 2026-11-01 本机 Shion-dev 先替换为 `4ecaaaa` 的开发包（旧包 `Shion-dev-before-session-labels-20261101`），同日再替换为 `b016547` 的安全修复开发包（220 文件），旧包保留为 `Shion-dev-before-security-20261101`。
+- 分支 `feature/v2-security-fixes`（从 `1500086` 派生）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题和复审第二轮（hook ↔ 服务端令牌、令牌绑定诗音进程、独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。2026-11-01 已快进合并到当前分支（`f8ec0a6`），之后追加 bundle_smoke 修正 `b016547`；worktree 已移除，分支保留、未 push，详见下方 2026-11-01 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -45,7 +45,7 @@
 - `feature/remove-face`、`feature/per-session-remote` 已合并并部署，真机验收按下方清单在日常试用中进行。
 - 下一步由用户审核开发分支及下方清单，再安排真实客户端适配与 GUI 人工验收；部署、打包、用户开关开放、真实配置写入与发布须有对应授权。本任务不推进这些步骤。
 - 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。（更正 2026-11-01：这个粘滞标志原先也让默认配置下的 ChatGPT 菜单“活动”一直显示“待确认”，不只影响调度器；`feature/v2-security-fixes` 已给显示层加时效，调度器语义仍是遗留。）
-- `feature/v2-security-fixes` 待用户审核、按下方清单真机验收后决定是否合并；打包后需跑一次 `tools/bundle_smoke.py`（本次改了它，但没有打包、没实际运行）。
+- `feature/v2-security-fixes` 已合并并部署到 Shion-dev；bundle_smoke（99 项）和隔离实例验证已通过，剩余真机项按下方清单在日常使用中验收。
 
 ## 未完成的人工验收清单
 
@@ -76,12 +76,20 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] 会话第一句话区分（`feature/session-labels`）：同一项目开两个 CC 会话并各说一句话，工作遥控子菜单显示“文件夹名 · 第一句话前 12 字…”；只开一个会话时仍只显示文件夹名；诗音启动前就开着、还没说话的会话显示原来的“(2)”编号；开隐私模式后显示“会话 1 / 会话 2”，关掉后不再出现之前的摘要；长名字被截断时鼠标悬停看到全文（高 DPI、多屏）；检查点面板的名字一致。
 - [ ] 发布前专门验收（按会话中断）：两个会话都在跑长命令时只中断 A，A 的工具进程结束、B 的不受影响；选“全部”时两边都结束。
 
-- [ ] 发布前安全修复（`feature/v2-security-fixes`）：源码版启动诗音后数据目录（`%APPDATA%\Shion`）出现 `claude-link.json`，退出后消失；CC 里授权面板同意/拒绝、停下/继续、做得好/有问题照常；诗音没开时 CC 不卡、不弹面板；先用别的程序占住 47613 再启动诗音：诗音提示端口被占，没有 `claude-link.json`，CC 交回自己的授权框；ChatGPT 菜单“活动”几分钟后不再一直显示“待确认”；同项目两个会话时“立即中断”只选其一仍正常（两个独立终端各一个进程）；打包后跑 `tools/bundle_smoke.py`。第二轮另加：用任务管理器结束诗音（`claude-link.json` 会留下）后在 CC 里继续干活：CC 不卡、不弹诗音面板、交回自己的授权框，再启动诗音后联动恢复；有条件的话，在用户目录经 junction 搬过家的机器上联动正常；令牌写不进去时诗音会说“联动凭据写不进数据目录……”（难以手动制造，可跳过）。
+- 发布前安全修复（`feature/v2-security-fixes`，已部署 Shion-dev `b016547`）：
+  - [x] 1. 启动后数据目录出现 `claude-link.json`，正常退出后消失（**隔离实例自动验证**，2026-11-01：打包版隔离实例 + WM_ENDSESSION 正常退出；真实 Shion-dev 启动后也确认文件存在）
+  - [ ] 2. CC 里授权面板同意/拒绝、停下/继续、做得好/有问题照常（日常使用验收）
+  - [ ] 3. 诗音没开时 CC 不卡、不弹面板（日常使用验收）
+  - [x] 4. 诗音被强制结束、`claude-link.json` 留下后，hook 不采用旧令牌、交回 CC 自己处理（**隔离实例自动验证**，2026-11-01：强制结束隔离实例、伪造已不存在进程号的令牌两种情况，hook 均不发请求、占端口 socket 0 连接）；真实 CC 里“再启动诗音后联动恢复”的观感仍在日常使用中留意
+  - [x] 5. 47613 被占时诗音不写 `claude-link.json`、日志有警告，hook 不给决定、不连占端口者（**隔离实例自动验证**，2026-11-01）
+  - [ ] 6. ChatGPT 菜单“活动”几分钟后不再一直显示“待确认”（日常使用验收）
+  - [ ] 7. 两个独立终端各一个 CC 会话，“立即中断”只选其一：只有被选的停下（日常使用验收）
+  - [ ] 有条件时：用户目录经 junction 搬过家的机器上联动正常；令牌写不进去时诗音会说“联动凭据写不进数据目录……”（难以手动制造，可跳过）
 
 - [ ] 删除朝向鼠标（`feature/remove-face`）：右键“动作”只剩跳一跳 / 去睡觉 / 趴一会儿（三语）；普通/活泼档待机时不再出现侧身，只有小跳和开心/发呆表情，表情明显多于小跳；旧存档正常加载。
 
 ## v1.1 待办
-- [x] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）：`feature/v2-security-fixes` 已实现，待合并和真机验收
+- [x] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）：`feature/v2-security-fixes` 已实现、合并并部署 Shion-dev（2026-11-01），剩余真机项见验收清单
 - [x] hook 耗时：诗音没开时的等待已在 v1.0.1 热修里去掉（见当前状态）。诗音运行时 PreToolUse 仍约 354 ms（源码）/ 435 ms（exe）：主要是进程启动，`find_cc_process` 只占约 26 ms；是否继续降另议
 - [ ] 实验：桌面端能否拿到 statusLine 的 `rate_limits.seven_day`（每任务额度上限的前提）
 - [ ] 接入 GPT / Codex
@@ -91,6 +99,22 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-01 合并安全修复、隔离验证并替换 Shion-dev**（证据在忽略目录 `build/security-replacement-20261101/`）：
+  - **合并**：`git merge --ff-only feature/v2-security-fixes`，HEAD 由 `1500086` 快进到 `f8ec0a6`。worktree `..\shion-security-fixes` 扫描无 reparse point（junction 已在上一任务解除）、无未提交改动（只有被忽略的 `build/` 和缓存），用 `git worktree remove`（未加 `--force`）移除，分支保留；主仓库 `.venv` 与 `assets/sprites/raw`（23 项）完好。
+  - **打包**：沿用 `build/session-labels-replacement-20261101/` 的脚本，只改目录名和备份名，不生成 ZIP。
+    - 第 1 次：打包成功（220 文件），但 bundle_smoke 失败，`list index out of range`。原因是 `tools/bundle_smoke.py` 的 `MockHooks.link` 只写了 `{"token"}`，没有第二轮新增的 `pid` / `created`；打包版 hook 的 `read_link` 正确地拒绝了它、一个请求都没发，`mock.events` 为空。这是第二轮漏改的测试工具（当时只做了编译检查），不是产品代码问题。
+    - 修正：`MockHooks.link` 改用正式的 `shion.loopback.write_token`，单独提交为 `b016547`（只改测试工具）。第 1 次的结果改名保留为 `*-attempt1`。
+    - 第 2 次：从 `b016547` 完整重打，220 文件，bundle_smoke **99 项全部通过**（新增 `hook-sends-link-token`、`server-rejects-missing-token`），没有新 ZIP。观察端 stdio 烟测通过，响应与上次替换完全一致。依赖版本 PyInstaller 6.22.3 / pyinstaller-hooks-contrib 2026.9 / PySide6 6.12.0 / numpy 2.2.6，与 `requirements-build.txt` 一致。
+  - **隔离验证**（`isolated_verify.py` → `isolated-verify.json`）：打包版在系统临时目录里运行，独立 HOME / APPDATA / CODEX_HOME / SHION_DATA_DIR、空闲端口、唯一实例名，ChatGPT 观察端预置为别的端口并关闭，存档预置 `permission_timeout=10`；隔离实例用原生 windows 平台（正常退出靠 WM_ENDSESSION，等同注销）。**a～d 全部通过**：
+    - a. 启动后出现 `claude-link.json`，记录的写入者就是该实例；带令牌 `/health` 返回 200；`--hook PermissionRequest` 登记成功（日志有“有东西要你决定哦”），10 秒超时后撤回，不输出决定，退出码 0；WM_ENDSESSION 正常退出（退出码 0）后令牌文件被删。
+    - b. 普通 socket 先占住端口：日志有“HTTP 服务启动失败”，没有令牌文件，实例仍在运行；`--hook PermissionRequest` 不输出决定，占端口 socket 0 连接。
+    - c. 伪造进程号已不存在（句柄也已关闭）的令牌文件：PermissionRequest 和 UserPromptSubmit 都不发请求，0 连接；隔离实例被强制结束后令牌文件留下，`read_link` 拒绝，hook 不发请求，0 连接。
+    - d. 不带令牌、错误令牌、300 字符畸形令牌请求 `/health`、`/event` 都返回 403。
+    - 3 个隔离进程均已结束，4 个临时目录已删除，之后也没有 dist 下的 Shion 进程残留。
+  - **替换**：开始时没有任何 Shion.exe 在运行，不需要用户关闭程序。替换器原地替换，两次改名均一次成功；旧包 220 文件逐个核对后保留为 `D:\desktop\tools\Shion-dev-before-security-20261101`，新目录 220 文件逐个核对一致。Codex / CC 配置哈希与任务开始时一致，存档 `v2_scheduler_enabled=false`、`claude_link_enabled=true` 未变，`Shion-1.0.0-win64.zip` 未变，没有强制结束进程。旧 exe `4834ed5a…55f458`，新 exe `b1c65811…278d6a`。
+  - **用户启动新版后只读核对**：PID 5780 来自 `Shion-dev\Shion.exe`（exe 哈希与新包一致），同时监听 127.0.0.1:47613 和 47614；19:28:58 启动，19:29:01 真实数据目录出现 `claude-link.json`（只确认存在，没有读取或记录内容）。启动后日志 13 行，没有 WARNING/ERROR，没有端口被占或令牌写入失败；真实 CC hook 发来的 prompt / working / tool_done 都被新服务端接收（新 hook 带令牌和新服务端对上），prompt 行只有 `None` 和会话 ID，没有提示词内容。
+  - 验收清单第 1、4、5 项注明“隔离实例自动验证”并打勾，第 2、3、6、7 项留待日常使用验收。未 push、未发布。
 
 - **2026-11-01 安全修复第二轮**（同分支 `feature/v2-security-fixes`，在 `5164056` 之后新提交，不改写历史；本地提交、未合并、未 push）。来源是 reviewer 子代理对 `5164056` 的复审（结论“可以合并”）加我的独立复核。
   - **应修 1：旧令牌被信任。** 诗音被强制结束后令牌文件会留下；命名管道名是整台机器共用的，别的账户能在诗音没开时同时冒充管道和 47613，hook 就会带着旧令牌发出完整命令、采纳伪造的 allow。（子代理原判断只影响设了 `SHION_PORT` 的情况，复核后更正。）修法：令牌文件加 `pid` / `created`（写入者进程号、FILETIME 创建时间），hook 改用 `loopback.read_link`，只有写入者还在运行才采用令牌。新增 `winproc.process_running`，同一句柄上核对创建时间，并要求退出码是 `STILL_ACTIVE`。**踩坑**：最初只比创建时间，测试发现进程被 `kill()` + `wait()` 后，`Popen` 仍握着句柄，内核对象还在，`GetProcessTimes` 照样成功，旧令牌被当成有效。真实环境里任何握着诗音句柄的程序都会造成同样情况，所以加上退出码判断。Windows 上读不到自己的创建时间时，`write_token` 抛 OSError，按写失败处理。
