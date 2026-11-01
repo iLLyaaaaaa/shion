@@ -9,6 +9,7 @@ import random
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QSize, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
@@ -26,7 +27,7 @@ from shion.effects import HeartOverlay
 from shion.lines import Lines, available_languages, resolve_language
 from shion.remote import RemoteHub
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
-from shion.server import DEFAULT_PORT, ShionServer, start_linked, stop_linked
+from shion.server import DEFAULT_PORT, LINK_PORT_BUSY, LINK_TOKEN_FAILED, ShionServer, start_linked, stop_linked
 from shion.speech import Priority
 
 log = logging.getLogger("shion")
@@ -126,6 +127,15 @@ def data_dir() -> Path:
     return Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
 
 
+def link_warning(status: str, ui, port: int) -> Optional[str]:
+    """启动时联动服务的问题提示（start_linked 的返回值）；没问题返回 None。"""
+    if status == LINK_PORT_BUSY:
+        return ui("port_busy", port=port)
+    if status == LINK_TOKEN_FAILED:
+        return ui("link_token_failed")
+    return None
+
+
 def setup_logging(directory: Path, debug: bool) -> None:
     """日志写进数据目录（1 MB 轮转，保留 2 份）。目录不可写时不能让桌宠起不来，只往 stderr 写。"""
     root = logging.getLogger("shion")
@@ -196,7 +206,7 @@ def run() -> int:
     port = int(os.environ.get("SHION_PORT") or DEFAULT_PORT)
     server = ShionServer(bridge.on_event, bridge.on_take_feedback, port=port, hub=hub)
     # 绑定成功才写令牌；端口被占时不写，hook 就不会去连占着端口的进程
-    server_ok = start_linked(server, directory)
+    link_status = start_linked(server, directory)
     app.aboutToQuit.connect(lambda: stop_linked(server, directory))  # 先删令牌、停服务，再写存档
     app.aboutToQuit.connect(scheduler.flush)
 
@@ -204,8 +214,9 @@ def run() -> int:
     win.show()
     log.info("Shion 启动，存档：%s", save_path)
     controller.greet_startup(first_start, from_hook=os.environ.get("SHION_LAUNCHED_BY_HOOK") == "1")
-    if not server_ok:
-        controller.say(lines.ui("port_busy", port=port), priority=Priority.HIGH, category="port_error")
+    warning = link_warning(link_status, lines.ui, port)
+    if warning:
+        controller.say(warning, priority=Priority.HIGH, category="port_error")
     code = app.exec()
     scheduler.flush()
     guard.release()

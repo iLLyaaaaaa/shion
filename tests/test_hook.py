@@ -352,3 +352,35 @@ def test_notification_forwards_its_type(env, kind):
                  json.dumps({"notification_type": kind, "message": "私密内容不转发"}).encode())
     assert r.returncode == 0 and r.stdout == b""
     assert events == [("notification", kind)]
+
+
+# ---------------------------------------------------------------- 403：令牌换了才重读重试
+def test_request_rereads_a_changed_token_after_403_and_retries_once(env, monkeypatch):
+    srv, events, _, tmp = env
+    monkeypatch.setenv("SHION_PORT", str(srv.port))
+    monkeypatch.setenv("SHION_DATA_DIR", str(tmp))
+    h = load_hook()
+    write_token(tmp, "e" * 64)  # 相当于上一个诗音的令牌（进程活着，格式也对）
+    assert h.link_token() == "e" * 64
+    write_token(tmp, srv.token)  # 诗音重启换了令牌
+    assert h.request("/event", {"type": "working"}) == {"ok": True}
+    assert h.link_token() == srv.token
+    assert events == [("working", None)]
+
+
+def test_request_does_not_retry_when_the_token_did_not_change(monkeypatch, tmp_path):
+    import urllib.error
+    monkeypatch.setenv("SHION_DATA_DIR", str(tmp_path))
+    write_token(tmp_path, "e" * 64)
+    h = load_hook()
+    attempts = []
+
+    class Opener:
+        def open(self, req, timeout=None):
+            attempts.append(req.get_header("Authorization"))
+            raise urllib.error.HTTPError(req.full_url, 403, "forbidden", {}, None)
+
+    monkeypatch.setattr(h.urllib.request, "build_opener", lambda *a: Opener())
+    assert h.request("/event", {}) is None
+    assert attempts == ["Bearer " + "e" * 64]
+    assert h._down is False  # 403 是服务端答了，不算连接失败

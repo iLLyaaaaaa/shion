@@ -833,3 +833,30 @@ def test_hook_rejected_by_the_real_server_with_a_stale_token_gives_no_decision(h
     r = run_hook("PermissionRequest", srv.port, tmp, stdin=perm_input())
     assert r.returncode == 0 and r.stdout == b""
     assert hub.permissions.pending() == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="进程核对只在 Windows")
+@pytest.mark.parametrize("event,stdin", [
+    ("PermissionRequest", perm_input("Bash", command="rm -rf /")),
+    ("UserPromptSubmit", json.dumps({"session_id": "s1", "prompt": "秘密"}).encode()),
+])
+@pytest.mark.parametrize("owner", ["exited", "pid_reused"])
+def test_hook_ignores_a_stale_token_left_by_a_crashed_shion(tmp_path, event, stdin, owner):
+    """诗音被强制结束后令牌文件还在，又有人占着端口（设了 SHION_PORT 时 hook 不看管道，相当于管道也被冒充）：
+    旧令牌对应的诗音进程已经不在，hook 一个请求都不发、不给决定。"""
+    from shion import winproc
+    from shion.loopback import write_token
+    from tests.test_server import exited_process
+    if owner == "exited":
+        pid, created = exited_process()
+    else:
+        pid = os.getpid()
+        created = winproc.process_created(pid) + 1  # 进程号活着但启动时间不对
+    write_token(tmp_path, "9" * 64, pid=pid, created=created)
+    impostor = _Impostor()
+    try:
+        r = run_hook(event, impostor.port, tmp_path, stdin=stdin)
+        assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
+        assert impostor.seen == []
+    finally:
+        impostor.close()

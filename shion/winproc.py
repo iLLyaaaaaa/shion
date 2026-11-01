@@ -73,6 +73,37 @@ def process_created(pid: int) -> Optional[int]:
         k32.CloseHandle(wintypes.HANDLE(handle))
 
 
+STILL_ACTIVE = 259
+
+
+def process_running(pid: int, created: int) -> bool:
+    """这个进程还在运行：创建时间对得上（防 PID 复用），而且还没退出。
+
+    只看创建时间不够：进程退出后，只要还有别的进程握着它的句柄，内核对象就还在，
+    OpenProcess / GetProcessTimes 照样成功。所以同一个句柄上再看退出码是不是 STILL_ACTIVE。
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    k32 = _k32()
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(wintypes.HANDLE(handle), *[ctypes.byref(t) for t in times]):
+            return False
+        if (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime != created:
+            return False
+        code = wintypes.DWORD()
+        if not k32.GetExitCodeProcess(wintypes.HANDLE(handle), ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        k32.CloseHandle(wintypes.HANDLE(handle))
+
+
 def process_image(pid: int) -> str:
     """可执行文件的完整路径；拿不到返回空串。"""
     if os.name != "nt":

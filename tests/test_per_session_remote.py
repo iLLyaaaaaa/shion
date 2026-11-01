@@ -420,6 +420,7 @@ def test_interrupting_a_session_that_shares_its_process_only_stops_it(shared):
     find_action(find_action(rem, "立即中断").menu(), "alpha").trigger()
     hub = shared.ctl.hub
     assert shared.world.killed == []
+    assert shared.said[-1] == shared.ctl.lines.ui("interrupt_shared_process")  # 说清楚是共用进程
     assert hub.is_session_paused("A") and not hub.is_session_paused("B")
     assert not hub.interrupt_pending("A") and not hub.interrupt_pending("B")
     assert sorted(shared.state.working_sessions(shared.now)) == ["A", "B"]

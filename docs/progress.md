@@ -76,7 +76,7 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] 会话第一句话区分（`feature/session-labels`）：同一项目开两个 CC 会话并各说一句话，工作遥控子菜单显示“文件夹名 · 第一句话前 12 字…”；只开一个会话时仍只显示文件夹名；诗音启动前就开着、还没说话的会话显示原来的“(2)”编号；开隐私模式后显示“会话 1 / 会话 2”，关掉后不再出现之前的摘要；长名字被截断时鼠标悬停看到全文（高 DPI、多屏）；检查点面板的名字一致。
 - [ ] 发布前专门验收（按会话中断）：两个会话都在跑长命令时只中断 A，A 的工具进程结束、B 的不受影响；选“全部”时两边都结束。
 
-- [ ] 发布前安全修复（`feature/v2-security-fixes`）：源码版启动诗音后数据目录（`%APPDATA%\Shion`）出现 `claude-link.json`，退出后消失；CC 里授权面板同意/拒绝、停下/继续、做得好/有问题照常；诗音没开时 CC 不卡、不弹面板；先用别的程序占住 47613 再启动诗音：诗音提示端口被占，没有 `claude-link.json`，CC 交回自己的授权框；ChatGPT 菜单“活动”几分钟后不再一直显示“待确认”；同项目两个会话时“立即中断”只选其一仍正常（两个独立终端各一个进程）；打包后跑 `tools/bundle_smoke.py`。
+- [ ] 发布前安全修复（`feature/v2-security-fixes`）：源码版启动诗音后数据目录（`%APPDATA%\Shion`）出现 `claude-link.json`，退出后消失；CC 里授权面板同意/拒绝、停下/继续、做得好/有问题照常；诗音没开时 CC 不卡、不弹面板；先用别的程序占住 47613 再启动诗音：诗音提示端口被占，没有 `claude-link.json`，CC 交回自己的授权框；ChatGPT 菜单“活动”几分钟后不再一直显示“待确认”；同项目两个会话时“立即中断”只选其一仍正常（两个独立终端各一个进程）；打包后跑 `tools/bundle_smoke.py`。第二轮另加：用任务管理器结束诗音（`claude-link.json` 会留下）后在 CC 里继续干活：CC 不卡、不弹诗音面板、交回自己的授权框，再启动诗音后联动恢复；有条件的话，在用户目录经 junction 搬过家的机器上联动正常；令牌写不进去时诗音会说“联动凭据写不进数据目录……”（难以手动制造，可跳过）。
 
 - [ ] 删除朝向鼠标（`feature/remove-face`）：右键“动作”只剩跳一跳 / 去睡觉 / 趴一会儿（三语）；普通/活泼档待机时不再出现侧身，只有小跳和开心/发呆表情，表情明显多于小跳；旧存档正常加载。
 
@@ -88,8 +88,23 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] V2.1 候选：Codex 控制能力。实验结论：授权可行（异常时交回 Codex 自己处理，桌面端未测）；停下只能做到"检查点暂停 → 继续"；中断目前不可行。详见 docs/experiments/shion-v2-codex-control.md。
 
 - [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。ChatGPT 菜单显示已在 `feature/v2-security-fixes` 加 600 秒时效（`TaskLedger.uncertain_at`）；调度器 `scheduler.py` 仍读粘滞标志，这一条仍未完成。
+- [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-01 安全修复第二轮**（同分支 `feature/v2-security-fixes`，在 `5164056` 之后新提交，不改写历史；本地提交、未合并、未 push）。来源是 reviewer 子代理对 `5164056` 的复审（结论“可以合并”）加我的独立复核。
+  - **应修 1：旧令牌被信任。** 诗音被强制结束后令牌文件会留下；命名管道名是整台机器共用的，别的账户能在诗音没开时同时冒充管道和 47613，hook 就会带着旧令牌发出完整命令、采纳伪造的 allow。（子代理原判断只影响设了 `SHION_PORT` 的情况，复核后更正。）修法：令牌文件加 `pid` / `created`（写入者进程号、FILETIME 创建时间），hook 改用 `loopback.read_link`，只有写入者还在运行才采用令牌。新增 `winproc.process_running`，同一句柄上核对创建时间，并要求退出码是 `STILL_ACTIVE`。**踩坑**：最初只比创建时间，测试发现进程被 `kill()` + `wait()` 后，`Popen` 仍握着句柄，内核对象还在，`GetProcessTimes` 照样成功，旧令牌被当成有效。真实环境里任何握着诗音句柄的程序都会造成同样情况，所以加上退出码判断。Windows 上读不到自己的创建时间时，`write_token` 抛 OSError，按写失败处理。
+  - **应修 2：junction 回退。** 令牌读写原来复用 `observer_files.reject_reparse`，会检查所有上级目录，用户目录在 junction 下时联动会悄悄失效。改为 `loopback` 自己读写，只检查数据目录本身和令牌文件本身；写入用同目录唯一临时文件 + `os.replace`，失败时删掉临时文件；读取限 4 KB。`start_linked` 改成返回 `ok` / `port_busy` / `token_failed`，`app.link_warning` 在 `token_failed` 时说新台词 `link_token_failed`（三语）。日志只记异常类型，不记路径。
+  - **小问题**：hook 的 `request()` 收到 403 时重读令牌，令牌换了才用新令牌重试一次；`_Server.server_bind` 补设 `server_name` / `server_port`；所有选中会话都因共用进程没法结束时说新台词 `interrupt_shared_process`（三语）。
+  - **新增测试**：
+    - 写入者已退出（握着句柄的情况）、进程号复用两种情况下 `read_link` 拒绝，6 种缺字段或坏字段也拒绝；
+    - 上级目录是 junction 时能读写；数据目录本身或令牌文件位置是 junction 时拒绝，且不往别处写；
+    - 不留临时文件；`token_failed` 与三种提示文字；
+    - 端到端：只靠 `start_linked` 写令牌，用 hook 真实的 `link_token` 读到并 `/health` 返回 200，退出后读不到；
+    - 旧令牌 + 冒充者：2 种事件 × 2 种失效方式，hook 一个请求都不发；
+    - 403 后令牌换了能重试成功，令牌没变时不重试、也不熔断；共用进程时的提示语。
+  - **验证**：全量 pytest（PowerShell `$LASTEXITCODE`，worktree 内临时 junction，`PYTHONUTF8=1`）汇总原文：`2041 passed, 8 skipped, 2 warnings in 618.99s (0:10:18)`，退出码 0；两条警告都是既有的 Pillow `getdata()` 弃用提示。`tools/bundle_smoke.py` 仍未打包运行。
+  - **范围外**：ChatGPT 观察端凭据仍会检查所有上级目录（已记入 v1.1 待办）。
 
 - **2026-11-01 v2.0.0 发布前安全修复**（分支 `feature/v2-security-fixes`，从 `1500086` 派生，worktree `..\shion-security-fixes`，本地提交、未合并、未 push）。起因是同日的发布前审查（master `74121dc`..`1500086`，结论“修复后发布”，没有阻塞项）。
   - **令牌（应修 1、3）**：新模块 `shion/loopback.py`（只用标准库）。诗音每次启动生成 `secrets.token_hex(32)`；`server.start_linked` 先删旧的 `claude-link.json`，绑定 47613 成功后才写新令牌（复用 `observer_files.replace_private`，先清掉崩溃残留的暂存文件），端口被占时不写；`stop_linked` 退出时先删令牌再停服务。服务端 `_allowed()` 对所有路由（含 `/health`）核对 `Authorization: Bearer`（`hmac.compare_digest`），不对就 403、不读请求体。hook 读不到令牌就不发任何请求（按诗音没开处理），`probe_health` 重新读令牌。修复前，抢先占住 47613 的进程（包括别的 Windows 账户）能收到完整命令并回 allow，还能注入反馈、解除暂停；`/event` 等接口本机任何进程都能调。

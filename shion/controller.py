@@ -893,7 +893,9 @@ class PetController(QObject):
         if not done:
             log.info("立即中断：没有找到对应的进程，或进程和别的会话共用（会话 %s，共用 %s）", sessions, shared)
             self._speech.dismiss()
-            self.say(ui("interrupt_no_process"), priority=Priority.MEDIUM, category="stop_requested")
+            # 有进程、只是和别的会话共用时说清楚原因；真的找不到进程时照旧
+            self.say(ui("interrupt_shared_process" if shared else "interrupt_no_process"),
+                     priority=Priority.MEDIUM, category="stop_requested")
             if scoped:
                 if not self.state.paused:
                     self._held_said = self._held_seen = False

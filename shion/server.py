@@ -371,6 +371,7 @@ class _Server(ThreadingHTTPServer):
     def server_bind(self):
         bind_exclusive(self.socket, self.server_address)  # 绑上以后别人不能再绑同一端口抢连接
         self.server_address = self.socket.getsockname()
+        self.server_name, self.server_port = self.server_address[:2]  # 与 HTTPServer.server_bind 一致（不做 getfqdn）
 
     def emit_event(self, etype: str, detail: Optional[str], meta: dict) -> None:
         """带会话信息时多传一个参数；旧的两参数回调（测试、调试入口）照常可用。"""
@@ -430,24 +431,28 @@ class ShionServer:
         log.info("HTTP 服务已停止")
 
 
-def start_linked(server: ShionServer, directory) -> bool:
-    """正式启动顺序：先删旧令牌，绑定成功后才写新令牌。返回服务是否起来了。
+LINK_OK, LINK_PORT_BUSY, LINK_TOKEN_FAILED = "ok", "port_busy", "token_failed"
 
-    端口被占（绑定失败）时不写令牌：hook 读不到令牌就不会去连占着端口的进程。
-    令牌写不进去时服务照常运行，但 hook 连不上（相当于联动不可用），只记日志。
+
+def start_linked(server: ShionServer, directory) -> str:
+    """正式启动顺序：先删旧令牌，绑定成功后才写新令牌（连同本进程的进程号和启动时间）。
+
+    返回 "ok"；"port_busy"：端口被占，不写令牌，hook 读不到令牌就不会去连占着端口的进程；
+    "token_failed"：服务起来了但令牌写不进去，hook 连不上（联动不可用），界面要告诉用户。
     """
-    from .loopback import remove_token, write_token
-    remove_token(directory)
+    from . import loopback
+    loopback.remove_token(directory)
     try:
         server.start()
     except OSError as e:
         log.warning("HTTP 服务启动失败（端口 %s 被占用？）：%s", server.port, e)
-        return False
+        return LINK_PORT_BUSY
     try:
-        write_token(directory, server.token)
+        loopback.write_token(directory, server.token)
     except (OSError, ValueError) as e:
-        log.warning("写联动令牌失败，Claude Code 暂时连不上诗音：%s", e)
-    return True
+        log.warning("写联动令牌失败，Claude Code 暂时连不上诗音：%s", type(e).__name__)
+        return LINK_TOKEN_FAILED
+    return LINK_OK
 
 
 def stop_linked(server: ShionServer, directory) -> None:

@@ -66,28 +66,24 @@ _token = None  # 本进程读到的令牌；读不到时每次请求前再试一
 
 
 def link_token(refresh: bool = False):
-    """数据目录里的令牌（见 shion/loopback.py），读不到返回 None。"""
+    """数据目录里的令牌（见 shion/loopback.py:read_link）：只有写它的诗音进程还活着才算数，读不到返回 None。"""
     global _token
     if refresh or _token is None:
         try:
             if str(ROOT) not in sys.path:
                 sys.path.insert(0, str(ROOT))
             from shion import loopback  # 只用标准库
-            _token = loopback.read_token()
+            _token = loopback.read_link()
         except Exception:
             _token = None
     return _token
 
 
-def request(path: str, payload=None, timeout: float = TIMEOUT):
-    """成功返回解析后的 JSON，失败返回 None。连接阶段失败后熔断：之后的请求直接返回 None。
-    没有令牌时不连接、直接返回 None：不把内容发给可能占着端口的别的进程。"""
+_FORBIDDEN = object()  # 服务端回 403：令牌对不上
+
+
+def _send(path: str, payload, timeout: float, token: str):
     global _down
-    if _down:
-        return None
-    token = link_token()
-    if not token:
-        return None
     try:
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(base_url() + path, data=data)
@@ -97,13 +93,29 @@ def request(path: str, payload=None, timeout: float = TIMEOUT):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 本机请求不走系统代理
         with opener.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError:
-        return None  # 服务端答了（只是不是 200）：不是连接失败
+    except urllib.error.HTTPError as e:
+        return _FORBIDDEN if e.code == 403 else None  # 服务端答了（只是不是 200）：不是连接失败
     except urllib.error.URLError:
         _down = True  # 连接阶段失败：诗音没在听，别再逐个等超时
         return None
     except Exception:
         return None  # 读超时、返回内容不对等：只算这一次失败
+
+
+def request(path: str, payload=None, timeout: float = TIMEOUT):
+    """成功返回解析后的 JSON，失败返回 None。连接阶段失败后熔断：之后的请求直接返回 None。
+    没有有效令牌时不连接、直接返回 None：不把内容发给可能占着端口的别的进程。
+    收到 403（例如诗音重启换了令牌）时重读一次令牌，换了才用新令牌重试一次；403 说明请求没被处理，重试安全。"""
+    if _down:
+        return None
+    token = link_token()
+    if not token:
+        return None
+    result = _send(path, payload, timeout, token)
+    if result is _FORBIDDEN:
+        fresh = link_token(refresh=True)
+        result = _send(path, payload, timeout, fresh) if fresh and fresh != token and not _down else None
+    return None if result is _FORBIDDEN else result
 
 
 def read_save_strict():
