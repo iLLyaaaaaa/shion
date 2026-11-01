@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import math
@@ -16,6 +17,7 @@ import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
+from .loopback import bind_exclusive, new_token, valid_token
 from .remote import DISABLED, RemoteHub
 
 log = logging.getLogger("shion.server")
@@ -129,14 +131,18 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _allowed(self) -> bool:
-        """拒绝来自网页的请求：带 Origin 头（浏览器跨域请求）或 Host 不是本机（DNS 重绑定）。
+        """拒绝来自网页的请求：带 Origin 头（浏览器跨域请求）或 Host 不是本机（DNS 重绑定）；
+        并且只认带对令牌的请求（Authorization: Bearer <令牌>，令牌在数据目录的 claude-link.json 里，
+        见 shion/loopback.py）。不对就 403，不读请求体。
 
-        Claude Code 的 hook 和 MCP 服务器都是普通 HTTP 客户端，不带 Origin。
+        Claude Code 的 hook 是普通 HTTP 客户端，不带 Origin。
         """
         host = self.headers.get("Host")
+        auth = self.headers.get("Authorization") or ""
+        given = auth[7:] if auth.startswith("Bearer ") else ""
         if self.headers.get("Origin") is not None or (
             host is not None and host.rsplit(":", 1)[0] not in ALLOWED_HOSTS and host not in ALLOWED_HOSTS
-        ):
+        ) or not hmac.compare_digest(given.encode("utf-8", "replace"), self.server.token.encode("ascii")):
             self._send(403, {"error": "forbidden"})
             return False
         return True
@@ -354,12 +360,17 @@ class _Server(ThreadingHTTPServer):
     allow_reuse_address = False  # 端口被占用时要报错，而不是悄悄共用
     request_queue_size = 64  # 并行子代理的 hook 可能同时连进来，默认的 5 会被重置连接
 
-    def __init__(self, addr, on_event, on_take_feedback, hub):
+    def __init__(self, addr, on_event, on_take_feedback, hub, token):
+        self.token = token
         super().__init__(addr, _Handler)
         self.on_event = on_event
         self.on_take_feedback = on_take_feedback
         self.hub = hub
         self.feedback_lock = threading.Lock()
+
+    def server_bind(self):
+        bind_exclusive(self.socket, self.server_address)  # 绑上以后别人不能再绑同一端口抢连接
+        self.server_address = self.socket.getsockname()
 
     def emit_event(self, etype: str, detail: Optional[str], meta: dict) -> None:
         """带会话信息时多传一个参数；旧的两参数回调（测试、调试入口）照常可用。"""
@@ -377,7 +388,14 @@ class ShionServer:
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         hub: Optional[RemoteHub] = None,
+        token: Optional[str] = None,
     ):
+        """token：只认带这个令牌的请求；不给就随机生成一个（可从 .token 读到）。"""
+        if token is None:
+            token = new_token()
+        if not valid_token(token):
+            raise ValueError("token 必须是 64 位小写十六进制")
+        self.token = token
         self._on_event = on_event
         self._on_take_feedback = on_take_feedback
         self.hub = hub or RemoteHub()
@@ -394,7 +412,7 @@ class ShionServer:
         """启动服务。端口被占用时抛 OSError。"""
         if self._httpd:
             return
-        self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_feedback, self.hub)
+        self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_feedback, self.hub, self.token)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="shion-server", daemon=True
         )
@@ -410,6 +428,33 @@ class ShionServer:
             self._thread.join(timeout=2)
         self._httpd = self._thread = None
         log.info("HTTP 服务已停止")
+
+
+def start_linked(server: ShionServer, directory) -> bool:
+    """正式启动顺序：先删旧令牌，绑定成功后才写新令牌。返回服务是否起来了。
+
+    端口被占（绑定失败）时不写令牌：hook 读不到令牌就不会去连占着端口的进程。
+    令牌写不进去时服务照常运行，但 hook 连不上（相当于联动不可用），只记日志。
+    """
+    from .loopback import remove_token, write_token
+    remove_token(directory)
+    try:
+        server.start()
+    except OSError as e:
+        log.warning("HTTP 服务启动失败（端口 %s 被占用？）：%s", server.port, e)
+        return False
+    try:
+        write_token(directory, server.token)
+    except (OSError, ValueError) as e:
+        log.warning("写联动令牌失败，Claude Code 暂时连不上诗音：%s", e)
+    return True
+
+
+def stop_linked(server: ShionServer, directory) -> None:
+    """正常退出：先删令牌（hook 不再来连），再停服务。"""
+    from .loopback import remove_token
+    remove_token(directory)
+    server.stop()
 
 
 def main() -> None:
@@ -437,6 +482,7 @@ def main() -> None:
     srv = ShionServer(on_event, on_take)
     srv.start()
     print(f"监听 {DEFAULT_HOST}:{srv.port}，Ctrl+C 退出", flush=True)
+    print(f"请求头：Authorization: Bearer {srv.token}（调试入口不写令牌文件）", flush=True)
     try:
         while True:
             time.sleep(1)

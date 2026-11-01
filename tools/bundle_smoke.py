@@ -15,7 +15,9 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
+import secrets
 import uuid
 
 
@@ -52,10 +54,20 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
-def http(port, path, data=None):
+def read_link_token(directory: Path) -> str:
+    """诗音绑定端口后写进数据目录的令牌（见 shion/loopback.py）；没有就返回空串。"""
+    try:
+        return json.loads((directory / "claude-link.json").read_text(encoding="utf-8"))["token"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def http(port, path, data=None, data_dir=None):
+    token = read_link_token(data_dir) if data_dir is not None else ""
     req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
                                  data=None if data is None else json.dumps(data).encode(),
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json",
+                                          **({"Authorization": "Bearer " + token} if token else {})})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=2) as response:
         return json.loads(response.read())
@@ -178,16 +190,30 @@ class MockHooks:
         self.gate = {"paused": False}
         self.decision = "allow"
         self.feedback = ""
+        self.token = secrets.token_hex(32)
+        self.unauthorized = 0
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
 
+            def authorized(self):
+                if self.headers.get("Authorization") == "Bearer " + owner.token:
+                    return True
+                owner.unauthorized += 1
+                self.send_response(403)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+
             def do_GET(self):
-                self.respond({"ok": True})
+                if self.authorized():
+                    self.respond({"ok": True})
 
             def do_POST(self):
+                if not self.authorized():
+                    return
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
                 if self.path == "/event":
                     owner.events.append(data)
@@ -214,6 +240,11 @@ class MockHooks:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def link(self, directory: Path) -> None:
+        """像诗音一样把令牌写进 hook 读取的数据目录。"""
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "claude-link.json").write_text(json.dumps({"token": self.token}), encoding="utf-8")
 
     def __enter__(self):
         self.thread.start()
@@ -316,6 +347,7 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
 
             with MockHooks() as mock:
                 env["SHION_PORT"] = str(mock.server.server_port)
+                mock.link(Path(env["APPDATA"]) / "Shion")
                 payload = {"session_id": "临时会话", "tool_name": "Read", "tool_input": {"file_path": "测试.txt"},
                            "tool_use_id": "bundle-tool", "notification_type": "idle_prompt",
                            "last_assistant_message": "不应转发的回复"}
@@ -352,6 +384,7 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
                             f"stop-output-{event}")
                 result = run(["--hook", "PermissionRequest"], {**payload, "tool_name": "ExitPlanMode"})
                 require(not result.stdout and mock.events[-1]["type"] == "plan_ready", "plan-ready-only")
+                require(mock.unauthorized == 0, "hook-sends-link-token")
             env["SHION_PORT"] = str(free_port())
             require(not run(["--hook", "Stop"]).stdout, "server-down-silent")
             require(json.loads(run(["--console-send", "--pid", "0", "--created", "0", "--text", "继续"],
@@ -360,7 +393,12 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
             # 无 mock 服务，SessionStart 必须自行启动同一复制路径的 exe。
             run(["--hook", "SessionStart"], {"session_id": "auto-launch"})
             port = int(env["SHION_PORT"])
-            wait_for(lambda: http(port, "/health") == {"ok": True})
+            wait_for(lambda: http(port, "/health", data_dir=Path(env["APPDATA"]) / "Shion") == {"ok": True})
+            try:
+                http(port, "/health")
+                require(False, "server-rejects-missing-token")
+            except urllib.error.HTTPError as error:
+                require(error.code == 403, "server-rejects-missing-token")
             pids = own_processes(exe)
             require(bool(pids), "session-start-launches-relocated-exe")
             report["launched_pids"] = pids

@@ -15,6 +15,7 @@
 - 分支 `feature/per-session-remote`（从 `5062919` 派生）：工作遥控四个按钮按会话区分，多个会话同时停住时用检查点面板分别继续/结束。2026-10-31 已合并到当前分支（合并提交 `7abd815`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-10-31 记录。
 - 分支 `feature/session-labels`（从 `e5fee12` 派生）：同一项目多个会话时，工作遥控菜单和检查点面板用各会话的第一句话摘要区分。2026-11-01 已快进合并到当前分支（`4ecaaaa`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-11-01 记录。
 - 2026-11-01 本机 Shion-dev 已替换为 `4ecaaaa` 的开发包（220 文件），旧包保留为 `Shion-dev-before-session-labels-20261101`。
+- 分支 `feature/v2-security-fixes`（从 `1500086` 派生，worktree `..\shion-security-fixes`）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题（hook ↔ 服务端令牌与独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。未合并、未部署、未 push，详见下方 2026-11-01 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -43,7 +44,8 @@
 - `feature/remove-codex-autolaunch` 待用户审核后合并到当前分支；Codex 自动拉起相关验收项已取消。
 - `feature/remove-face`、`feature/per-session-remote` 已合并并部署，真机验收按下方清单在日常试用中进行。
 - 下一步由用户审核开发分支及下方清单，再安排真实客户端适配与 GUI 人工验收；部署、打包、用户开关开放、真实配置写入与发布须有对应授权。本任务不推进这些步骤。
-- 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。
+- 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。（更正 2026-11-01：这个粘滞标志原先也让默认配置下的 ChatGPT 菜单“活动”一直显示“待确认”，不只影响调度器；`feature/v2-security-fixes` 已给显示层加时效，调度器语义仍是遗留。）
+- `feature/v2-security-fixes` 待用户审核、按下方清单真机验收后决定是否合并；打包后需跑一次 `tools/bundle_smoke.py`（本次改了它，但没有打包、没实际运行）。
 
 ## 未完成的人工验收清单
 
@@ -74,18 +76,38 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] 会话第一句话区分（`feature/session-labels`）：同一项目开两个 CC 会话并各说一句话，工作遥控子菜单显示“文件夹名 · 第一句话前 12 字…”；只开一个会话时仍只显示文件夹名；诗音启动前就开着、还没说话的会话显示原来的“(2)”编号；开隐私模式后显示“会话 1 / 会话 2”，关掉后不再出现之前的摘要；长名字被截断时鼠标悬停看到全文（高 DPI、多屏）；检查点面板的名字一致。
 - [ ] 发布前专门验收（按会话中断）：两个会话都在跑长命令时只中断 A，A 的工具进程结束、B 的不受影响；选“全部”时两边都结束。
 
+- [ ] 发布前安全修复（`feature/v2-security-fixes`）：源码版启动诗音后数据目录（`%APPDATA%\Shion`）出现 `claude-link.json`，退出后消失；CC 里授权面板同意/拒绝、停下/继续、做得好/有问题照常；诗音没开时 CC 不卡、不弹面板；先用别的程序占住 47613 再启动诗音：诗音提示端口被占，没有 `claude-link.json`，CC 交回自己的授权框；ChatGPT 菜单“活动”几分钟后不再一直显示“待确认”；同项目两个会话时“立即中断”只选其一仍正常（两个独立终端各一个进程）；打包后跑 `tools/bundle_smoke.py`。
+
 - [ ] 删除朝向鼠标（`feature/remove-face`）：右键“动作”只剩跳一跳 / 去睡觉 / 趴一会儿（三语）；普通/活泼档待机时不再出现侧身，只有小跳和开心/发呆表情，表情明显多于小跳；旧存档正常加载。
 
 ## v1.1 待办
-- [ ] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）
+- [x] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）：`feature/v2-security-fixes` 已实现，待合并和真机验收
 - [x] hook 耗时：诗音没开时的等待已在 v1.0.1 热修里去掉（见当前状态）。诗音运行时 PreToolUse 仍约 354 ms（源码）/ 435 ms（exe）：主要是进程启动，`find_cc_process` 只占约 26 ms；是否继续降另议
 - [ ] 实验：桌面端能否拿到 statusLine 的 `rate_limits.seven_day`（每任务额度上限的前提）
 - [ ] 接入 GPT / Codex
 - [ ] V2.1 候选：Codex 控制能力。实验结论：授权可行（异常时交回 Codex 自己处理，桌面端未测）；停下只能做到"检查点暂停 → 继续"；中断目前不可行。详见 docs/experiments/shion-v2-codex-control.md。
 
-- [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。
+- [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。ChatGPT 菜单显示已在 `feature/v2-security-fixes` 加 600 秒时效（`TaskLedger.uncertain_at`）；调度器 `scheduler.py` 仍读粘滞标志，这一条仍未完成。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-01 v2.0.0 发布前安全修复**（分支 `feature/v2-security-fixes`，从 `1500086` 派生，worktree `..\shion-security-fixes`，本地提交、未合并、未 push）。起因是同日的发布前审查（master `74121dc`..`1500086`，结论“修复后发布”，没有阻塞项）。
+  - **令牌（应修 1、3）**：新模块 `shion/loopback.py`（只用标准库）。诗音每次启动生成 `secrets.token_hex(32)`；`server.start_linked` 先删旧的 `claude-link.json`，绑定 47613 成功后才写新令牌（复用 `observer_files.replace_private`，先清掉崩溃残留的暂存文件），端口被占时不写；`stop_linked` 退出时先删令牌再停服务。服务端 `_allowed()` 对所有路由（含 `/health`）核对 `Authorization: Bearer`（`hmac.compare_digest`），不对就 403、不读请求体。hook 读不到令牌就不发任何请求（按诗音没开处理），`probe_health` 重新读令牌。修复前，抢先占住 47613 的进程（包括别的 Windows 账户）能收到完整命令并回 allow，还能注入反馈、解除暂停；`/event` 等接口本机任何进程都能调。
+  - **独占绑定**：47613 的 `_Server.server_bind` 和 47614 的 `_ExclusiveHTTPServer` 在 Windows 上设 `SO_EXCLUSIVEADDRUSE`，不设 `SO_REUSEADDR`（47614 原来用标准库默认，会设 `SO_REUSEADDR`）。
+  - **ChatGPT 状态（应修 2）**：`TaskLedger.uncertain` 改成带 setter 的属性，并记录 `uncertain_at`，读取时仍是原来的粘滞布尔值（调度器不变）。`ChatGPTConnection` 的 `status()`/`activity()` 只看最近 600 秒（`UNKNOWN_WINDOW`）内的不确定/断开；`_unobserved_start` 只在启动后 `ledger.ttl` 内算；不开调度器时一次降级只断开一次，然后清标记。修复前 `_unobserved_start` 从不清除，菜单“活动”永远显示“待确认”，切换一次开关也会永久卡住。
+  - **小问题**：`interrupt_work` 中，选中会话和没选中的工作会话报来同一个 CC 进程（pid + 创建时间）时不结束进程、改为只停下这个会话；hook 新增 `read_save_strict()`，存档读不到或损坏时不发 `prompt_head`。
+  - **测试**：`tests/link_support.py` 加 conftest 的 autouse fixture：测试里起的 ShionServer 按端口登记令牌、写进当前 `SHION_DATA_DIR`，`run_hook` 在目标目录没有令牌时补上，hook 模块的令牌缓存每个测试清零。原来 13 个文件共 156 个用例因缺令牌失败，已全部改好。“连不上 / 不回包 / 熔断”这类用例改为先写一个令牌，保证仍真的去连。
+  - **新增用例**：8 个路由 × 6 种错误令牌都返回 403；错令牌不转发事件、不取反馈、不能解除暂停；冒充者占着端口回 allow 时 hook 一个请求都不发（PermissionRequest / UserPromptSubmit / PostToolUse）；旧令牌被真服务端拒绝时不给决定；两个端口二次绑定失败；`start_linked` 写/删令牌、端口被占不写；真实 app 子进程不带令牌 403、第二个实例没有令牌文件；ChatGPT 五个时效用例；共用进程中断三个用例；prompt_head 在没有存档、存档损坏时不发。
+  - **工具**：`bundle_smoke.py` 的 MockHooks 要求令牌，并新增 `hook-sends-link-token`、`server-rejects-missing-token` 两项；`benchmark_hooks.py` 写令牌。两者只做了编译检查，**没有打包、没有实际运行**。
+  - **验证**：全量 pytest（worktree 内，临时 junction 指向主仓库 `.venv` 和 `assets/sprites/raw`，`PYTHONUTF8=1`）。
+    - 第 1 次：`1 failed, 2022 passed, 8 skipped, 2 warnings in 623.91s`。唯一失败是 `test_permission.py::test_http_input_validation_and_limits` 发超大请求体时遇到 `ConnectionAbortedError [WinError 10053]`（服务端没读完请求体就回 400 并关连接），和调度审查报告里记过的同类偶发问题一样；单独连跑 15 次都通过。
+    - 第 2 次：`2023 passed, 8 skipped, 2 warnings in 630.57s`，但测试全部通过后 Python 进程退出码是 `-1073740791`（0xC0000409，退出阶段崩溃）。
+    - 第 3 次（`-X faulthandler`）：`2023 passed, 8 skipped, 2 warnings in 626.86s`，退出码 0，没有崩溃栈。
+    - 第 4 次（和第 2 次同样的命令）：`2023 passed, 8 skipped, 2 warnings in 614.04s`，退出码 0。
+    - 原代码 `1500086` 在临时 worktree 跑一次：`1955 passed, 8 skipped, 2 warnings in 604.41s`，退出码 0。
+    - 退出阶段崩溃只出现过 1 次、没复现、原因未查明，**不能断定和本次改动无关**，后续全量留意。两条警告都是既有的 Pillow `getdata()` 弃用提示。
+    - Git Bash 下记到的退出码 127 不可信（审查时原代码也是 127），本次改用 PowerShell 的 `$LASTEXITCODE`。
+  - `tools/check_private.py` 检查暂存区通过，`git diff --cached --check` 通过。基线 worktree 已先单独解除 junction、扫描确认无 reparse point 后移除。
 
 - **2026-11-01 合并 session-labels，替换 Shion-dev**：`git merge --ff-only feature/session-labels`，HEAD 由 `e5fee12` 快进到 `4ecaaaa`。worktree `..\shion-session-labels` 扫描无 reparse point（junction 已在上一任务解除）、无未提交改动（只有被忽略的 `build/` 和缓存），用 `git worktree remove`（未加 `--force`）移除，分支保留；主仓库 `.venv` 与 `assets/sprites/raw`（23 项）完好。打包沿用 `build/per-session-replacement-20261031/` 的脚本，只改目录名（证据在忽略目录 `build/session-labels-replacement-20261101/`）：依赖版本一致，不生成 ZIP，bundle_smoke 97 项通过，观察端 stdio 烟测与上次替换响应完全一致；新包 220 文件。替换器等用户退出旧诗音后原地替换，两次改名均一次成功，旧包 220 文件逐个核对后保留为 `D:\desktop\tools\Shion-dev-before-session-labels-20261101`，新目录 220 文件逐个核对一致；Codex/CC 配置哈希与任务开始时一致，存档 `v2_scheduler_enabled=false`、`claude_link_enabled=true` 未变，`Shion-1.0.0-win64.zip` 未变，没有强制结束进程。旧 exe `2c3f163b…81cd38`，新 exe `4834ed5a…55f458`。用户启动新版后只读核对：PID 365416 来自 `Shion-dev\Shion.exe`，同时监听 127.0.0.1:47613 和 47614，09:15:53 启动后日志 19 行、无 WARNING/ERROR；UserPromptSubmit 的日志行只有 `prompt None <会话 ID>`，没有提示词内容。未 push、未发布。
 

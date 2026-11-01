@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from shion.bridge import ServerBridge
 from shion.server import ShionServer
+from tests.link_support import auth
 from tests.test_controller import Env
 
 
@@ -43,7 +44,8 @@ class Rig:
 
     def request(self, method, path, body=None, raw=None):
         data = raw if raw is not None else (json.dumps(body).encode() if body is not None else b"")
-        req = urllib.request.Request(self.base + path, data=data if method == "POST" else None, method=method)
+        req = urllib.request.Request(self.base + path, data=data if method == "POST" else None, method=method,
+                                     headers=auth(self.server))
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
                 return r.status, json.loads(r.read())

@@ -97,3 +97,91 @@ def test_chatgpt_speech_lines_are_shion_voice_without_claude(lang):
         assert ui[key] and "ChatGPT" in ui[key] and "Claude" not in ui[key]
     # 菜单状态行和气泡分开：失联的菜单文字不是气泡台词
     assert ui["chatgpt_disconnected"] != ui["chatgpt_disconnected_say"]
+
+
+# ---------------------------------------------------------------- 状态能自己恢复（默认配置，不开调度器）
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def ui(key, **kwargs):
+    return key
+
+
+def connection(tmp_path):
+    from shion.tasks import TaskLedger
+    clock = Clock()
+    conn = ChatGPTConnection(tmp_path / "data", tmp_path / "codex")
+    conn.ledger = TaskLedger(clock=clock)
+    conn._started_at = clock()
+    return conn, clock
+
+
+def shown(conn):
+    return conn.status(ui).splitlines()[-1], conn.activity(ui)[1]
+
+
+def test_unobserved_start_is_shown_only_for_the_first_ttl(tmp_path):
+    conn, clock = connection(tmp_path)
+    assert shown(conn) == ("chatgpt_uncertain", "link_unknown_hint")
+    clock.now += conn.ledger.ttl - 1
+    assert shown(conn)[0] == "chatgpt_uncertain"
+    clock.now += 2
+    assert shown(conn) == ("chatgpt_observation", None)
+
+
+def test_global_uncertainty_is_shown_for_a_while_then_recovers(tmp_path):
+    from shion.chatgpt import UNKNOWN_WINDOW
+    conn, clock = connection(tmp_path)
+    clock.now += conn.ledger.ttl + 1  # 启动期已过
+    conn.ledger.accept(parse_observation({"event": "Stop", "session_id": "s"}))  # 缺 turn_id
+    assert conn.ledger.uncertain  # 调度器看到的仍是原来的粘滞标志
+    assert shown(conn) == ("chatgpt_uncertain", "link_unknown_hint")
+    clock.now += UNKNOWN_WINDOW + 1
+    assert shown(conn) == ("chatgpt_observation", None)
+    assert conn.ledger.uncertain  # 只改显示，不改调度器语义
+
+
+def test_disconnected_tasks_are_shown_for_a_while_then_recover(tmp_path):
+    from shion.chatgpt import UNKNOWN_WINDOW
+    conn, clock = connection(tmp_path)
+    clock.now += conn.ledger.ttl + 1
+    conn.ledger.accept(parse_observation({"event": "UserPromptSubmit", "session_id": "s", "turn_id": "t"}))
+    conn.ledger.disconnect(provider="chatgpt")
+    assert shown(conn) == ("chatgpt_disconnected", "link_lost_hint")
+    clock.now += UNKNOWN_WINDOW + 1
+    assert shown(conn) == ("chatgpt_observation", None)
+    assert conn.working == 0  # 断开的任务不会被算成还在工作，也不算成功
+
+
+def test_toggling_twice_does_not_leave_the_status_stuck(tmp_path):
+    from shion.chatgpt import UNKNOWN_WINDOW
+    conn, clock = connection(tmp_path)
+    clock.now += conn.ledger.ttl + 1
+    conn.toggle()
+    conn.toggle()
+    assert conn.enabled
+    assert shown(conn)[0] == "chatgpt_uncertain"
+    clock.now += UNKNOWN_WINDOW + 1
+    assert shown(conn) == ("chatgpt_observation", None)
+
+
+def test_one_degradation_disconnects_once_and_later_tasks_are_unaffected(tmp_path):
+    from types import SimpleNamespace
+    from shion.observer import ObservationInbox
+    conn, clock = connection(tmp_path)
+    clock.now += conn.ledger.ttl + 1
+    conn.server = SimpleNamespace(inbox=ObservationInbox("a" * 64))
+    conn.ledger.accept(parse_observation({"event": "UserPromptSubmit", "session_id": "old", "turn_id": "t"}))
+    old_key = next(iter(conn.ledger.tasks))
+    conn.server.inbox.degraded.set()
+    conn.poll()
+    assert not conn.server.inbox.degraded.is_set()
+    assert conn.ledger.tasks[old_key].state == "disconnected"
+    conn.ledger.accept(parse_observation({"event": "UserPromptSubmit", "session_id": "new", "turn_id": "t"}))
+    conn.poll()  # 降级已经算过一次：新任务不会被再次标成断开
+    assert conn.working == 1

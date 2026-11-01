@@ -12,6 +12,8 @@
 用户在 CC 里自己答了授权：同一会话的 PostToolUse / PostToolUseFailure（按工具名 + 参数配对）让诗音马上收起面板。
 ExitPlanMode 仅发送 plan_ready 提醒，不登记授权请求，计划确认始终由 CC 自己处理。
 反馈队列：PostToolUse（工作中）和 UserPromptSubmit（空闲时）把诗音里攒的反馈作为附加上下文送出。
+令牌：诗音绑定端口成功后才把令牌写进数据目录（shion/loopback.py）；读不到令牌就一个请求都不发，按诗音没开处理，
+这样端口被别的进程占住时不会把命令发给它，也不会采纳它的回答。
 """
 import hashlib
 import json
@@ -60,14 +62,36 @@ def shion_running():
         return None
 
 
+_token = None  # 本进程读到的令牌；读不到时每次请求前再试一次（诗音可能刚启动）
+
+
+def link_token(refresh: bool = False):
+    """数据目录里的令牌（见 shion/loopback.py），读不到返回 None。"""
+    global _token
+    if refresh or _token is None:
+        try:
+            if str(ROOT) not in sys.path:
+                sys.path.insert(0, str(ROOT))
+            from shion import loopback  # 只用标准库
+            _token = loopback.read_token()
+        except Exception:
+            _token = None
+    return _token
+
+
 def request(path: str, payload=None, timeout: float = TIMEOUT):
-    """成功返回解析后的 JSON，失败返回 None。连接阶段失败后熔断：之后的请求直接返回 None。"""
+    """成功返回解析后的 JSON，失败返回 None。连接阶段失败后熔断：之后的请求直接返回 None。
+    没有令牌时不连接、直接返回 None：不把内容发给可能占着端口的别的进程。"""
     global _down
     if _down:
+        return None
+    token = link_token()
+    if not token:
         return None
     try:
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(base_url() + path, data=data)
+        req.add_header("Authorization", "Bearer " + token)
         if data is not None:
             req.add_header("Content-Type", "application/json")
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 本机请求不走系统代理
@@ -82,14 +106,20 @@ def request(path: str, payload=None, timeout: float = TIMEOUT):
         return None  # 读超时、返回内容不对等：只算这一次失败
 
 
-def read_save() -> dict:
+def read_save_strict():
+    """存档内容；读不到、损坏或不是对象时返回 None（需要区分“读失败”时用，例如隐私模式）。"""
     try:
         directory = os.environ.get("SHION_DATA_DIR")
         path = (Path(directory) if directory else Path(os.environ["APPDATA"]) / "Shion") / "state.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        return data if isinstance(data, dict) else None
     except Exception:
-        return {}
+        return None
+
+
+def read_save() -> dict:
+    """存档内容；读失败按空存档（各项取默认）处理。"""
+    return read_save_strict() or {}
 
 
 def remote_setting(name: str, default: int, low: int, high: int) -> int:
@@ -318,9 +348,10 @@ def launch_shion() -> None:
 
 
 def probe_health():
-    """/health 探测。熔断不能挡住它：刚拉起诗音的几秒里要反复探测。"""
+    """/health 探测。熔断不能挡住它：刚拉起诗音的几秒里要反复探测；令牌也重新读（新启动的诗音换了令牌）。"""
     global _down
     _down = False
+    link_token(refresh=True)
     return request("/health")
 
 
@@ -414,7 +445,7 @@ def prompt_head(text) -> str:
 
 def session_meta(name: str, data: dict) -> dict:
     """事件里附带的会话信息：session_id、tool_use_id；prompt / PreToolUse 附带 CC 进程。
-    UserPromptSubmit 另带提示词开头 prompt_head（隐私模式下不发）。"""
+    UserPromptSubmit 另带提示词开头 prompt_head（隐私模式下不发；存档读不到时拿不准是不是隐私模式，也不发）。"""
     meta = {}
     for key, field in (("session", "session_id"), ("tool_id", "tool_use_id")):
         value = data.get(field)
@@ -423,7 +454,8 @@ def session_meta(name: str, data: dict) -> dict:
     project = project_name(data.get("cwd"))
     if project:
         meta["project"] = project
-    if name == "UserPromptSubmit" and read_save().get("privacy_mode") is not True:
+    save = read_save_strict() if name == "UserPromptSubmit" else None
+    if save is not None and save.get("privacy_mode") is not True:
         head = prompt_head(data.get("prompt"))
         if head:
             meta["prompt_head"] = head

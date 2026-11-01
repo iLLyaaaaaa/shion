@@ -15,6 +15,7 @@ from shion.sessions import SessionNames
 from shion.state import PetState, SaveData, _feedback_items
 from tests.test_controller import T0, env, find_action, qapp  # noqa: F401
 from tests.test_hook import HOOK, run_hook
+from tests.link_support import auth
 from tests.test_interrupt import CC, START, FakeView, ft
 from tests.test_stop_work import join
 
@@ -163,7 +164,8 @@ def server():
 
 
 def post(srv, path, payload):
-    req = urllib.request.Request(f"http://127.0.0.1:{srv.port}{path}", data=json.dumps(payload).encode())
+    req = urllib.request.Request(f"http://127.0.0.1:{srv.port}{path}", data=json.dumps(payload).encode(),
+                                 headers=auth(srv))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=5) as resp:
         return resp.status, json.loads(resp.read())
@@ -390,6 +392,53 @@ def test_interrupt_all_matches_old_behaviour(two):
     _, rem = remote(two)
     find_action(find_action(rem, "立即中断").menu(), "全部").trigger()
     assert sorted(two.world.killed) == [300, 310]
+
+
+def world_shared():
+    """A、B 共用一个宿主进程 pid 100（工具 300、301 都是它的子进程）；C 自己的进程 pid 110（工具 310）。"""
+    created = {100: CC.created, 110: CC.created,
+               300: ft(START + 0.2), 301: ft(START + 0.2), 310: ft(START + 0.2)}
+    table = {100: (1, "claude.exe"), 110: (1, "claude.exe"),
+             300: (100, "cmd.exe"), 301: (100, "cmd.exe"), 310: (110, "cmd.exe")}
+    return FakeView(table, created)
+
+
+@pytest.fixture
+def shared(env):  # noqa: F811
+    env.world = world_shared()
+    env.ctl.process_view = env.world.view()
+    env.ctl.hook_images = ()
+    work(env, "A", "alpha", 100)
+    work(env, "B", "beta", 100)
+    yield env
+    env.ctl.hub.resume()
+
+
+def test_interrupting_a_session_that_shares_its_process_only_stops_it(shared):
+    """共用进程时按进程结束会把 B 的工具也杀掉：改为只让 A 停下。"""
+    _, rem = remote(shared)
+    find_action(find_action(rem, "立即中断").menu(), "alpha").trigger()
+    hub = shared.ctl.hub
+    assert shared.world.killed == []
+    assert hub.is_session_paused("A") and not hub.is_session_paused("B")
+    assert not hub.interrupt_pending("A") and not hub.interrupt_pending("B")
+    assert sorted(shared.state.working_sessions(shared.now)) == ["A", "B"]
+
+
+def test_interrupting_every_session_on_a_shared_process_still_kills(shared):
+    _, rem = remote(shared)
+    find_action(find_action(rem, "立即中断").menu(), "全部").trigger()
+    assert sorted(shared.world.killed) == [300, 301]
+
+
+def test_partial_interrupt_kills_own_process_and_stops_the_shared_one(shared):
+    work(shared, "C", "gamma", 110)
+    shared.ctl.interrupt_work(only=["A", "C"])
+    hub = shared.ctl.hub
+    assert shared.world.killed == [310]  # 只有 C 自己的工具
+    assert hub.interrupt_pending("C") and not hub.interrupt_pending("A")
+    assert hub.is_session_paused("A") and not hub.is_session_paused("B")
+    assert sorted(shared.state.working_sessions(shared.now)) == ["A", "B"]
 
 
 def test_feedback_goes_only_to_the_chosen_session(two):

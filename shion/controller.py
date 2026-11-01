@@ -858,7 +858,8 @@ class PetController(QObject):
         if not self.hub.link_enabled:
             return
         now = self._now()
-        sessions = self.state.working_sessions(now)
+        working = self.state.working_sessions(now)
+        sessions = working
         scoped = only is not None
         if scoped:
             sessions = [s for s in sessions if s in set(only)]
@@ -867,11 +868,18 @@ class PetController(QObject):
             self.say(ui("interrupt_idle"), priority=Priority.MEDIUM, category="stop_requested")
             return
         self.react(self.state.interact(now))
+        # 没选中、但还在工作的会话用的 CC 进程：按进程结束会误杀它们的工具，这些会话只“停下”
+        others = {(p.pid, p.created) for s in working if s not in sessions
+                  for p in [self._procs.get(s)] if p is not None}
         done = []
+        shared = []
         killed_any = False
         for session in sessions:
             proc = self._procs.get(session)
             if proc is None:
+                continue
+            if (proc.pid, proc.created) in others:
+                shared.append(session)
                 continue
             starts = list(self._tool_wall.get(session, {}).values())
             try:
@@ -883,7 +891,7 @@ class PetController(QObject):
                 done.append(session)
                 killed_any |= bool(killed)
         if not done:
-            log.info("立即中断：没有找到对应的进程（会话 %s）", sessions)
+            log.info("立即中断：没有找到对应的进程，或进程和别的会话共用（会话 %s，共用 %s）", sessions, shared)
             self._speech.dismiss()
             self.say(ui("interrupt_no_process"), priority=Priority.MEDIUM, category="stop_requested")
             if scoped:
@@ -908,6 +916,14 @@ class PetController(QObject):
         if scoped:
             for s in done:
                 self.hub.resume(s)  # 只解除被中断的会话；在等的 hook 先看到中断标记，返回 stop
+            if shared:
+                # 和没选中的会话共用 CC 进程：不结束进程，退回“停下”
+                log.info("立即中断：会话 %s 和别的会话共用进程，改为停下", shared)
+                if not self.state.paused:
+                    self._held_said = self._held_seen = False
+                for s in shared:
+                    self.hub.pause(s)
+                self.state.paused = self.hub.is_paused
             if self.state.paused and not self.hub.is_paused:
                 self._leave_pause()
         elif self.state.paused and not self.state.working_sessions(now):

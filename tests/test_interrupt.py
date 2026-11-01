@@ -18,6 +18,7 @@ from shion.server import ShionServer, parse_meta
 from shion.state import Config, PetState, SaveData
 from tests.test_controller import T0, env, qapp, find_action  # noqa: F401
 from tests.test_hook import HOOK, run_hook
+from tests.link_support import auth_port, link_port
 from tests.test_stop_work import join, start_waiters
 
 INTERRUPTED = "已经中断啦，在 CC 里说一声就能继续"
@@ -140,7 +141,7 @@ def test_clear_interrupt():
 def _post(port, path, body):
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(), method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **auth_port(port)},
     )
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
@@ -618,6 +619,7 @@ def test_hook_timeout_reports_its_session(meta_env):
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
         "m.pause_limit = lambda: 1; sys.argv = ['x', 'PostToolUse']; m.main()"
     )
+    link_port(srv.port, tmp)
     r = subprocess.run([sys.executable, "-c", code], input=json.dumps({"session_id": "s1"}).encode(),
                        capture_output=True, timeout=20,
                        env={**os.environ, "SHION_PORT": str(srv.port), "SHION_DATA_DIR": str(tmp)})

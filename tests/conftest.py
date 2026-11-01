@@ -56,6 +56,34 @@ def isolated_user(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fresh_hook_token():
+    """hook 模块把令牌缓存在全局变量里；每个测试开始前清掉，免得带上一个测试的服务端令牌。"""
+    import sys
+    for module in list(sys.modules.values()):
+        if getattr(module, "__file__", None) and str(module.__file__).endswith("shion_hook.py"):
+            module._token = None
+    yield
+
+
+@pytest.fixture(autouse=True)
+def register_server_tokens(monkeypatch):
+    """测试里直接起的 ShionServer：启动后按端口登记令牌，并写进当前 SHION_DATA_DIR（见 tests/link_support.py）。"""
+    from shion import server as server_mod
+    from tests import link_support
+    link_support.TOKENS.clear()
+    original = server_mod.ShionServer.start
+
+    def start(self):
+        original(self)
+        link_support.TOKENS[self.port] = self.token
+        link_support.link(self)
+
+    monkeypatch.setattr(server_mod.ShionServer, "start", start)
+    yield
+    link_support.TOKENS.clear()
+
+
+@pytest.fixture(autouse=True)
 def no_real_launch(monkeypatch):
     """任何测试都不能真的拉起诗音 GUI；要检查启动参数的测试自己再替换 _popen。"""
     from shion import launcher

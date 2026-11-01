@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from shion.loopback import write_token
+
 from shion import launcher
 
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "shion_hook.py"
@@ -200,6 +202,7 @@ def test_safety_invariants_when_shion_is_unavailable(monkeypatch, scenario):
     monkeypatch.setattr(h, "find_cc_process", lambda *a, **k: None)
     monkeypatch.setattr(h, "pause_limit", lambda: 60)
     monkeypatch.setattr(h, "permission_limit", lambda: 10)
+    write_token(Path(os.environ["SHION_DATA_DIR"]), "a" * 64)  # 有令牌：真的去连，走连接失败 / 熔断分支
     if scenario == "not_running":
         monkeypatch.setattr(h, "shion_running", lambda: False)
     else:
@@ -226,6 +229,7 @@ def test_connection_failure_trips_breaker_and_later_requests_skip_the_network(mo
             raise urllib.error.URLError(ConnectionRefusedError())
 
     monkeypatch.setattr(h.urllib.request, "build_opener", lambda *a: Opener())
+    write_token(Path(os.environ["SHION_DATA_DIR"]), "a" * 64)
     assert h.request("/event", {}) is None and h._down is True
     assert h.request("/event", {}) is None and h.request("/pause/wait", {"wait": 0}) is None
     assert len(attempts) == 1

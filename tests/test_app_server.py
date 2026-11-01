@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -39,9 +40,13 @@ def start(tmp_path, port, name):
     return proc, data / "shion.log"
 
 
-def http(port, method, path, body=None):
+def http(port, method, path, body=None, data_dir=None):
+    """带上诗音写进 data_dir 的令牌（没有令牌就不带，服务端应回 403）。"""
+    from shion.loopback import read_token
     data = json.dumps(body).encode() if body is not None else (b"" if method == "POST" else None)
-    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method=method)
+    token = read_token(data_dir) if data_dir is not None else None
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=3) as r:
         return json.loads(r.read())
 
@@ -71,7 +76,12 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
     try:
         p1, log1 = start(tmp_path, port, "a")
         procs.append(p1)
-        assert wait_for(lambda: http(port, "GET", "/health") == {"ok": True}), log_text(log1)
+        data1 = log1.parent
+        assert wait_for(lambda: http(port, "GET", "/health", data_dir=data1) == {"ok": True}), log_text(log1)
+        # 不带令牌：403（正式启动路径在绑定成功后写令牌，只有读得到它的 hook 能连）
+        with pytest.raises(urllib.error.HTTPError) as denied:
+            http(port, "POST", "/event", {"type": "working"})
+        assert denied.value.code == 403
 
         from shion.lines import Lines
 
@@ -84,11 +94,11 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
         saved = json.loads(state_path.read_text(encoding="utf-8"))
         assert saved["affection_level"] == 1 and saved["affection_daily"]["open"] == 1
 
-        assert http(port, "POST", "/event", {"type": "working"}) == {"ok": True}
+        assert http(port, "POST", "/event", {"type": "working"}, data1) == {"ok": True}
         assert wait_for(lambda: "→ working" in log_text(log1)), log_text(log1)
-        http(port, "POST", "/event", {"type": "stop"})
+        http(port, "POST", "/event", {"type": "stop"}, data1)
         assert wait_for(lambda: "→ done" in log_text(log1)), log_text(log1)
-        assert http(port, "POST", "/feedback/take", {}) == {"text": ""}
+        assert http(port, "POST", "/feedback/take", {}, data1) == {"text": ""}
 
         # 第二个实例（实例名不同）抢同一个端口：不崩溃，日志里有提示
         p2, log2 = start(tmp_path, port, "b")
@@ -97,6 +107,9 @@ def test_real_app_reacts_to_http_event_and_survives_port_conflict(tmp_path):
         time.sleep(1.0)
         assert p2.poll() is None  # 还活着
         assert p1.poll() is None
+        from shion.loopback import read_token
+        assert read_token(log2.parent) is None  # 没绑上端口：不写令牌，hook 不会去连占端口的进程
+        assert read_token(data1) is not None
     finally:
         for p in procs:
             p.kill()

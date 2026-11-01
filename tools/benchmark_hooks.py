@@ -35,6 +35,7 @@ def main() -> None:
                "SHION_PORT": str(mock.server.server_port)}
         drive, tail = os.path.splitdrive(directory)
         env.update(HOMEDRIVE=drive, HOMEPATH=tail)
+        mock.link(home / "Shion")  # hook 读到令牌才会发请求
         for i in range(RUNS):
             # 交替谁先跑，所有 20 次都计入，不丢弃首轮或预热。
             for name in (("exe", "venv") if i % 2 == 0 else ("venv", "exe")):

@@ -113,6 +113,10 @@ def test_hook_sends_prompt_head_only_on_prompt(tmp_path, monkeypatch):
     monkeypatch.setenv("SHION_DATA_DIR", str(tmp_path))
     data = {"session_id": "s1", "cwd": r"D:\w\proj", "prompt": "修一下菜单"}
     monkeypatch.setattr(h, "find_cc_process", lambda: None)
+    assert "prompt_head" not in h.session_meta("UserPromptSubmit", data)  # 还没有存档：拿不准是不是隐私模式，不发
+    (tmp_path / "state.json").write_text("{坏的", encoding="utf-8")
+    assert "prompt_head" not in h.session_meta("UserPromptSubmit", data)  # 存档损坏：同上
+    (tmp_path / "state.json").write_text(json.dumps({"privacy_mode": False}), encoding="utf-8")
     assert h.session_meta("UserPromptSubmit", data)["prompt_head"] == "修一下菜单"
     assert "prompt_head" not in h.session_meta("PreToolUse", data)
     (tmp_path / "state.json").write_text(json.dumps({"privacy_mode": True}), encoding="utf-8")
@@ -122,6 +126,7 @@ def test_hook_sends_prompt_head_only_on_prompt(tmp_path, monkeypatch):
 def test_hook_to_server_end_to_end(server, tmp_path):  # noqa: F811
     srv, events, _ = server
     stdin = json.dumps({"session_id": "s9", "cwd": r"D:\work\alpha", "prompt": "第一句\n话"}).encode()
+    (tmp_path / "state.json").write_text("{}", encoding="utf-8")  # 正常存档、没开隐私模式
     r = run_hook("UserPromptSubmit", srv.port, tmp_path, stdin=stdin)
     assert r.returncode == 0 and r.stderr == b""
     assert events[0][0] == "prompt" and events[0][2]["prompt_head"] == "第一句 话"
@@ -219,6 +224,7 @@ def test_server_does_not_log_prompt_head(server, caplog, tmp_path):  # noqa: F81
     srv, events, _ = server
     caplog.set_level(logging.DEBUG)
     stdin = json.dumps({"session_id": "s1", "cwd": r"D:\w\proj", "prompt": SECRET}).encode()
+    (tmp_path / "state.json").write_text("{}", encoding="utf-8")
     run_hook("UserPromptSubmit", srv.port, tmp_path, stdin=stdin)
     assert events and events[0][2]["prompt_head"] == SECRET
     assert SECRET[:6] not in caplog.text

@@ -9,6 +9,7 @@ import pytest
 from shion.bubble import BubbleTimeline
 from shion.remote import MAX_WAIT, RemoteHub
 from shion.server import ShionServer
+from tests.link_support import auth
 from shion.speech import Priority, SpeechGate
 from tests.test_controller import env, qapp, find_action  # noqa: F401
 
@@ -39,7 +40,8 @@ def test_hub_wait_is_clamped():
 # ---------------------------------------------------------------- HTTP 接口
 def post(srv, path, body=None):
     req = urllib.request.Request(
-        f"http://127.0.0.1:{srv.port}{path}", data=json.dumps(body or {}).encode(), method="POST"
+        f"http://127.0.0.1:{srv.port}{path}", data=json.dumps(body or {}).encode(), method="POST",
+        headers=auth(srv),
     )
     with urllib.request.urlopen(req, timeout=10) as r:
         return r.status, json.loads(r.read())
@@ -100,7 +102,7 @@ def test_pause_wait_rejects_web_origin(server):
     hub.pause()
     req = urllib.request.Request(
         f"http://127.0.0.1:{srv.port}/pause/wait", data=b"{}", method="POST",
-        headers={"Origin": "http://evil.example"},
+        headers={"Origin": "http://evil.example", **auth(srv)},
     )
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=5)

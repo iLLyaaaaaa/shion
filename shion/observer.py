@@ -97,11 +97,23 @@ class _Handler(BaseHTTPRequestHandler):
             pass
 
 
+class _ExclusiveHTTPServer(HTTPServer):
+    """No SO_REUSEADDR; on Windows SO_EXCLUSIVEADDRUSE so nobody can rebind and steal connections."""
+    allow_reuse_address = False
+
+    def server_bind(self):
+        from .loopback import bind_exclusive
+        bind_exclusive(self.socket, self.server_address)
+        self.server_address = self.socket.getsockname()
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = host, port
+
+
 class ObservationServer:
     def __init__(self, token, port=47614):
         self.inbox = ObservationInbox(token)
         # One worker, bounded listen backlog, bounded body and read timeout.
-        self.server = HTTPServer(("127.0.0.1", port), _Handler)
+        self.server = _ExclusiveHTTPServer(("127.0.0.1", port), _Handler)
         self.server.inbox = self.inbox
         self.thread = threading.Thread(target=self.server.serve_forever,
                                        kwargs={"poll_interval": 0.1}, daemon=True)

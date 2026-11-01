@@ -15,6 +15,10 @@ from tools import codex_config as config
 
 log = logging.getLogger("shion.chatgpt")
 
+# 菜单/状态里“待确认、已断开”最多显示这么久（秒，两倍于任务过期时间）。只是不再显示，
+# 不推断旧任务成功；调度器用的仍是 ledger 原来的粘滞标志。
+UNKNOWN_WINDOW = 600.0
+
 
 def log_observation(event):
     """Only validated metadata; logging failure must not interrupt observation."""
@@ -44,7 +48,9 @@ class ChatGPTConnection:
         self.error = False
         self.enabled = True
         self._last_notice = 0.0
+        # 启动前可能已有没看到开头的任务：启动后 ledger.ttl 秒内显示“待确认”（那之后这类任务也已过期）
         self._unobserved_start = True
+        self._started_at = self.ledger.clock()
         self._disconnected_keys = set()
         self._disconnect_notice_pending = False
 
@@ -112,6 +118,8 @@ class ChatGPTConnection:
                     if result:
                         notices.append(result)
             if core is None and self.server.inbox.degraded.is_set():
+                # 一次降级只算一次：标记当时的任务为断开，然后清掉，之后的新任务不受牵连
+                self.server.inbox.degraded.clear()
                 self.ledger.disconnect(provider="chatgpt")
         self.ledger.expire()
         lost = {key for key, task in self.ledger.tasks.items()
@@ -130,13 +138,28 @@ class ChatGPTConnection:
             return "chatgpt_interrupted" if "interrupted" in notices else "chatgpt_ended"
         return None
 
+    def _shown_lost(self, tasks) -> bool:
+        """最近 UNKNOWN_WINDOW 秒内有过动静、现在断开的任务（更早的不再显示为断开）。"""
+        now = self.ledger.clock()
+        return any(t.state == "disconnected" and now - t.last < UNKNOWN_WINDOW for t in tasks)
+
+    def _shown_unknown(self, tasks) -> bool:
+        """是否显示“待确认”。只看最近的不确定：全局标志、不确定任务都有时效，启动时的“没看到开头”只算 ttl 秒。"""
+        now = self.ledger.clock()
+        at = self.ledger.uncertain_at
+        return bool(
+            self.error
+            or (self.ledger.uncertain and at is not None and now - at < UNKNOWN_WINDOW)
+            or any(t.state == "uncertain" and now - t.last < UNKNOWN_WINDOW for t in tasks)
+            or (self._unobserved_start and now - self._started_at < self.ledger.ttl))
+
     def status(self, ui):
         if not self.enabled:
             return ui("chatgpt_disabled")
         tasks = [t for k, t in self.ledger.tasks.items() if k[0] == "chatgpt"]
         text = ui("chatgpt_status", count=self.working, received=self.ledger.received_by_provider.get("chatgpt", 0)) + "\n" + ui(
-            "chatgpt_disconnected" if any(t.state == "disconnected" for t in tasks) else
-            "chatgpt_uncertain" if self.error or self.ledger.uncertain or any(t.state == "uncertain" for t in tasks) or self._unobserved_start else "chatgpt_observation")
+            "chatgpt_disconnected" if self._shown_lost(tasks) else
+            "chatgpt_uncertain" if self._shown_unknown(tasks) else "chatgpt_observation")
         if any(t.permission_unknown and not t.terminal for t in tasks):
             text += "\n" + ui("chatgpt_permission_unknown")
         return text
@@ -156,9 +179,9 @@ class ChatGPTConnection:
             return ui("activity_link_none"), None
         tasks = [t for k, t in self.ledger.tasks.items() if k[0] == "chatgpt"]
         rounds = ui("activity_link_rounds", count=self.working)
-        if any(t.state == "disconnected" for t in tasks):
+        if self._shown_lost(tasks):
             return ui("activity_link_unknown", rounds=rounds), ui("link_lost_hint")
-        if self.error or self.ledger.uncertain or any(t.state == "uncertain" for t in tasks) or self._unobserved_start:
+        if self._shown_unknown(tasks):
             return ui("activity_link_unknown", rounds=rounds), ui("link_unknown_hint")
         return rounds, None
 

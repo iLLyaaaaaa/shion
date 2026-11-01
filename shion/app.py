@@ -26,7 +26,7 @@ from shion.effects import HeartOverlay
 from shion.lines import Lines, available_languages, resolve_language
 from shion.remote import RemoteHub
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
-from shion.server import DEFAULT_PORT, ShionServer
+from shion.server import DEFAULT_PORT, ShionServer, start_linked, stop_linked
 from shion.speech import Priority
 
 log = logging.getLogger("shion")
@@ -195,13 +195,9 @@ def run() -> int:
     bridge = ServerBridge(controller, parent=app)
     port = int(os.environ.get("SHION_PORT") or DEFAULT_PORT)
     server = ShionServer(bridge.on_event, bridge.on_take_feedback, port=port, hub=hub)
-    server_ok = True
-    try:
-        server.start()
-    except OSError as e:
-        server_ok = False
-        log.warning("HTTP 服务启动失败（端口 %s 被占用？）：%s", port, e)
-    app.aboutToQuit.connect(server.stop)  # 先停服务，再写存档
+    # 绑定成功才写令牌；端口被占时不写，hook 就不会去连占着端口的进程
+    server_ok = start_linked(server, directory)
+    app.aboutToQuit.connect(lambda: stop_linked(server, directory))  # 先删令牌、停服务，再写存档
     app.aboutToQuit.connect(scheduler.flush)
 
     controller.restore_position()

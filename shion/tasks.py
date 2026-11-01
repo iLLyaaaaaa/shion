@@ -39,12 +39,24 @@ class TaskLedger:
     def __init__(self, clock=time.monotonic, capacity=1024, ttl=300, lease_ttl=OBSERVER_LEASE):
         self.clock, self.capacity, self.ttl = clock, capacity, ttl
         self.tasks = OrderedDict()
-        self.uncertain = False
+        self._uncertain = False
+        self.uncertain_at: float | None = None  # Last time uncertainty was raised (display recency only).
         self.received = 0
         self.received_by_provider = {}
         self.duplicates = 0
         self.lease_ttl = lease_ttl
         self.leases: dict[str, ObserverLease] = {}
+
+    @property
+    def uncertain(self) -> bool:
+        """Sticky global flag, unchanged semantics for the opt-in scheduler."""
+        return self._uncertain
+
+    @uncertain.setter
+    def uncertain(self, value: bool) -> None:
+        self._uncertain = bool(value)
+        if value:
+            self.uncertain_at = self.clock()
 
     def heartbeat(self, pulse: ObserverHeartbeat):
         self.expire()

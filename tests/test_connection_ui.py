@@ -226,7 +226,7 @@ def test_source_startup_command_runs_from_unrelated_workdir(tmp_path):
     proc = subprocess.Popen(launch_args(), cwd=tmp_path, env=child_env,
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        assert wait_for(lambda: http(port, "GET", "/health") == {"ok": True}), log_text(data / "shion.log")
+        assert wait_for(lambda: http(port, "GET", "/health", data_dir=data) == {"ok": True}), log_text(data / "shion.log")
         assert proc.poll() is None
     finally:
         proc.kill()

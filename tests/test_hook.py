@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from shion.remote import RemoteHub
+from shion.loopback import write_token
 from shion.server import ShionServer
+from tests.link_support import link, link_port
 
 HOOK = Path(__file__).resolve().parent.parent / "hooks" / "shion_hook.py"
 PRAISE_LINE = "[诗音] 用户觉得你刚才做得很好。"
@@ -26,12 +28,15 @@ def env(tmp_path):
     hub = RemoteHub()
     srv = ShionServer(lambda t, d, m=None: events.append((t, d)), take, port=0, hub=hub)
     srv.start()
+    link(srv, tmp_path)  # hook 子进程读这里
+    link(srv)  # 进程内 hook 读当前 SHION_DATA_DIR
     yield srv, events, state, tmp_path
     hub.resume()
     srv.stop()
 
 
 def run_hook(name, port, data_dir, stdin=b"{}"):
+    link_port(port, data_dir)  # 测试服务端的令牌（目录里已有令牌时不覆盖）
     e = {**os.environ, "SHION_PORT": str(port), "SHION_DATA_DIR": str(data_dir)}
     return subprocess.run(
         [sys.executable, str(HOOK), name], input=stdin, capture_output=True, env=e, timeout=20
@@ -164,6 +169,7 @@ def test_post_tool_use_delivers_feedback_as_additional_context(env):
 
 
 def test_feedback_hooks_are_silent_when_shion_is_not_running(tmp_path):
+    write_token(tmp_path, "a" * 64)  # 有令牌也连不上：走连接失败分支
     for name in ("PostToolUse", "UserPromptSubmit"):
         r = run_hook(name, 1, tmp_path)  # 端口 1：连不上
         assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
@@ -178,6 +184,7 @@ def test_pre_tool_use_passes_straight_through_when_not_paused(env):
 
 
 def test_pre_tool_use_passes_when_shion_is_not_running(tmp_path):
+    write_token(tmp_path, "a" * 64)
     t0 = time.monotonic()
     r = run_hook("PreToolUse", 1, tmp_path)
     assert r.returncode == 0 and r.stdout == b"" and r.stderr == b""
@@ -272,6 +279,7 @@ def test_launch_sets_source_only_on_child_environment(monkeypatch):
 
 
 def test_server_down_is_silent_and_fast(tmp_path):
+    write_token(tmp_path, "a" * 64)
     for name in ("PreToolUse", "Stop", "Notification", "UserPromptSubmit"):
         t0 = time.monotonic()
         r = run_hook(name, 1, tmp_path)  # 端口 1：连不上
@@ -306,6 +314,7 @@ def test_session_start_launches_when_down(monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     monkeypatch.setenv("SHION_PORT", "1")
+    write_token(Path(os.environ["SHION_DATA_DIR"]), "a" * 64)  # 探测要真的去连
     launched = []
     monkeypatch.setattr(mod, "launch_shion", lambda: launched.append(1))
     monkeypatch.setattr(mod.time, "sleep", lambda s: None)
@@ -321,6 +330,7 @@ def test_hanging_server_returns_quickly(tmp_path):
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     s.listen(5)  # 接受连接但永远不回包
+    write_token(tmp_path, "a" * 64)
     try:
         t0 = time.monotonic()
         r = run_hook("Stop", s.getsockname()[1], tmp_path)

@@ -14,6 +14,7 @@ from shion.remote import HOLD_GRACE, RemoteHub
 from shion.server import ShionServer
 from tests.test_controller import env, qapp, find_action  # noqa: F401
 from tests.test_hook import HOOK, PRAISE_LINE, run_hook
+from tests.link_support import auth_port, link_port
 from tests.test_hook import env as hook_env  # noqa: F401
 
 STOP_REQUESTED = "好，马上停～"
@@ -92,7 +93,7 @@ def test_is_holding_has_short_grace_between_polls():
 def _post(port, path, body):
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(), method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **auth_port(port)},
     )
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
@@ -168,6 +169,7 @@ def run_hook_main(server, tmp, name, limit):
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
         f"m.pause_limit = lambda: {limit}; sys.argv = ['x', {name!r}]; m.main()"
     )
+    link_port(server.port, tmp)
     return subprocess.run(
         [sys.executable, "-c", code], input=b"{}", capture_output=True, timeout=20,
         env={**os.environ, "SHION_PORT": str(server.port), "SHION_DATA_DIR": str(tmp)},
