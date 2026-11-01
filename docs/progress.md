@@ -7,7 +7,7 @@
 - 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修、调度 GUI 审查修复、菜单 Claude Code 标名和 v2.0.0 发布前安全修复均已合并。2026-11-01 已替换本机 Shion-dev 开发预览包（安全修复版）；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
 - 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 更新为菜单标名开发包（替换记录核验 228 文件）。替换记录确认配置哈希未变，旧包保留为 `Shion-dev-before-menu-label-20261030`；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
-- 最近一次全量为 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
+- 最近一次全量为 2026-11-01 v2.0.0 发布准备：`--basetemp=.venv/preview-run/release-prep`，结果 `1 failed, 2040 passed, 8 skipped, 2 warnings in 607.48s (0:10:07)`。唯一失败是 `test_real_process_tree_is_terminated`，满载时出现，单独跑能通过，详见下方 2026-11-01 记录。更早一次全量通过是 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
 - 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
 - 分支 `feature/menu-parity`（从 `dc9fe3d` 派生）：右键菜单 Claude Code / ChatGPT 连接管理对齐，并新增 Claude 的“临时关闭联动”。未合并、未部署、未 push；本分支全量结果见下方 2026-10-30 记录。
 - 分支 `feature/remove-codex-autolaunch`（从 `fad0e3a` 派生）：删除 Codex 新开会话自动拉起诗音，保留 Claude 拉起、单实例互斥锁和 Codex 窗口层级跟随。未合并、未 push，详见下方 2026-10-31 记录。
@@ -16,6 +16,7 @@
 - 分支 `feature/session-labels`（从 `e5fee12` 派生）：同一项目多个会话时，工作遥控菜单和检查点面板用各会话的第一句话摘要区分。2026-11-01 已快进合并到当前分支（`4ecaaaa`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-11-01 记录。
 - 2026-11-01 本机 Shion-dev 先替换为 `4ecaaaa` 的开发包（旧包 `Shion-dev-before-session-labels-20261101`），同日再替换为 `b016547` 的安全修复开发包（220 文件），旧包保留为 `Shion-dev-before-security-20261101`。
 - 分支 `feature/v2-security-fixes`（从 `1500086` 派生）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题和复审第二轮（hook ↔ 服务端令牌、令牌绑定诗音进程、独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。2026-11-01 已快进合并到当前分支（`f8ec0a6`），之后追加 bundle_smoke 修正 `b016547`；worktree 已移除，分支保留、未 push，详见下方 2026-11-01 记录。
+- 2026-11-01 v2.0.0 发布准备（当前分支本地提交，未合并 master、未打包、未 push）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -40,10 +41,12 @@
 ## 正在进行的阶段与下一步
 
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
-- `feature/menu-parity` 待用户审核、真机验收后决定是否合并到当前分支。
-- `feature/remove-codex-autolaunch` 待用户审核后合并到当前分支；Codex 自动拉起相关验收项已取消。
-- `feature/remove-face`、`feature/per-session-remote` 已合并并部署，真机验收按下方清单在日常试用中进行。
-- 下一步由用户审核开发分支及下方清单，再安排真实客户端适配与 GUI 人工验收；部署、打包、用户开关开放、真实配置写入与发布须有对应授权。本任务不推进这些步骤。
+- **下一步（v2.0.0 发布）**，按顺序、每步需用户授权：
+  1. 合并当前分支到 `master`；
+  2. `tools/build.py` 打包 `dist/Shion-2.0.0-win64.zip`；
+  3. 发布前专测：立即中断后工具进程是否结束（含按会话中断）、Codex 配置断开再重连、干净环境解压运行；
+  4. 用户确认后推送并发布（发布说明草稿 `build/release-notes-2.0.0.md`）。
+- 更正（2026-11-01 核对 `git branch --merged`）：`feature/menu-parity`、`feature/remove-codex-autolaunch` 均已在当前分支历史里，上方“未合并”的描述已过时；`feature/remove-face`、`feature/per-session-remote` 已合并并部署，真机验收按下方清单在日常试用中进行。
 - 普通用户开关开放前，先处理下方全局 `ledger.uncertain` 恢复遗留；不得用心跳、重复包或新 turn 结束推断旧任务成功。真实身份、前台绑定、coverage 和人工权限能力必须各自有证据。（更正 2026-11-01：这个粘滞标志原先也让默认配置下的 ChatGPT 菜单“活动”一直显示“待确认”，不只影响调度器；`feature/v2-security-fixes` 已给显示层加时效，调度器语义仍是遗留。）
 - `feature/v2-security-fixes` 已合并并部署到 Shion-dev；bundle_smoke（99 项）和隔离实例验证已通过，剩余真机项按下方清单在日常使用中验收。
 
@@ -99,6 +102,13 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-01 v2.0.0 发布准备**（只改版本号、文档、截图，没改功能代码；没合并 master、没打包、没 push）：
+  - **版本号**：`shion/__init__.py` 改为 `2.0.0`。关于页、`QApplication` 版本、snapshot 标题、exe 版本资源（`tools/build.py` → `Shion.spec`）、ZIP 文件名都从这里读取。同步修改了测试里写死的地方（`test_release.py` 的 QApplication 版本、ZIP 名和 `fileVersionMS == 2 << 16`，以及 `test_windowing.py`），还有 spec.md 两处、三语 README 的下载文件名。`shion/codex_mcp.py` 里 `serverInfo.version "1.0.0"` 是 `shion_lifecycle_v1` 协议的版本，有意保留。
+  - **README 三语**：结构不变，新增“ChatGPT（Codex）只读观察”“连接 ChatGPT（Codex）”“已知限制”三节。多会话选择、临时关闭联动、诗音没开时不拖慢 CC、Codex 窗口层级跟随写进功能；菜单路径改成“AI 连接 › Claude Code / ChatGPT › …”；隐私节补上一次性令牌与独占端口，以及第一句话摘要只在内存（隐私模式下不发送）。商标声明补上 OpenAI。
+  - **截图**：原有 7 张用 `tools/make_media.py` 重新生成后像素完全一致（`permission.en.png` 只差 PNG 编码字节），没有替换。新增 6 张菜单截图 `docs/images/menu-ai.{zh,en,ja}.png`（AI 连接 › Claude Code）和 `menu-sessions.{lang}.png`（工作遥控 › 停下 › 按会话），由 `tools/render_menu.py` 渲染（scale 1.5，20～52 KB）。工具里的合成项目名改为虚构的 `my-app` / `notes`，第一句话改为虚构英文。菜单树 json 已检查，没有路径或用户名。
+  - **发布说明**：`build/release-notes-2.0.0.md`（忽略目录、不入库），英中日三语。
+  - **坑**：`rg 1\.0\.0` 搜不到 `test_release.py` 里以 `1 << 16` 写死的主版本号，第 1 次全量才暴露（日志 `build/release-prep-pytest-attempt1.log`）。修正后第 2、3 次全量都是 `1 failed, 2040 passed, 8 skipped, 2 warnings`（第 3 次 `in 607.48s (0:10:07)`，日志 `build/release-prep-pytest.log`；第 2 次 `-attempt2.log`），唯一失败是 `test_interrupt.py::test_real_process_tree_is_terminated`：`killed` 里只有 1 个 pid，没有直接子进程。单独跑这个测试 5/5 通过，整个 `test_interrupt.py` 3/3 通过（84 passed）；本次 `shion/` 只改了版本号字符串，没碰中断代码。推测是满载时的时序竞争：`.venv\Scripts\python.exe` 是转发器，子进程（转发器）在真正的 python 被结束后自己退出，`TerminateProcess` 就返回失败，曾孙进程也可能还没创建。**未修复、未确认根因**；这个用例对应发布前专测的“立即中断后工具进程是否结束”，专测时要实机确认。`make_media.py --output-dir` 指到 C 盘会因 `relpath` 跨盘报错，应输出到仓库内的 `build/`。
 
 - **2026-11-01 合并安全修复、隔离验证并替换 Shion-dev**（证据在忽略目录 `build/security-replacement-20261101/`）：
   - **合并**：`git merge --ff-only feature/v2-security-fixes`，HEAD 由 `1500086` 快进到 `f8ec0a6`。worktree `..\shion-security-fixes` 扫描无 reparse point（junction 已在上一任务解除）、无未提交改动（只有被忽略的 `build/` 和缓存），用 `git worktree remove`（未加 `--force`）移除，分支保留；主仓库 `.venv` 与 `assets/sprites/raw`（23 项）完好。

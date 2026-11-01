@@ -29,11 +29,11 @@ SCENARIOS = {
     "two_sessions": ("connected", "", False, False, 2),
     "same_project": ("connected", "", False, False, 2),
 }
-PROJECTS = ("shion-pet", "docs-site")  # 合成的项目文件夹名
+PROJECTS = ("my-app", "notes")  # 合成的项目文件夹名
 # 场景 → 合成会话的 (文件夹名, 第一句话)；没列出的场景用 PROJECTS、不发第一句话
 SESSION_SPECS = {
-    "same_project": (("shion-pet", "把菜单截断的问题修一下，顺便补测试"),
-                     ("shion-pet", "Write the README section about hooks")),
+    "same_project": (("my-app", "Fix the login form validation"),
+                     ("my-app", "Add dark mode to settings")),
 }
 PAYLOAD = ("shion", "assets", "tools", "hooks")
 
