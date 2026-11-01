@@ -389,13 +389,31 @@ def test_read_link_rejects_missing_or_bad_owner_fields(tmp_path, record):
     assert loopback.read_link(tmp_path) is None
 
 
-@pytest.mark.skipif(not WINDOWS, reason="junction 只在 Windows")
-def test_token_works_under_a_junctioned_parent_directory(tmp_path):
+@pytest.fixture
+def junction():
+    """建 junction 的工具；测试结束时只解除链接（os.rmdir 不碰目标），不在 build/ 里留下重解析点。"""
     import _winapi
+    import os
+    made = []
+
+    def make(target, link):
+        _winapi.CreateJunction(str(target), str(link))
+        made.append(link)
+
+    yield make
+    for link in reversed(made):
+        try:
+            os.rmdir(link)
+        except OSError:
+            pass
+
+
+@pytest.mark.skipif(not WINDOWS, reason="junction 只在 Windows")
+def test_token_works_under_a_junctioned_parent_directory(tmp_path, junction):
     from shion import loopback
     real = tmp_path / "real-profile"
     real.mkdir()
-    _winapi.CreateJunction(str(real), str(tmp_path / "moved-profile"))
+    junction(real, tmp_path / "moved-profile")
     directory = tmp_path / "moved-profile" / "AppData" / "Shion"  # 上级目录是 junction（搬过家的用户目录）
     loopback.write_token(directory, "d" * 64)
     assert loopback.read_link(directory) == "d" * 64
@@ -404,18 +422,17 @@ def test_token_works_under_a_junctioned_parent_directory(tmp_path):
 
 
 @pytest.mark.skipif(not WINDOWS, reason="junction 只在 Windows")
-def test_token_refuses_when_the_shion_directory_or_file_is_a_reparse_point(tmp_path):
-    import _winapi
+def test_token_refuses_when_the_shion_directory_or_file_is_a_reparse_point(tmp_path, junction):
     from shion import loopback
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    _winapi.CreateJunction(str(elsewhere), str(tmp_path / "Shion"))
+    junction(elsewhere, tmp_path / "Shion")
     with pytest.raises(ValueError):
         loopback.write_token(tmp_path / "Shion", "e" * 64)
     assert loopback.read_link(tmp_path / "Shion") is None
     data = tmp_path / "data"
     data.mkdir()
-    _winapi.CreateJunction(str(elsewhere), str(loopback.token_path(data)))  # 令牌文件位置本身是重解析点
+    junction(elsewhere, loopback.token_path(data))  # 令牌文件位置本身是重解析点
     with pytest.raises(ValueError):
         loopback.write_token(data, "e" * 64)
     assert loopback.read_link(data) is None
