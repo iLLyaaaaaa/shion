@@ -118,6 +118,7 @@ def connection(tmp_path):
     conn = ChatGPTConnection(tmp_path / "data", tmp_path / "codex")
     conn.ledger = TaskLedger(clock=clock)
     conn._started_at = clock()
+    conn.connection_state = lambda: "installed"  # 未安装时活动行固定是“—”，这里测的是已安装后的显示时效
     return conn, clock
 
 

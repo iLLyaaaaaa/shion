@@ -234,13 +234,47 @@ def test_chatgpt_status_line_and_submenu_only_when_present(env, tmp_path, lang):
     chatgpt_line = top[6]
     full = ctl.chatgpt.status(ui)
     assert not chatgpt_line.isEnabled() and full in chatgpt_line.toolTip()  # 原来的多行全文仍在 tooltip
-    activity, _ = ctl.chatgpt.activity(ui)
-    expected = ui("menu_link_status", name=ui("menu_chatgpt"), state=ui("link_state_not_installed"), activity=activity)
+    assert ctl.chatgpt.connection_state() == "not_installed"
+    expected = ui("menu_link_status_bare", name=ui("menu_chatgpt"), state=ui("link_state_not_installed"))
+    # 未安装：只有“ChatGPT：未安装”，没有活动轮次和“待确认”
     assert chatgpt_line.text() in (expected, menu.fontMetrics().elidedText(expected, Qt.ElideRight, 240))
+    assert ui("activity_link_rounds", count=0) not in chatgpt_line.text()
     assert "\n" not in chatgpt_line.text() and menu.fontMetrics().horizontalAdvance(chatgpt_line.text()) <= 240
     assert titles(sub(menu, "menu_ai", ctl)) == [ui("menu_claude"), ui("menu_chatgpt")]  # Claude Code 在前，ChatGPT 在后
     chat = ai_sub(menu, "menu_chatgpt", ctl)
     assert [a.isEnabled() for a in chat.actions() if not a.isSeparator()] == [False, False, True, True, True]
+    assert titles(chat)[1] == el(chat, ui("menu_link_activity", state=ui("activity_link_none")), 360)  # 活动：—
+    assert chat.actions()[1].toolTip() in ("", chat.actions()[1].text())  # 没有“待确认”说明
+
+
+@pytest.mark.parametrize("lang", LANGS)
+@pytest.mark.parametrize("code", ["installed", "off", "error"])
+def test_chatgpt_status_line_keeps_activity_in_other_states(env, tmp_path, monkeypatch, lang, code):
+    """已安装、临时关闭、出错时仍是“名称：状态 · 活动”，子菜单活动行照旧。"""
+    ctl = env.ctl
+    ctl.set_language(lang)
+    ui = ctl.lines.ui
+    ctl.chatgpt = ChatGPTConnection(tmp_path / "data", tmp_path / "codex")
+    from shion import chatgpt as module
+
+    def ownership(*a):
+        if code == "error":
+            raise module.config.Conflict("legacy")
+        return b"{}"
+    monkeypatch.setattr(module.config, "read_ownership", ownership)
+    ctl.chatgpt.enabled = code != "off"
+    assert ctl.chatgpt.connection_state() == code
+    activity, _ = ctl.chatgpt.activity(ui)
+    if code == "off":
+        assert activity == ui("activity_link_none")
+    else:
+        assert activity == ui("activity_link_unknown", rounds=ui("activity_link_rounds", count=0))
+    menu = ctl.build_menu()
+    line = [a for a in menu.actions() if not a.isSeparator()][6]
+    expected = ui("menu_link_status", name=ui("menu_chatgpt"), state=ui("link_state_" + code), activity=activity)
+    assert line.text() in (expected, menu.fontMetrics().elidedText(expected, Qt.ElideRight, 240))
+    chat = ai_sub(menu, "menu_chatgpt", ctl)
+    assert titles(chat)[1] == el(chat, ui("menu_link_activity", state=activity), 360)
 
 
 @pytest.mark.parametrize("lang", LANGS)

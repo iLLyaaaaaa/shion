@@ -7,7 +7,7 @@
 - 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修、调度 GUI 审查修复、菜单 Claude Code 标名和 v2.0.0 发布前安全修复均已合并。2026-11-01 已替换本机 Shion-dev 开发预览包（安全修复版）；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
 - 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 更新为菜单标名开发包（替换记录核验 228 文件）。替换记录确认配置哈希未变，旧包保留为 `Shion-dev-before-menu-label-20261030`；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
-- 最近一次全量为 2026-11-01 v2.0.0 发布准备：`--basetemp=.venv/preview-run/release-prep`，结果 `1 failed, 2040 passed, 8 skipped, 2 warnings in 607.48s (0:10:07)`。唯一失败是 `test_real_process_tree_is_terminated`，满载时出现，单独跑能通过，详见下方 2026-11-01 记录。更早一次全量通过是 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
+- 最近一次全量为 2026-11-02：`--basetemp=.venv/preview-run/release-prep2`，结果 `1 failed, 2049 passed, 8 skipped, 2 warnings in 603.42s (0:10:03)`。唯一失败是 `test_real_process_tree_is_terminated`，满载时出现（连续 3 次全量都出现），单独跑能通过，详见下方 2026-11-01 记录。更早一次全量通过是 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
 - 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
 - 分支 `feature/menu-parity`（从 `dc9fe3d` 派生）：右键菜单 Claude Code / ChatGPT 连接管理对齐，并新增 Claude 的“临时关闭联动”。未合并、未部署、未 push；本分支全量结果见下方 2026-10-30 记录。
 - 分支 `feature/remove-codex-autolaunch`（从 `fad0e3a` 派生）：删除 Codex 新开会话自动拉起诗音，保留 Claude 拉起、单实例互斥锁和 Codex 窗口层级跟随。未合并、未 push，详见下方 2026-10-31 记录。
@@ -16,7 +16,7 @@
 - 分支 `feature/session-labels`（从 `e5fee12` 派生）：同一项目多个会话时，工作遥控菜单和检查点面板用各会话的第一句话摘要区分。2026-11-01 已快进合并到当前分支（`4ecaaaa`）并部署到 Shion-dev，分支保留、未 push，详见下方 2026-11-01 记录。
 - 2026-11-01 本机 Shion-dev 先替换为 `4ecaaaa` 的开发包（旧包 `Shion-dev-before-session-labels-20261101`），同日再替换为 `b016547` 的安全修复开发包（220 文件），旧包保留为 `Shion-dev-before-security-20261101`。
 - 分支 `feature/v2-security-fixes`（从 `1500086` 派生）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题和复审第二轮（hook ↔ 服务端令牌、令牌绑定诗音进程、独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。2026-11-01 已快进合并到当前分支（`f8ec0a6`），之后追加 bundle_smoke 修正 `b016547`；worktree 已移除，分支保留、未 push，详见下方 2026-11-01 记录。
-- 2026-11-01 v2.0.0 发布准备（当前分支本地提交，未合并 master、未打包、未 push）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。
+- 2026-11-01 v2.0.0 发布准备（当前分支本地提交，未合并 master、未打包、未 push）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。2026-11-02 追加：ChatGPT 未安装时顶层只显示“ChatGPT：未安装”、子菜单活动显示“—”；6 张菜单图改为原生 Windows 11 风格重新渲染。详见下方 2026-11-02 记录。
 - 公开稳定版为 v1.0.0（`master`）；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
@@ -102,6 +102,13 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-02 ChatGPT 未安装状态显示 + 原生风格菜单截图**（本地提交，没合并 master、没打包、没 push）：
+  - **状态显示**：`ChatGPTConnection.activity()` 在临时关闭**或未安装**时返回“—”（`activity_link_none`），子菜单显示“活动：—”。`build_menu` 的 `status_row` 在 not_installed 时改用新增三语 key `menu_link_status_bare`（“{name}：{state}”），顶层只显示“ChatGPT：未安装”，原来的多行全文仍放在 tooltip。已安装、临时关闭、出错时的显示不变（新增三语×三状态参数化测试）。Claude 未连接时仍显示“未连接 · 空闲”，按用户决定没有改。`test_chatgpt_ui.py` 的辅助函数把连接视为已安装，因为它测的是“待确认”时效。基线 `scheduler_disabled_a55825f.json` 只刷新 `menu_sha256`：21 项中 18 项变化，12 个不同哈希一一对应；不变的 3 项是 ChatGPT 临时关闭阶段，其余字段逐项比对一致。
+  - **截图**：`--platform windows` 时 Qt 已经使用 `windows11` 样式（圆角高亮、未勾选项没有方框），但 `QMenu.grab()` 只截客户区，真机上的圆角外框、细边框和阴影是 Windows DWM 加的，所以原图是方角。`render_menu.py` 在原生平台下照样补上外框（圆角 8 逻辑像素、1px 半透明边框、柔和阴影），offscreen 输出不变。`SESSION_SPECS` 改为按语言给虚构的第一句话，项目名都是 `my-app`。6 张图取 scale1.5，大小 48～61 KB，文件名不变。日文和英文的第一句话按程序规则截断到 12 个字。
+  - **坑**：曾想把真实菜单弹到屏幕上再截屏来测外框，`grabWindow` 截到的是桌面壁纸（没有菜单），文件已立即删除，之后不再用截屏方式。外框参数按 Windows 11 规范模拟，需要真机对照确认。
+  - **其他 README 媒体**：hero.gif（抽 4 帧）、pat、desk、permission 三语、sleep-bed 都只有桌宠和授权面板，没有菜单，不涉及旧菜单结构。
+  - **验证**：全量 `--basetemp=.venv/preview-run/release-prep2`，结果 `1 failed, 2049 passed, 8 skipped, 2 warnings in 603.42s (0:10:03)`（日志 `build/release-prep2-pytest.log`）。唯一失败仍是满载时出现的 `test_real_process_tree_is_terminated`（见下方 11-01 记录），根因未确认。
 
 - **2026-11-01 v2.0.0 发布准备**（只改版本号、文档、截图，没改功能代码；没合并 master、没打包、没 push）：
   - **版本号**：`shion/__init__.py` 改为 `2.0.0`。关于页、`QApplication` 版本、snapshot 标题、exe 版本资源（`tools/build.py` → `Shion.spec`）、ZIP 文件名都从这里读取。同步修改了测试里写死的地方（`test_release.py` 的 QApplication 版本、ZIP 名和 `fileVersionMS == 2 << 16`，以及 `test_windowing.py`），还有 spec.md 两处、三语 README 的下载文件名。`shion/codex_mcp.py` 里 `serverInfo.version "1.0.0"` 是 `shion_lifecycle_v1` 协议的版本，有意保留。

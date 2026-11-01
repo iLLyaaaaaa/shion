@@ -174,8 +174,8 @@ class ChatGPTConnection:
             return "error"
 
     def activity(self, ui):
-        """菜单“活动”行：(文字, tooltip 或 None)。关闭时没有活动。"""
-        if not self.enabled:
+        """菜单“活动”行：(文字, tooltip 或 None)。关闭或未安装时没有活动，显示“—”。"""
+        if not self.enabled or self.connection_state() == "not_installed":
             return ui("activity_link_none"), None
         tasks = [t for k, t in self.ledger.tasks.items() if k[0] == "chatgpt"]
         rounds = ui("activity_link_rounds", count=self.working)

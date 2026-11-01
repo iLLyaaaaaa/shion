@@ -30,11 +30,16 @@ SCENARIOS = {
     "same_project": ("connected", "", False, False, 2),
 }
 PROJECTS = ("my-app", "notes")  # 合成的项目文件夹名
-# 场景 → 合成会话的 (文件夹名, 第一句话)；没列出的场景用 PROJECTS、不发第一句话
+# 场景 → 语言 → 合成会话的 (文件夹名, 第一句话)；没列出的场景用 PROJECTS、不发第一句话。全部是虚构内容
 SESSION_SPECS = {
-    "same_project": (("my-app", "Fix the login form validation"),
-                     ("my-app", "Add dark mode to settings")),
+    "same_project": {
+        "zh": (("my-app", "修复登录页报错"), ("my-app", "给设置页加深色模式")),
+        "en": (("my-app", "Fix the login page error"), ("my-app", "Add dark mode to settings")),
+        "ja": (("my-app", "ログインページのエラーを修正"), ("my-app", "設定画面にダークモードを追加")),
+    },
 }
+# 原生平台下 QMenu.grab() 只有客户区；真机上的圆角、细边框和阴影是 Windows 11 的 DWM 加的，这里照着补上
+DWM_RADIUS, DWM_SHADOW = 8, 12  # 逻辑像素：圆角半径、阴影留边
 PAYLOAD = ("shion", "assets", "tools", "hooks")
 
 
@@ -55,8 +60,8 @@ def worker(source: Path, out: Path) -> int:
 
     from types import SimpleNamespace
     from datetime import datetime
-    from PySide6.QtCore import QRect
-    from PySide6.QtGui import QColor, QImage, QPainter
+    from PySide6.QtCore import QRect, QRectF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
     from PySide6.QtWidgets import QApplication
 
     from shion import state as S
@@ -102,9 +107,29 @@ def worker(source: Path, out: Path) -> int:
     written = []
     ratio_seen = [1.0]
 
+    native = app.platformName() == "windows"
+
+    def dwm_frame(painter, pix, px, py, w, h):
+        """照 Windows 11 弹出菜单补外框：柔和阴影、圆角裁切、1px 半透明细边框。"""
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        for i in range(DWM_SHADOW, 0, -1):  # 由外向内叠加，越靠近菜单越深，略向下偏
+            painter.setBrush(QColor(0, 0, 0, round(22 * (1 - i / DWM_SHADOW) ** 2)))
+            painter.drawRoundedRect(QRectF(px - i, py - i + 2, w + 2 * i, h + 2 * i), DWM_RADIUS + i, DWM_RADIUS + i)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(px, py, w, h), DWM_RADIUS, DWM_RADIUS)
+        painter.save()
+        painter.setClipPath(clip)
+        painter.drawPixmap(px, py, pix)
+        painter.restore()
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(0, 0, 0, 40), 1))
+        painter.drawRoundedRect(QRectF(px + 0.5, py + 0.5, w - 1, h - 1), DWM_RADIUS, DWM_RADIUS)
+
     def render_chain(chain, path):
         """chain: [(菜单, 通向下一级的动作 or None), …]；父级高亮该项，子菜单与其顶端对齐并排。"""
-        shots, x, offset_y, height, ratio = [], 0, 0, 0, 1.0
+        margin = DWM_SHADOW if native else 0
+        shots, x, offset_y, height, ratio = [], margin, margin, 0, 1.0
         for menu, active in chain:
             menu.setActiveAction(active)
             menu.ensurePolished()
@@ -113,18 +138,22 @@ def worker(source: Path, out: Path) -> int:
             ratio = pix.devicePixelRatio() or 1.0
             ratio_seen[0] = ratio
             w, h = round(pix.width() / ratio), round(pix.height() / ratio)
-            shots.append((pix, x, offset_y))
-            height = max(height, offset_y + h)
+            shots.append((pix, x, offset_y, w, h))
+            height = max(height, offset_y + h + margin)
             if active is not None:
                 geo: QRect = menu.actionGeometry(active)
                 offset_y += geo.y()
-            x += w + 4
-        canvas = QImage(round(x * ratio), round(height * ratio), QImage.Format_ARGB32_Premultiplied)
+            x += w + (4 + margin if native else 4)
+        width = x - 4 if native else x
+        canvas = QImage(round(width * ratio), round(height * ratio), QImage.Format_ARGB32_Premultiplied)
         canvas.setDevicePixelRatio(ratio)
         canvas.fill(QColor("#e9e9e9"))
         painter = QPainter(canvas)
-        for pix, px, py in shots:
-            painter.drawPixmap(px, py, pix)
+        for pix, px, py, w, h in shots:
+            if native:
+                dwm_frame(painter, pix, px, py, w, h)
+            else:
+                painter.drawPixmap(px, py, pix)
         painter.end()
         assert canvas.save(str(path), "PNG") and path.stat().st_size > 0, path
         written.append(path)
@@ -165,7 +194,7 @@ def worker(source: Path, out: Path) -> int:
             if with_chatgpt:
                 ctl.chatgpt = ChatGPTConnection(path / "chatgpt", path / "codex")
             ctl.set_language(lang)
-            specs = SESSION_SPECS.get(scenario) or tuple((PROJECTS[i], None) for i in range(n_sessions))
+            specs = SESSION_SPECS.get(scenario, {}).get(lang) or tuple((PROJECTS[i], None) for i in range(n_sessions))
             for i, (project, prompt) in enumerate(specs):  # 合成的工作中会话（只给菜单看，不碰真实 CC）
                 if prompt:
                     ctl.handle_event("prompt", None, {"session": f"s{i}", "project": project, "prompt_head": prompt})

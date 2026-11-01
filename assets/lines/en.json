@@ -402,6 +402,7 @@
     "menu_claude": "Claude Code",
     "menu_chatgpt": "ChatGPT",
     "menu_link_status": "{name}: {state} · {activity}",
+    "menu_link_status_bare": "{name}: {state}",
     "menu_link_connection": "Connection: {state}",
     "menu_link_activity": "Activity: {state}",
     "link_manage": "Connect / inspect configuration",

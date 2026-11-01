@@ -1490,9 +1490,10 @@ class PetController(QObject):
         claude_state = ui("connection_" + connection.state)
         claude_activity = ui("activity_link_" + self.claude_activity())
 
-        def status_row(name: str, state: str, activity: str, tooltip: str = "") -> None:
-            """顶层每个提供方一行：名称：连接 · 活动。截断到 240，全文在 tooltip。"""
-            full = ui("menu_link_status", name=name, state=state, activity=activity)
+        def status_row(name: str, state: str, activity: Optional[str], tooltip: str = "") -> None:
+            """顶层每个提供方一行：名称：连接 · 活动（activity 为 None 时只有“名称：连接”）。截断到 240，全文在 tooltip。"""
+            full = (ui("menu_link_status_bare", name=name, state=state) if activity is None else
+                    ui("menu_link_status", name=name, state=state, activity=activity))
             row = menu.addAction(menu.fontMetrics().elidedText(full, Qt.ElideRight, 240))
             row.setEnabled(False)
             tip = "\n".join(t for t in (full if row.text() != full else "", tooltip) if t)
@@ -1506,9 +1507,12 @@ class PetController(QObject):
             v2_status_action.setToolTip(full_status)
             v2_status_action.setEnabled(False)
         if self.chatgpt is not None:
-            chat_state = ui("link_state_" + self.chatgpt.connection_state())
+            chat_code = self.chatgpt.connection_state()
+            chat_state = ui("link_state_" + chat_code)
             chat_activity, chat_hint = self.chatgpt.activity(ui)
-            status_row(ui("menu_chatgpt"), chat_state, chat_activity, self.chatgpt.status(ui))  # 原来的多行全文
+            # 未安装：顶层只写“ChatGPT：未安装”，不带活动轮次；原来的多行全文仍在 tooltip
+            status_row(ui("menu_chatgpt"), chat_state, None if chat_code == "not_installed" else chat_activity,
+                       self.chatgpt.status(ui))
 
         def provider_menu(name: str, state: str, activity: str, hint: Optional[str]) -> QMenu:
             """两边子菜单同一套结构：连接行、活动行，然后三个操作项。"""
