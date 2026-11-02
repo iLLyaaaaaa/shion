@@ -7,7 +7,7 @@ sys.path.insert(0, str(root))
 from tools.build import windows_version_info
 
 assets = root / "assets"
-datas = [(str(assets / "affection.json"), "assets")]
+datas = [(str(assets / name), "assets") for name in ("affection.json", "pricing.json", "weekly_titles.json")]
 datas.append((str(root / "THIRD_PARTY_NOTICES.md"), "."))
 for directory in ("lines", "menu"):
     datas += [(str(p), f"assets/{directory}") for p in sorted((assets / directory).glob("*.json"))]

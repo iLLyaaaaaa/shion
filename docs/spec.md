@@ -623,26 +623,28 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 - **原因（诊断结论）**：Codex 把 MCP 观察端放进设置了 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 且不允许脱离（breakaway）的 Job Object。观察端拉起的诗音即使带 `CREATE_BREAKAWAY_FROM_JOB` 也留在这个 Job 里，Codex 退出或关闭 MCP 子进程时，Job 关闭，诗音被一起结束，所以这条路径做不到“拉起后独立存活”。Claude 的 hook 子进程不在这样的 Job 里，行为不受影响。
 - **保留不变**：Claude hook 的 SessionStart 拉起及 `claude_link_enabled` 临时关闭判断；`shion/launcher.py` 的 `shion_running()`、`launch_shion()`、`INSTANCE_NAME`（hook 和 `app.py` 在用）；单实例命名互斥锁（`fad0e3a`）；未开“置于最上层”时对 Codex 桌面端窗口的层级跟随（`4a6e9eb`）。
 
-## V2.1 诗音周报与体力（2026-11-02 规划，尚未开发）
+## V2.1 诗音周报与体力（2026-11-02：第 1 步开发预览，体力未开发）
 
 只做 Claude Code，不做 Codex/ChatGPT。目标是给诗音一个值得晒、值得宣传的功能。用户 2026-11-02 已同意：为统计 token 改动下方隐私规则；周报带 API 价格估算。
 
 ### 隐私规则（本版改动）
 
 - hook 仍**不打开** `transcript_path`，`Stop` 规则不变。token 统计由**诗音主程序**在后台线程只读扫描 CC 本地对话记录。
-- 扫描只取 `type == "assistant"` 且带 `message.usage` 的行中的：`timestamp`、`message.id`、`requestId`、`message.model`，以及 usage 的 `input_tokens`、`output_tokens`、`cache_creation_input_tokens`、`cache_read_input_tokens`。**绝不读取、保存、记录或显示**对话内容、`cwd`、文件路径和项目目录名；日志中只写计数。
-- 落盘只有按本地日期（和模型）的聚合数，以及增量扫描所需的“文件 → 已读字节偏移”。缓存里的文件以路径 sha256 前 16 位作为键，不存明文路径。
-- 设置菜单新增“统计用量”开关，默认开启。关闭后不扫描，周报里隐藏 token 和价格两行。隐私模式不影响用量统计，因为它们只是数字。
+- 扫描只取 `type == "assistant"` 且带 `message.usage` 的行中的：`timestamp`、`message.id`、`requestId`、`message.model`，以及 usage 的 `input_tokens`、`output_tokens`、`cache_creation_input_tokens`、`cache_read_input_tokens`，以及 `usage.cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`。最晚活动与夜猫子只使用 user / assistant 对话记录的 `timestamp`（不读取内容）。**绝不读取、保存、记录或显示**对话内容、`cwd`、文件路径和项目目录名；日志中只写计数。
+- 落盘只含按本地日期/模型/档位的数字聚合，以及增量扫描状态：文件偏移与哈希去重索引。最近 8 天的去重索引只含消息键的 sha256、聚合桶定位、上次 token 数与数值时间戳，用于跨重启的重复排除和流式差额修正，不保存明文 message.id / requestId。缓存里的文件以路径 sha256 前 16 位作为键，不存明文路径；只存偏移、文件标识/大小/修改时间和边界摘要等重扫校验信息。
+- 设置菜单新增“统计用量”开关，默认开启。关闭后不扫描，周报里隐藏 token 和价格两行，七天柱图改为任务计数。隐私模式不影响用量统计，因为它们只是数字。
 
 ### 数据源 A：token 用量（`shion/usage.py`）
 
 - 目录：设置了 `CLAUDE_CONFIG_DIR` 时用 `<它>/projects`，否则用 `%USERPROFILE%\.claude\projects`，递归读取其中的 `*.jsonl`。目录不存在就视为没有数据，不报错。
-- 逐行流式读取：先用 `'"usage"' in line` 预筛，再解析 JSON；坏行跳过并计数，单行超过 1 MB 也跳过。
+- 逐行流式读取：先用 `'"timestamp"' in line` 预筛，再只保留白名单元数据；user / assistant 的 timestamp 用于活动统计，仅 assistant 且有 usage 的记录进入 token 聚合。坏行跳过并计数，单行超过 1 MB 也跳过。
 - **去重**：同一条回复会被写入多次，按 `(message.id, requestId)` 去重，两者都缺失的行不计入。增量扫描的去重集合只保留最近 8 天的键。
 - 文件被截断或替换（大小小于已记偏移）时，从头重读该文件。去重集合保证不会重复计数。
-- 时间戳按本机时区换算成本地日期，日界是 00:00。`usage.json`（位于 `%APPDATA%\Shion`）只保留最近 8 周的每日聚合：`{date: {model: {in, out, cw, cr}}}`。写入方式与存档相同：先写临时文件，再原子替换。
+- 时间戳按本机时区换算成本地日期，日界是 00:00。`usage.json`（位于 `%APPDATA%\Shion`）只保留最近 8 周的每日聚合：`{date: {model: {tier: {in, out, cw5, cw1, cr}}}}`（聚合键为日期、模型、单消息档位）。cache write 按 5 分钟 / 1 小时分别累计，缺少细分时全部按 5 分钟；总 token 只算一遍 cache write。写入方式与存档相同：先写临时文件，再原子替换。
 - 触发时机：启动后 10 秒、每次 `Stop` 事件后（30 秒防抖）、打开周报时。扫描在后台线程进行，不阻塞 GUI 和 hook 响应。
-- “总 token”是四项之和，“输出 token”只算 `output_tokens`。
+- “总 token”是 input + output + cache write（cw5 + cw1）+ cache read，“输出 token”只算 `output_tokens`。每条有效消息先按 input + cache write + cache read 选价格档位，再聚合；价格不落盘，渲染时按当前单价计算，改价格无需重扫。
+- 去重的流式更新采用时间戳较新的有效 usage，并用差额修正聚合；去重键持久化为 sha256。增量文件校验边界摘要，截断/替换或晚到旧记录时从源重建，避免超过 8 天的重复键再次累加。未完成的末尾行不前移偏移。
+- 最晚活动与夜猫子从对话记录 timestamp 转为本地时间，按 05:00 划分活动日，只保存每日最晚分钟数；不从诗音运行时间推断。
 
 ### 数据源 B：终端额度（statusLine）
 
@@ -682,8 +684,8 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 - **统计项**：
   - token：总量、输出量，以及 7 天柱状图（每天总量）
   - API 价格估算（见下）
-  - 7 天额度：本周观测到的 `seven_day.used_percentage` 最大值，没有收到时显示“未获取”
-  - 诗音自己记录的数据：完成任务数（`Stop` 次数）、工作时长（每个会话从 `UserPromptSubmit` 到 `Stop` 的时长之和，单轮最多算 2 小时，没收到 Stop 的不算）、通过诗音批准和拒绝的次数、摸头和喂零食次数、最晚活动时间（日界按 05:00 算，例如 02:41 算前一天的深夜）
+  - 7 天额度：本周观测到的 `seven_day.used_percentage` 最大值，没有收到时隐藏该行
+  - 诗音自己记录的数据：完成任务数（`Stop` 次数）、工作时长（每个会话从 `UserPromptSubmit` 到 `Stop` 的时长之和，单轮最多算 2 小时，没收到 Stop 的不算）、通过诗音批准和拒绝的次数、摸头和喂零食次数。最晚活动时间与夜猫子改从对话记录 timestamp 计算（日界按 05:00 算，例如 02:41 算前一天的深夜）
 - 诗音自己的统计新增存档可选字段 `weekly_stats: {date: {...计数}}`，只保留 8 周，规则沿用 v5 可选字段：缺失或非法时为空，不升 schema。
 - **称号**：数据放在 `assets/weekly_titles.json`（三语名称、一句评语、条件、优先级、使用的立绘），按优先级取第一个满足条件的称号。首批：
   - 额度刺客：7 天额度 ≥ 90%
@@ -697,13 +699,14 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 
   阈值都写在 JSON 里，方便以后调整，也方便内容包扩展。
 - **卡片**：用 QPainter 渲染成 1200×1500（4:5）的 PNG，语言跟随当前设置，采用终端风格。卡片包含：周范围、称号和评语、诗音立绘、上述统计、7 天柱状图，角落是 `github.com/iLLyaaaaaa/shion`（设置里可以关掉）。**不得出现**文件名、路径、项目名、提示词或会话摘要。
-- 数字格式：中文用 万 / 亿，英文用 K / M / B，日文用 万 / 億。
+- 数字格式：中文用 万 / 亿，英文用 K / M / B，日文用 万 / 億。卡片字体使用 Microsoft YaHei / Yu Gothic / Consolas；日文优先 Yu Gothic UI / Yu Gothic，正文使用 Medium 字重、标题 Bold，启用 palt 比例字形，字距和词距均为 0，避免全角假名被拉开。
+- 卡片采用诗音配色：背景 `#1A1212`，分隔线 `#33241F`，主强调 `#F4772E`（> SHION、称号、总 token、唯一最高柱），正文/数字 `#F2EDEA`，标签 `#9C8A84`，其他柱 `#5A3A2C`；不使用 Claude 陶土橙或米白底。总/输出 token 标签顶部对齐，价格两行放在右栏输出 token 下。最高一天标注三语“最拼的一天”，并列最高取最早一天；全零不标最高。 标注以柱子中心居中，根据距卡片左右边距的空间缩小字号，首日/末日也不得越界。总 token 与输出 token 数字共用底部基线；七天柱图上方加分隔线，线后间距与其他区块一致。英文顶部固定为 `> SHION / WEEKLY`。
 - 周报窗口有两个按钮：“保存图片”（默认保存为 `图片\Shion-weekly-<周一日期>.png`）和“复制到剪贴板”。窗口不抢焦点，Esc 关闭。
 - 预览命令：`python -m shion --snapshot <out.png> --weekly-preview [--lang zh|en|ja]`，使用合成数据。
 
 ### API 价格估算
 
-- `assets/pricing.json`：按模型名前缀匹配，填写每百万 token 的 input / output / cache write / cache read 美元单价，带 `as_of` 日期，价格以 Anthropic 官方公开价格为准。
+- `assets/pricing.json`：按明确模型版本匹配（仅允许日期 / latest 后缀，不用 claude-opus-4 这类宽前缀；未知版本一律未计价），填写每百万 token 的 input / output / cache write 5m / cache write 1h / cache read 美元单价。支持可选档位阈值，按每条消息的 input + cache write + cache read 判断（超过阈值才进高档），不按一日/一周的聚合总量判断。仅采用官方定价页的数字，写明 `as_of` 与来源；提交前先给用户核对价格表。只改单价无需重扫，修改分档阈值则需重建聚合。
 - 卡片上写“按 API 公开价格约 $xx”，再用小字注明“估算，仅供参考”。出现无法匹配价格的模型时，小字改为“部分模型未计价”。价格变动时只需要改这份 JSON。
 
 ### 开发步骤

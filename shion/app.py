@@ -196,6 +196,7 @@ def run() -> int:
         data.language = lines.lang
         scheduler.mark_dirty(now)
     controller.quit_requested.connect(app.quit)
+    app.aboutToQuit.connect(controller.usage.close)
     from shion.chatgpt import ChatGPTConnection
     controller.chatgpt = ChatGPTConnection(directory)
     controller.chatgpt.start()

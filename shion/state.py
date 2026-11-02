@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from shion.affection import AffectionRules
+from shion.weekly import clean_stats, count as weekly_count
 
 log = logging.getLogger("shion.state")
 
@@ -230,8 +231,17 @@ class SaveData:
     time_speech: dict = field(default_factory=lambda: {"date": "", "spoken": []})
     connection_prompt: Optional[str] = None  # pending / connect / later / skipped；旧档启动时标 skipped
 
+    weekly_stats: dict = field(default_factory=dict)
+    usage_enabled: bool = True
+    weekly_branding: bool = True
+    weekly_announced: str = ""
+
     def to_dict(self) -> dict:
         return {
+            "weekly_stats": clean_stats(self.weekly_stats),
+            "usage_enabled": self.usage_enabled,
+            "weekly_branding": self.weekly_branding,
+            "weekly_announced": self.weekly_announced,
             "schema_version": self.schema_version,
             "first_run": self.first_run.isoformat(timespec="seconds") if self.first_run else None,
             "affection": self.affection,
@@ -263,6 +273,14 @@ class SaveData:
         d = cls()
         if not isinstance(raw, dict):
             return d
+        d.weekly_stats = clean_stats(raw.get("weekly_stats"))
+        d.usage_enabled = _bool(raw.get("usage_enabled"), True)
+        d.weekly_branding = _bool(raw.get("weekly_branding"), True)
+        announced = raw.get("weekly_announced")
+        try:
+            d.weekly_announced = str(datetime.strptime(announced, "%Y-%m-%d").date())
+        except (ValueError, TypeError):
+            pass
         d.schema_version = _int(raw.get("schema_version"), 1, minimum=1)
         d.first_run = _parse_dt(raw.get("first_run"))
         d.last_attended = _parse_dt(raw.get("last_attended"))
@@ -593,6 +611,7 @@ class PetState:
             self._eating_until = None
             if self.save.snacks["count"] < self.snack_limit:
                 self.save.snacks["count"] += 1
+                weekly_count(self.save.weekly_stats, now, "snacks")
                 reactions.extend(self.gain_affection("snack", now))
                 self._changed(now)
         if self._temp and now >= self._temp[1]:
@@ -678,6 +697,7 @@ class PetState:
         reactions = self._touch(now, attend=True)
         reactions.extend(self.gain_affection("pat", now))
         self.save.stats["pats"] += 1
+        weekly_count(self.save.weekly_stats, now, "pats")
         self._set_temp("happy", now)
 
         self._changed(now)
@@ -878,6 +898,11 @@ class PetState:
 
     def _roll_stats(self, now: datetime) -> None:
         today = now.date().isoformat()
+        cutoff = (now.date() - timedelta(days=55)).isoformat()
+        retained = {day: values for day, values in self.save.weekly_stats.items() if cutoff <= day <= today}
+        if retained != self.save.weekly_stats:
+            self.save.weekly_stats = retained
+            self._changed(now)
         if self.save.time_speech.get("date") != today:
             self.save.time_speech = {"date": today, "spoken": []}
             self._changed(now)

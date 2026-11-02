@@ -37,6 +37,9 @@ from shion.pet_window import PetWindow
 from shion.speech import PatSession, Priority, SpeechGate, speech_kind
 from shion.state import ACTIVITY_LEVELS, EXPRESSIONS, PetState, Reaction, SaveScheduler
 from shion.scheduler_gui import SchedulerGUI
+from shion.usage_service import UsageService
+from shion.weekly import WorkTimer, count as weekly_count, report as weekly_report, week_start
+from shion.weekly_ui import WeeklyWindow
 
 log = logging.getLogger("shion.controller")
 
@@ -108,6 +111,12 @@ class PetController(QObject):
         self.continue_runner: Callable[[interrupt.CCProcess, str, Callable[[dict], None]], None] =             self._run_console_send
         self.process_view = interrupt.ProcessView()
         self.hook_images: tuple[str, ...] = hook_process_images(ROOT)
+        self._weekly_window = None
+        self._weekly_previous = False
+        self._weekly_offer = None
+        self._weekly_started = False
+        self._work_timer = WorkTimer()
+        self.usage = UsageService(scheduler.path.parent)
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
         self._dialogue: Optional[DialoguePanel] = None
@@ -166,6 +175,8 @@ class PetController(QObject):
         self.sync()
         if autostart:
             self._timer.start()
+            if state.save.usage_enabled:
+                self.usage.request(10)
 
     # ------------------------------------------------------------ 基础
     def _now(self) -> datetime:
@@ -206,6 +217,9 @@ class PetController(QObject):
 
     def tick(self) -> None:
         now = self._now()
+        if self.usage.poll(self.state.save.usage_enabled) and self._weekly_window is not None and self._weekly_window.isVisible():
+            self._weekly_window.update_report(self._weekly_data())
+        self._try_weekly_notice(now)
         if self.chatgpt is not None:
             if self.v2.core.enabled:
                 self.v2.attach(self.chatgpt)
@@ -303,6 +317,7 @@ class PetController(QObject):
 
     def greet_startup(self, first_start: bool, from_hook: bool = False) -> None:
         """首次介绍自己；普通重启用 startup，hook 拉起留给 session_start 问候。"""
+        self._weekly_started = True
         if first_start or not from_hook:
             self.say_key("intro" if first_start else "startup")
         self.react(self.state.gain_affection("open", self._now()))
@@ -370,6 +385,10 @@ class PetController(QObject):
         self._try_time_speech()
 
     def _on_click(self) -> None:
+        if self._weekly_offer is not None:
+            self._weekly_offer = None
+            self.open_weekly(True)
+            return
         self.window.stop_motion()
         self._on_pressed()
         self._status_timer.stop()
@@ -474,6 +493,8 @@ class PetController(QObject):
         """切换语言，立即生效并存档：之后的台词、菜单、状态文字都用新语言，旧气泡收起。"""
         self.lines.set_language(code)
         self.state.save.language = self.lines.lang
+        if self._weekly_window is not None:
+            self._weekly_window.update_report(self._weekly_data())
         self._speech.dismiss()
         if self.bubble is not None:
             self.bubble.set_font_fallback(self.lines.font_fallback)
@@ -552,7 +573,7 @@ class PetController(QObject):
 
     def _dialog_windows(self):
         return (self._dialogue, self._input_panel, self._perm_panel, self._about, self._connection_panel,
-                self._observation_hint)
+                self._observation_hint, self._weekly_window)
 
     def _apply_topmost(self) -> None:
         if self.state.save.always_on_top:
@@ -595,6 +616,12 @@ class PetController(QObject):
                                 meta.get("prompt_head") if etype == "prompt" else None, private)
         log.info("收到事件：%s %r %s", etype, None if private else detail, session or "")
         now = self._now()
+        kind = "work_stopped" if etype == "stop" and session in self._end_pending else etype
+        self._work_timer.event(kind, session, now, self.state.save.weekly_stats)
+        if etype == "stop":
+            self.scheduler.mark_dirty(now)
+            if self.state.save.usage_enabled:
+                self.usage.request(30)
         if etype == "pause_timeout":
             self._interrupt_waiting.discard(session)
             self._mark_end_pending(session)
@@ -1057,6 +1084,8 @@ class PetController(QObject):
     def _on_permission_decided(self, rid: str, allow: bool) -> None:
         """用户点了面板上的按钮——这是 allow/deny 唯一的来源。"""
         if self.hub.permissions.decide(rid, allow):
+            weekly_count(self.state.save.weekly_stats, self._now(), "approvals" if allow else "denials")
+            self.scheduler.mark_dirty(self._now())
             log.info("授权决定：%s", "同意" if allow else "否决")
         self._sync_permission()
         if self.v2.core.enabled:
@@ -1142,6 +1171,11 @@ class PetController(QObject):
 
     def dispose(self) -> None:
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
+        self.usage.close()
+        if self._weekly_window is not None:
+            self._weekly_window.close()
+            self._weekly_window.deleteLater()
+            self._weekly_window = None
         self._foreground.stop()
         self.state.cancel_snack()
         for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel, self._observation_hint):
@@ -1156,6 +1190,9 @@ class PetController(QObject):
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:
+        self.usage.close()
+        if self._weekly_window is not None:
+            self._weekly_window.hide()
         self._foreground.stop()
         self.window.stop_motion()
         self.state.cancel_snack()
@@ -1172,6 +1209,59 @@ class PetController(QObject):
             self.quit_requested.emit()
 
     # ------------------------------------------------------------ 双击状态
+    def _weekly_data(self):
+        start = week_start(self._now().date()) - timedelta(days=7 if self._weekly_previous else 0)
+        return weekly_report(start, self.state.save.weekly_stats, self.usage.data,
+                             self.lines.lang, self.state.save.usage_enabled)
+
+    def open_weekly(self, previous=False):
+        self._weekly_previous = previous
+        self._weekly_offer = None
+        if self.state.save.usage_enabled:
+            self.usage.request()
+        if self._weekly_window is not None:
+            self._weekly_window.close()
+            self._weekly_window.deleteLater()
+        self._weekly_window = WeeklyWindow(self._weekly_data(), self.state.save.weekly_branding)
+        set_topmost(self._weekly_window, self.state.save.always_on_top)
+        self._weekly_window.show()
+        position_dialog(self._weekly_window, self.window.body_rect())
+
+    def set_usage_enabled(self, enabled):
+        self.state.save.usage_enabled = bool(enabled)
+        self.scheduler.mark_dirty(self._now())
+        if enabled:
+            self.usage.request()
+        self.usage.poll(bool(enabled))
+        if self._weekly_window is not None:
+            self._weekly_window.update_report(self._weekly_data())
+
+    def set_weekly_branding(self, enabled):
+        self.state.save.weekly_branding = bool(enabled)
+        self.scheduler.mark_dirty(self._now())
+        if self._weekly_window is not None:
+            self._weekly_window.branding = bool(enabled)
+            self._weekly_window.update_report(self._weekly_data())
+
+    def _try_weekly_notice(self, now):
+        week = str(week_start(now.date()))
+        if self._weekly_offer is not None and self.window.monotonic_time() >= self._speech.until:
+            self._weekly_offer = None
+        if (not self._weekly_started or self.state.save.connection_prompt == 'pending'
+                or self._connection_waiting
+                or self.state.save.weekly_announced == week or self._weekly_offer is not None
+                or self._menu_open or self.hub.permissions.pending()
+                or any(w is not None and w.isVisible() for w in
+                       (self._input_panel, self._connection_panel, self._dialogue, self._weekly_window))
+                or not self.state.can_idle(now)
+                or self.window.monotonic_time() < self._speech.until):
+            return
+        if self.say_text(self.lines.ui("weekly_ready"), priority=Priority.LOW, category="weekly_ready"):
+            self._weekly_offer = week
+            self.state.save.weekly_announced = week
+            self.scheduler.mark_dirty(now)
+            self.state.menu_talk(now, "proud")
+
     def status_text(self, now: Optional[datetime] = None) -> str:
         now = now or self._now()
         self.state._roll_stats(now)
@@ -1571,6 +1661,20 @@ class PetController(QObject):
             auto.setEnabled(False)
             auto.setToolTip(ui("startup_failed", error=str(exc)))
         auto.triggered.connect(self.set_startup)
+
+        usage = settings_menu.addAction(ui("weekly_usage"))
+        usage.setCheckable(True)
+        usage.setChecked(self.state.save.usage_enabled)
+        usage.triggered.connect(self.set_usage_enabled)
+        branding = settings_menu.addAction(ui("weekly_branding"))
+        branding.setCheckable(True)
+        branding.setChecked(self.state.save.weekly_branding)
+        branding.triggered.connect(self.set_weekly_branding)
+
+
+        weekly_menu = menu.addMenu(ui("weekly_report"))
+        weekly_menu.addAction(ui("weekly_this")).triggered.connect(lambda: self.open_weekly(False))
+        weekly_menu.addAction(ui("weekly_previous")).triggered.connect(lambda: self.open_weekly(True))
 
         menu.addSeparator()
         menu.addAction(ui("menu_about")).triggered.connect(self.show_about)

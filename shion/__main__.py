@@ -31,6 +31,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = argparse.ArgumentParser(prog="shion", description="Shion 桌宠")
     p.add_argument("--snapshot", metavar="OUT.png", help="离屏渲染一帧存成 PNG 后退出")
+    p.add_argument("--weekly-preview", action="store_true", help="配合 --snapshot：用合成数据渲染周报")
+    p.add_argument("--weekly-no-usage", action="store_true", help="周报预览：隐藏用量与价格")
+    p.add_argument("--weekly-no-branding", action="store_true", help="周报预览：隐藏项目链接")
     p.add_argument("--icon-preview", action="store_true", help="配合 --snapshot：各尺寸图标的浅色/深色预览")
     p.add_argument("--state", default="idle", choices=STATES + list(PROP_STATES), help="截图用的精灵（默认 idle）")
     p.add_argument("--from-state", choices=STATES + list(PROP_STATES), help="截图用：从这张精灵交叉淡化到 --state")
@@ -58,6 +61,16 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     from shion import app
+
+    if args.weekly_preview:
+        if not args.snapshot:
+            p.error("--weekly-preview requires --snapshot")
+        from PySide6.QtWidgets import QApplication
+        from shion.weekly import preview
+        from shion.weekly_ui import render_card
+        application = QApplication.instance() or QApplication([])
+        image = render_card(preview(args.lang, not args.weekly_no_usage), not args.weekly_no_branding)
+        return 0 if image.save(args.snapshot, "PNG") else 1
 
     if args.snapshot and args.icon_preview:
         return app.snapshot_icon_preview(args.snapshot)

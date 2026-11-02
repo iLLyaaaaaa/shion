@@ -45,14 +45,14 @@ ACTIONS = ["link_manage", "link_disable", "link_remove"]
 
 
 @pytest.mark.parametrize("lang", LANGS)
-def test_top_level_is_grouped_into_ten_entries_with_two_separators(env, lang):
+def test_top_level_is_grouped_into_eleven_entries_with_two_separators(env, lang):
     env.ctl.set_language(lang)
     ui = env.ctl.lines.ui
     menu = env.ctl.build_menu()
     shape = ["-" if a.isSeparator() else a.text() for a in menu.actions()]
     status = el(menu, claude_status(ui, "disconnected"), 240)
     assert shape == [ui("menu_talk"), ui("menu_remote"), ui("menu_pet"), ui("menu_mute"), ui("menu_privacy"), "-",
-                     status, ui("menu_ai"), ui("menu_settings"), "-", ui("menu_about"), ui("menu_quit")]
+                     status, ui("menu_ai"), ui("menu_settings"), ui("weekly_report"), "-", ui("menu_about"), ui("menu_quit")]
     assert len({ui(k) for k in ("menu_talk", "menu_pet", "menu_ai", "menu_settings")}) == 4
     assert all(ui(k) != k for k in ("menu_pet", "menu_ai", "menu_settings"))  # 三语都有，不是回退成 key
 
@@ -312,15 +312,15 @@ def test_settings_autostart_stale_and_oserror_are_kept(env, monkeypatch, lang):
     ui = ctl.lines.ui
     monkeypatch.setattr(ctl.startup, "inspect", lambda: "stale")
     menu = ctl.build_menu()
-    auto = [a for a in sub(menu, "menu_settings", ctl).actions() if a.menu() is None]
-    assert [a.text() for a in auto] == [ui("menu_autostart_stale")] and auto[0].isCheckable() and not auto[0].isChecked()
+    auto = find_action(menu, ui("menu_autostart_stale"))
+    assert auto.isCheckable() and not auto.isChecked()
 
     def denied():
         raise PermissionError("denied")
 
     monkeypatch.setattr(ctl.startup, "inspect", denied)
     menu = ctl.build_menu()
-    auto = [a for a in sub(menu, "menu_settings", ctl).actions() if a.menu() is None][0]
+    auto = find_action(menu, ui("menu_autostart"))
     assert not auto.isEnabled() and "denied" in auto.toolTip()
 
 

@@ -130,6 +130,8 @@ def test_blocked_does_not_pick_or_consume_then_retries(env, monkeypatch, blocker
 
 
 def test_original_responses_win_and_tick_does_not_replay(env):
+    # Weekly reminders have their own regression tests; isolate time-speech behavior.
+    env.data.weekly_announced = str((env.now - timedelta(days=env.now.weekday())).date())
     env.ctl.greet_startup(False)
     assert env.said[-1] in env.ctl.lines._lines["startup"]
     assert env.data.time_speech["spoken"] == []

@@ -1,0 +1,181 @@
+[
+  {
+    "id": "quota",
+    "priority": 0,
+    "name": {
+      "zh": "额度刺客",
+      "en": "Quota Assassin",
+      "ja": "上限アサシン"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "proud",
+    "all": [
+      {
+        "field": "quota",
+        "min": 90
+      }
+    ],
+    "any": []
+  },
+  {
+    "id": "night",
+    "priority": 1,
+    "name": {
+      "zh": "夜猫子",
+      "en": "Night Owl",
+      "ja": "夜更かしさん"
+    },
+    "comment": {
+      "zh": "夜深了，也记得休息。",
+      "en": "Late nights deserve some rest.",
+      "ja": "夜更かしの後は、ゆっくり休もう。"
+    },
+    "sprite": "sleep",
+    "all": [
+      {
+        "field": "nights",
+        "min": 2
+      }
+    ],
+    "any": []
+  },
+  {
+    "id": "gold",
+    "priority": 2,
+    "name": {
+      "zh": "吞金兽",
+      "en": "Token Titan",
+      "ja": "トークン大食い"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "proud",
+    "all": [
+      {
+        "field": "total_tokens",
+        "min": 200000000
+      }
+    ],
+    "any": []
+  },
+  {
+    "id": "approval",
+    "priority": 3,
+    "name": {
+      "zh": "审批狂魔",
+      "en": "Approval Ace",
+      "ja": "承認マスター"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "done",
+    "all": [
+      {
+        "field": "approvals",
+        "min": 50
+      }
+    ],
+    "any": []
+  },
+  {
+    "id": "hands_off",
+    "priority": 4,
+    "name": {
+      "zh": "甩手掌柜",
+      "en": "Hands-off Partner",
+      "ja": "お任せ上手"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "idle",
+    "all": [
+      {
+        "field": "tasks",
+        "min": 20
+      },
+      {
+        "field": "approvals_denials_pats",
+        "max": 3
+      }
+    ],
+    "any": []
+  },
+  {
+    "id": "treats",
+    "priority": 5,
+    "name": {
+      "zh": "投喂达人",
+      "en": "Treat Champion",
+      "ja": "おやつ名人"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "happy",
+    "all": [],
+    "any": [
+      {
+        "field": "snacks",
+        "min": 20
+      },
+      {
+        "field": "pats",
+        "min": 50
+      }
+    ]
+  },
+  {
+    "id": "quiet",
+    "priority": 6,
+    "name": {
+      "zh": "摸鱼周",
+      "en": "Easy Week",
+      "ja": "のんびり週間"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "desk",
+    "all": [
+      {
+        "field": "tasks",
+        "max": 2
+      }
+    ],
+    "any": []
+  },
+  {
+    "id": "partner",
+    "priority": 7,
+    "name": {
+      "zh": "勤劳搭档",
+      "en": "Steady Partner",
+      "ja": "働き者の相棒"
+    },
+    "comment": {
+      "zh": "这周也一起走过来了。",
+      "en": "Another week, side by side.",
+      "ja": "今週も、一緒に歩んだね。"
+    },
+    "sprite": "done",
+    "all": [],
+    "any": []
+  }
+]
