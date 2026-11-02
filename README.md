@@ -153,7 +153,7 @@ Apps packaged with PyInstaller are occasionally misdetected. You can review the 
 
 ## Known limitations
 
-- **Planned V2.1 stamina (not implemented yet):** four-level stamina is available only through terminal Claude Code statusLine data, which includes rate_limits after the first response. Desktop Code does not run statusLine; its planned two-state hook path uses rate_limit to collapse and quota_auto_resume_fired to revive. Actual Desktop hook delivery still needs manual acceptance testing.
+- **V2.1 stamina development preview (unreleased):** four-level stamina uses terminal Claude Code statusLine data, available after the first response. Connecting relays your existing status bar; disconnecting restores its original value and stops on conflicts. Desktop Code does not run statusLine; its two-state hook path uses rate_limit to collapse and quota_auto_resume_fired to revive. Actual Desktop hook delivery still needs manual acceptance testing. Stamina only changes idle appearance; permissions and interactions take priority.
 - ChatGPT (Codex) is observation only: Shion can't approve, stop or interrupt it, and **Work remote** applies to Claude Code only
 - The Codex desktop app sends no "start" event, so "Working" appears only after its first tool call
 - Codex doesn't launch Shion automatically (see the FAQ above; turning on **Start with Windows** helps)

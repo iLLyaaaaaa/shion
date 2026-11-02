@@ -15,7 +15,7 @@ from tools import hooks_config as hc
 @pytest.fixture
 def connection(tmp_path):
     root = tmp_path / "诗音 source with spaces"
-    for name in (".venv/Scripts/python.exe", "hooks/shion_hook.py"):
+    for name in (".venv/Scripts/python.exe", "hooks/shion_hook.py", "hooks/shion_statusline.py"):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"test")
@@ -46,13 +46,13 @@ def test_connect_migrates_keeps_every_foreign_value_and_disconnects(connection):
     put(c.project, project)
     original = {p: p.read_bytes() for p in (c.user, c.project)}
     result = c.connect("en")
-    assert result.changed == (c.project, c.user)
+    assert result.changed == (c.record, c.project, c.user)
     assert len(result.backups) == 2
     for backup in result.backups:
         target = c.user if backup.parent == c.user.parent else c.project
         assert backup.read_bytes() == original[target]
     installed = hc.load(c.user)
-    assert hc.remove(installed) == user
+    assert hc.remove(installed) == {**user, 'statusLine': hc.statusline_command(c.root, c.record)}
     assert hc.load(c.project) == hc.remove(project)
     assert len(own(installed)) == len(hc.EVENTS)
     assert c.inspect().state == "connected"
@@ -115,7 +115,7 @@ def test_user_write_failure_restores_project_bytes(connection, monkeypatch):
     monkeypatch.setattr(hc.os, "replace", fail_user)
     with pytest.raises(PermissionError):
         c.connect()
-    assert calls == [c.project, c.user, c.project]
+    assert calls == [c.record, c.project, c.user, c.project]
     assert c.project.read_bytes() == original
     assert not c.user.exists()
     assert not list(c.root.parent.rglob("*.tmp"))
@@ -128,7 +128,7 @@ def test_failed_rollback_reports_backup_location(connection, monkeypatch):
     count = [0]
     def fail_after_first(src, dst):
         count[0] += 1
-        if count[0] > 1:
+        if count[0] > 2:
             raise PermissionError("denied")
         return replace(src, dst)
     monkeypatch.setattr(hc.os, "replace", fail_after_first)
@@ -161,7 +161,7 @@ def test_status_refreshes_for_partial_stale_and_external_edits(connection):
     (c.root / "hooks/shion_hook.py").unlink()
     assert c.inspect().state == "stale"
     put(c.user, {"modelSettings": {}})
-    assert c.inspect().state == "disconnected"
+    assert c.inspect().state == "stale"  # The active statusLine record prevents a blind overwrite.
 
 
 def test_frozen_commands_recognised_replaced_and_removed(connection, monkeypatch):
@@ -209,3 +209,120 @@ def test_concurrent_edit_is_not_overwritten(connection, monkeypatch):
     with pytest.raises(OSError, match="其他程序"):
         c.connect()
     assert hc.load(c.user) == {"external": "kept"}
+
+
+@pytest.mark.parametrize('original', ['{ "type" : "command", "command" : "echo \\u4e2d", "padding": 3 }', 'null', '"unchanged"'])
+def test_statusline_original_value_bytes_restored_with_foreign_edits(connection, original):
+    c=connection
+    c.user.parent.mkdir(parents=True,exist_ok=True)
+    c.user.write_bytes(('{"foreign":1,"statusLine":'+original+'}').encode('utf-8'))
+    c.connect()
+    saved=hc.load(c.record)
+    assert saved['original_raw']==original
+    current=hc.load(c.user)
+    current['foreign']=2
+    put(c.user,current)
+    c.disconnect()
+    text,span=hc.statusline_span(c.user.read_bytes())
+    assert text[slice(*span)]==original
+    assert hc.load(c.user)['foreign']==2
+
+
+@pytest.mark.parametrize('operation', ['connect','disconnect'])
+def test_external_statusline_edit_is_never_overwritten(connection,operation):
+    c=connection
+    c.connect()
+    current=hc.load(c.user)
+    current['statusLine']['command']='user-changed-command'
+    put(c.user,current)
+    before={p:p.read_bytes() for p in (c.user,c.record)}
+    with pytest.raises(ValueError,match='拒绝覆盖'):
+        getattr(c,operation)()
+    assert {p:p.read_bytes() for p in before}==before
+
+
+def test_restore_checks_current_bytes_before_replacement(connection,monkeypatch):
+    c=connection
+    put(c.user,{'statusLine':{'type':'command','command':'echo before'}})
+    c.connect()
+    stage=hc._stage
+    def drift(path,content):
+        staged=stage(path,content)
+        if path==c.user:
+            edited=hc.load(c.user)
+            edited['external']='preserved'
+            put(c.user,edited)
+        return staged
+    monkeypatch.setattr(hc,'_stage',drift)
+    with pytest.raises(OSError,match='其他程序'):
+        c.disconnect()
+    assert hc.load(c.user)['external']=='preserved'
+    assert hc.load(c.record)['version']==1
+
+
+def test_ambiguous_duplicate_setting_keys_are_refused(connection):
+    c=connection
+    c.user.parent.mkdir(parents=True,exist_ok=True)
+    c.user.write_bytes(b'{"statusLine":null,"statusLine":{}}')
+    with pytest.raises(ValueError,match='重复键'):
+        c.connect()
+    assert not c.record.exists()
+
+
+def test_custom_config_directory_is_honored(tmp_path,monkeypatch):
+    monkeypatch.setenv('CLAUDE_CONFIG_DIR',str(tmp_path/'config'))
+    assert hc.user_settings_path()==tmp_path/'config/settings.json'
+
+
+def test_statusline_padding_is_preserved_and_original_raw_restored(connection):
+    c=connection
+    put(c.user,{'statusLine':{'type':'command','command':'echo before','padding':4}})
+    c.connect()
+    assert hc.load(c.user)['statusLine']['padding']==4
+    assert c.inspect().state=='connected'
+    c.disconnect()
+    assert hc.load(c.user)['statusLine']=={'type':'command','command':'echo before','padding':4}
+
+
+@pytest.mark.parametrize('operation',['connect','disconnect'])
+def test_orphan_statusline_record_stops_before_any_mutation(connection,operation):
+    c=connection
+    c.connect()
+    c.record.unlink()
+    raw=c.user.read_bytes()
+    assert c.inspect().state=='stale'
+    with pytest.raises(ValueError,match='记录缺失'):
+        getattr(c,operation)()
+    assert c.user.read_bytes()==raw
+
+
+def test_invalid_statusline_record_is_a_safe_error(connection):
+    c=connection
+    c.connect()
+    record=hc.load(c.record)
+    del record['original_raw']
+    put(c.record,record)
+    with pytest.raises(ValueError,match='拒绝覆盖'):
+        c.disconnect()
+
+
+def test_shell_detection_handles_git_bash_mingw_path(tmp_path,monkeypatch):
+    monkeypatch.delenv('CLAUDE_CODE_GIT_BASH_PATH',raising=False)
+    git=tmp_path/'Git/mingw64/bin/git.exe'
+    bash=tmp_path/'Git/bin/bash.exe'
+    for path in (git,bash):
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_bytes(b'test')
+    monkeypatch.setattr(hc.shutil,'which',lambda name:str(git) if name=='git' else None)
+    assert hc.statusline_shell()==[str(bash),'-c']
+
+
+def test_statusline_powershell_fallback_quotes_paths(connection,tmp_path,monkeypatch):
+    monkeypatch.delenv('CLAUDE_CODE_GIT_BASH_PATH',raising=False)
+    for key in ('ProgramFiles','ProgramFiles(x86)','LOCALAPPDATA'):
+        monkeypatch.setenv(key,str(tmp_path/'no-git'))
+    monkeypatch.setattr(hc.shutil,'which',lambda name:None)
+    command=hc.statusline_command(connection.root,connection.record)['command']
+    assert command.startswith("& '") and '--record' in command
+    assert Path(hc.statusline_shell()[0]).is_absolute()
+    assert '\\' not in command

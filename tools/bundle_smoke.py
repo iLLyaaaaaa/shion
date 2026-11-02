@@ -29,7 +29,7 @@ def isolated_environment(home: Path) -> dict[str, str]:
     drive, tail = os.path.splitdrive(str(home))
     windows = os.environ.get("SystemRoot", r"C:\Windows")
     env.update(HOME=str(home), USERPROFILE=str(home), HOMEDRIVE=drive, HOMEPATH=tail,
-               APPDATA=str(home / "AppData" / "Roaming"),
+               APPDATA=str(home / "AppData" / "Roaming"), CLAUDE_CONFIG_DIR=str(home / ".claude"),
                PATH=os.pathsep.join((str(Path(windows) / "System32"), windows)),
                QT_QPA_PLATFORM="offscreen", SHION_INSTANCE_NAME=f"ShionBundle-{uuid.uuid4().hex}")
     return env
@@ -187,6 +187,7 @@ def own_processes(exe: Path, terminate=False) -> list[int]:
 class MockHooks:
     def __init__(self):
         self.events = []
+        self.limits = []
         self.gate = {"paused": False}
         self.decision = "allow"
         self.feedback = ""
@@ -218,6 +219,9 @@ class MockHooks:
                 if self.path == "/event":
                     owner.events.append(data)
                     answer = {"ok": True}
+                elif self.path == '/usage/limits':
+                    owner.limits.append(data)
+                    answer = {'ok': True}
                 elif self.path == "/pause/wait":
                     answer = owner.gate
                 elif self.path == "/feedback/take":
@@ -356,6 +360,16 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
                 payload = {"session_id": "临时会话", "tool_name": "Read", "tool_input": {"file_path": "测试.txt"},
                            "tool_use_id": "bundle-tool", "notification_type": "idle_prompt",
                            "last_assistant_message": "不应转发的回复"}
+                record = base / 'statusline-record.json'
+                record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({
+                    'type': 'command', 'command': 'echo SHION-STATUSLINE'})}), encoding='utf-8')
+                quota = {'used_percentage': 42, 'resets_at': 2000000000}
+                relayed = run(['--statusline', '--record', str(record)], {
+                    **payload, 'rate_limits': {'five_hour': quota}, 'transcript_path': 'not-read'})
+                require(relayed.stdout.strip() == b'SHION-STATUSLINE' and not relayed.stderr,
+                        'statusline-chains-original')
+                require(mock.limits == [{'session': '临时会话', 'five_hour': quota}],
+                        'statusline-allowlist-authenticated')
                 for event, kind in (("SessionStart", "session_start"), ("UserPromptSubmit", "prompt"),
                                     ("PreToolUse", "working"), ("PostToolUse", "tool_done"),
                                     ("PostToolUseFailure", "tool_error"), ("Stop", "stop"),

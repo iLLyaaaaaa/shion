@@ -17,6 +17,7 @@ from typing import Callable, Optional
 
 from shion.affection import AffectionRules
 from shion.weekly import clean_stats, count as weekly_count
+from shion.limits import clean_announced
 
 log = logging.getLogger("shion.state")
 
@@ -235,6 +236,7 @@ class SaveData:
     usage_enabled: bool = True
     weekly_branding: bool = True
     weekly_announced: str = ""
+    stamina_announced: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -242,6 +244,7 @@ class SaveData:
             "usage_enabled": self.usage_enabled,
             "weekly_branding": self.weekly_branding,
             "weekly_announced": self.weekly_announced,
+            "stamina_announced": clean_announced(self.stamina_announced),
             "schema_version": self.schema_version,
             "first_run": self.first_run.isoformat(timespec="seconds") if self.first_run else None,
             "affection": self.affection,
@@ -277,6 +280,7 @@ class SaveData:
         d.usage_enabled = _bool(raw.get("usage_enabled"), True)
         d.weekly_branding = _bool(raw.get("weekly_branding"), True)
         announced = raw.get("weekly_announced")
+        d.stamina_announced = clean_announced(raw.get('stamina_announced'))
         try:
             d.weekly_announced = str(datetime.strptime(announced, "%Y-%m-%d").date())
         except (ValueError, TypeError):
@@ -455,6 +459,8 @@ class PetState:
         self._temp: Optional[tuple[str, datetime]] = None  # (状态名, 到期时间)
         self._sessions: dict[str, WorkSession] = {}  # 正在工作的会话（session_id → 状态；旧 hook 没带 id 时用 ""）
         self.observed_working = False  # Read-only activity; never enters Claude controls or rewards.
+        self.stamina_level = 0  # Cosmetic only; never enters session/control state.
+        self.stamina_standing = False
         self._stopped_at: Optional[datetime] = None  # Claude 停下的时间（催你回来用）
         self._nudges = 0
         self._last_activity = now  # 最近一次鼠标交互或 Claude 事件（用于睡眠）
@@ -511,8 +517,12 @@ class PetState:
             return "stop"
         if self.is_working(now) or self.observed_working:
             return "working"
+        if self.stamina_standing:
+            return "idle"
         if self._is_asleep(now):
             return "sleep"
+        if self.stamina_level >= 2:
+            return "sleep" if self.stamina_level >= 3 else "desk"
         if self._resting and (not self._resting_auto or self._neglect_level(now) == 1):
             return "desk"
         if self._idle_expression and now < self._idle_expression[1]:
@@ -545,7 +555,7 @@ class PetState:
     def can_idle(self, now: datetime) -> bool:
         return (
             not self._dragging and not self.is_working(now) and not self.observed_working
-            and not self.paused and self.current(now) != "desk"
+            and not self.paused and self.current(now) not in ("desk", "sleep")
             and self._eating_until is None
             and not self.save.fixed_expression and not self._is_asleep(now)
             and not (self._manual and now < self._manual[1])
@@ -596,7 +606,7 @@ class PetState:
         self._changed(now)
 
     def idle_expression(self, name: str, now: datetime) -> None:
-        if self.can_idle(now) and name in ("happy", "idle"):
+        if self.can_idle(now) and name in ("happy", "idle", "blink"):
             self._idle_expression = (name, now + self.config.idle_expression_for)
 
     # ------------------------------------------------------------ 输入

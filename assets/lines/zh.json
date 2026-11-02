@@ -415,7 +415,7 @@
     "connection_stale": "路径失效或连接不完整",
     "connection_error": "无法读取配置",
     "connection_title": "诗音 / Shion",
-    "connection_explain": "要连接 Claude Code 吗？\n诗音会在下列用户级配置中添加自己的 hooks，让所有项目都能联动：\n{path}\n\n修改前自动备份，保留其他设置。只有源码运行时会移除本项目的旧诗音 hooks；用 exe 连接时，请在旧项目里运行 tools\\uninstall_hooks.py，避免重复触发。之后可从右键菜单断开连接。",
+    "connection_explain": "要连接 Claude Code 吗？\n诗音会在下列用户级配置中添加 hooks，并接入 statusLine 观察终端额度：\n{path}\n\n修改前自动备份。已有状态栏会继续运行，断开时恢复原值；发现冲突则停止。其他设置保留。只有源码运行时会移除本项目的旧诗音 hooks；用 exe 连接时，请在旧项目里运行 tools\\uninstall_hooks.py，避免重复触发。之后可从右键菜单断开连接。",
     "connection_accept": "连接",
     "connection_later": "以后再说",
     "connection_success": "连接配置已写入。",
@@ -499,6 +499,14 @@
     "chatgpt_review": "查看详细信息中的配置差异。确认后只插入 Shion 条目，不另存配置副本；写入过程有事务记录并逐项校验，冲突即停止，失败仅回滚未被外部修改的文件；断开时按记录精确移除。Hook 信任需随后在客户端逐项确认。",
     "chatgpt_trust": "配置已安装。请在 Codex /hooks 逐项审核 Shion Hook，并在 /mcp 检查连接。首次安装请重启客户端，再新建或重新打开会话；旧会话热加载尚未验证。",
     "chatgpt_removed": "已移除可确认属于 Shion 的配置；Codex 里的信任记录保留不动。",
-    "chatgpt_config_error": "ChatGPT 配置操作未完成：{error}"
+    "chatgpt_config_error": "ChatGPT 配置操作未完成：{error}",
+    "stamina_yawn": "有点困……还能再陪你一会儿。",
+    "stamina_desk": "歇一下……我就趴一小会儿。",
+    "stamina_down": "今天……撑不住了……",
+    "stamina_revive": "满血复活！又能陪你啦～",
+    "quota_five_hour": "5 小时额度 {value}%",
+    "quota_seven_day": "7 天额度 {value}%",
+    "weekly_quota": "本周 7 天额度峰值 {value}%",
+    "stamina_ready": "精神满满！今天也一起加油～"
   }
 }

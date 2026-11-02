@@ -14,6 +14,9 @@ def main(argv: list[str] | None = None) -> int:
     from shion.runtime import prepare_standard_streams
     prepare_standard_streams()
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--statusline"]:
+        from hooks.shion_statusline import main as statusline
+        return statusline(argv[1:])
     if argv[:1] == ["--codex-observer"]:
         from shion.codex_mcp import main as observe
         return observe(argv[1:])

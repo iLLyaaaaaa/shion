@@ -40,6 +40,7 @@ from shion.scheduler_gui import SchedulerGUI
 from shion.usage_service import UsageService
 from shion.weekly import WorkTimer, count as weekly_count, report as weekly_report, week_start
 from shion.weekly_ui import WeeklyWindow
+from shion.limits import Limits
 
 log = logging.getLogger("shion.controller")
 
@@ -116,6 +117,7 @@ class PetController(QObject):
         self._weekly_offer = None
         self._weekly_started = False
         self._work_timer = WorkTimer()
+        self.limits = Limits(state.save.stamina_announced)
         self.usage = UsageService(scheduler.path.parent)
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
@@ -189,6 +191,9 @@ class PetController(QObject):
     def sync(self) -> None:
         """把状态机当前应显示的精灵同步给窗口（只在变化时切换，不打断呼吸相位）。"""
         now = self._now()
+        self.limits.refresh(now.timestamp())
+        self.state.stamina_level = self.limits.level if self.hub.link_enabled else 0
+        self.state.stamina_standing = bool(self.hub.permissions.pending())
         cur = self.state.current(now)
         if self.v2.core.enabled:
             self.v2.refresh(claude_working=self.state.is_working(now), permissions=self.hub.permissions.pending())
@@ -210,7 +215,7 @@ class PetController(QObject):
         self._sync_checkpoint_display()
         if calm and self.window.idle_motion_active:
             self.window.stop_motion()
-        if cur == "sleep" and self.state.sleep_in_bed(now):
+        if cur == "sleep" and self.state.sleep_in_bed(now) and self.state._is_asleep(now):
             cur = "bed"
         if cur != self.window.sprite_name:
             self.window.set_state(cur)
@@ -231,6 +236,7 @@ class PetController(QObject):
         self._sync_permission()
         self.react(self.state.tick(now))
         self.sync()
+        self._try_stamina_notice(now)
         if self.v2.core.enabled:
             if self.v2.notice() and not self.state.save.bubble_muted:
                 self.say(self.v2.text(self.lines.ui), priority=Priority.HIGH, category="v2_observation")
@@ -250,6 +256,7 @@ class PetController(QObject):
             self.window.jump(automatic=True)
         elif action == "expression":
             self.state.idle_expression(
+                "blink" if self.limits.level == 1 else
                 self._rng.choices(IDLE_EXPRESSIONS, weights=IDLE_EXPRESSION_WEIGHTS, k=1)[0], now
             )
             self.sync()
@@ -610,6 +617,26 @@ class PetController(QObject):
             detail = None  # 兼容旧 hook：回复/计划内容不显示、不记录
         meta = meta or {}
         session, tool_id = meta.get("session"), meta.get("tool_id")
+        if etype == 'usage_limits':
+            self.limits.update(meta, self._now().timestamp())
+            peak_changed = False
+            seven = meta.get('seven_day')
+            if seven is not None and seven['resets_at'] > self._now().timestamp():
+                value = seven['used_percentage']
+                day = str(self._now().date())
+                row = self.state.save.weekly_stats.setdefault(day, {})
+                if 'seven_day_peak' not in row or value > row['seven_day_peak']:
+                    row['seven_day_peak'] = value
+                    peak_changed = True
+                    self.scheduler.mark_dirty(self._now())
+            if peak_changed and self._weekly_window is not None and self._weekly_window.isVisible():
+                self._weekly_window.update_report(self._weekly_data())
+            self.sync()
+            return
+        if etype in ('quota_down', 'quota_revive'):
+            self.limits.signal(session, etype == 'quota_down', self._now().timestamp())
+            self.sync()
+            return
         private = self.state.save.privacy_mode
         # 第一句话摘要只用于菜单区分会话：只存内存，不写日志；隐私模式下不记录
         self.session_names.note(session, meta.get("project"),
@@ -1055,6 +1082,8 @@ class PetController(QObject):
         queue = self.hub.permissions
         queue.expire()
         pending = queue.pending()
+        if self.state.stamina_level:
+            self.sync()  # A permission panel must stand up immediately, including on a quota event.
         panel = self._perm_panel
         if not pending:
             if panel is not None and panel.isVisible():
@@ -1262,6 +1291,31 @@ class PetController(QObject):
             self.scheduler.mark_dirty(now)
             self.state.menu_talk(now, "proud")
 
+    def _try_stamina_notice(self, now):
+        pending = self.limits.pending
+        state = self.state
+        if (pending is None or not self.hub.link_enabled or self._menu_open
+                or state._dragging or state.save.fixed_expression or state.eating
+                or state.paused or state.is_working(now) or state.observed_working
+                or state._is_asleep(now)
+                or (state._manual and now < state._manual[1]) or (state._temp and now < state._temp[1])
+                or any(w is not None and w.isVisible() for w in self._dialog_windows())
+                or self.hub.permissions.pending() or self.hub.is_holding
+                or (self.v2.core.enabled and self.v2.display and self.v2.display.priority < 5)):
+            return
+        level = pending[0]
+        key = (('stamina_revive' if self.limits.reviving else 'stamina_ready'),
+               'stamina_yawn', 'stamina_desk', 'stamina_down')[level]
+        if self.say_text(self.lines.ui(key), priority=Priority.LOW, category='stamina'):
+            self.limits.acknowledge()
+            self.state.save.stamina_announced = self.limits.records(now.timestamp())
+            self.scheduler.mark_dirty(now)
+            if level == 0 and self.limits.reviving:
+                self.window.jump()
+            elif level == 1:
+                state.idle_expression('blink', now)
+            self.sync()
+
     def status_text(self, now: Optional[datetime] = None) -> str:
         now = now or self._now()
         self.state._roll_stats(now)
@@ -1291,6 +1345,10 @@ class PetController(QObject):
         if save.fixed_expression:
             text += "\n" + ui("expression_fixed")
         text += "\n" + self.connection_status_text()
+        quotas = self.limits.values(now.timestamp()) if self.hub.link_enabled else {}
+        parts = [ui('quota_' + key, value=f'{value:g}') for key, value in quotas.items() if value is not None]
+        if parts:
+            text += '\n' + ' · '.join(parts)
         if self.chatgpt is not None:
             text += "\n" + self.chatgpt.status(ui)
         if self.v2.core.enabled:
@@ -1699,6 +1757,7 @@ class PetController(QObject):
         self.scheduler.flush()
         self.hub.set_link_enabled(enabled)  # 关闭：撤回授权、放行停下等待的 hook、清掉暂停和中断
         if not enabled:
+            self.limits.clear()
             self._leave_pause()
             self._interrupt_waiting.clear()
             self._interrupted.clear()

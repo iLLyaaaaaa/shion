@@ -153,7 +153,7 @@ Codex 桌面端不会发出“开始工作”的事件，诗音要等它第一�
 
 ## 已知限制
 
-- **规划中的 V2.1 体力（尚未实现）**：四档体力仅 Claude Code 终端可用，statusLine 的 rate_limits 在首条回复后出现；桌面版不运行 statusLine，采用 hook 两档（rate_limit 倒地、quota_auto_resume_fired 复活），真实触发仍待人工验收。
+- **V2.1 体力开发预览（尚未发布）**：四档体力仅 Claude Code 终端可用，statusLine 的 rate_limits 在首条回复后出现；连接时串联原状态栏，断开时恢复原值，冲突时停止。桌面版不运行 statusLine，采用 hook 两档（rate_limit 倒地、quota_auto_resume_fired 复活），真实触发仍待人工验收。体力只改变待机外观，授权和操作优先。
 - ChatGPT（Codex）只观察：不能代为授权、停下或中断，“工作遥控”只对 Claude Code 有效
 - Codex 桌面端收不到“开始”事件，要等第一次调用工具后才显示工作中
 - Codex 不会自动拉起诗音（见上方常见问题，建议开启“开机自启”）

@@ -39,6 +39,7 @@ EVENTS = {
     "PostToolUseFailure": "tool_error",
     "Stop": "stop",
     "Notification": "notification",
+    "StopFailure": None,
 }
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -490,6 +491,15 @@ def main() -> None:
     can_launch = name == "SessionStart" and read_save().get("claude_link_enabled") is not False
     if not can_launch and shion_running() is False:
         return  # 诗音没开：放行，交回 CC 自己处理
+    if name == "StopFailure" or (name == "Notification" and
+                                 str(data.get("notification_type", "")).startswith("quota_auto_resume_")):
+        signal = ('quota_down' if name == 'StopFailure' and data.get('error') == 'rate_limit' else
+                  'quota_revive' if name == 'Notification' and
+                  data.get('notification_type') == 'quota_auto_resume_fired' else None)
+        session = _session_field(data)
+        if signal and session:
+            request('/event', {'type': signal, **session})
+        return  # Only routing metadata and an enum; no error/notification text.
     etype = EVENTS[name]
     meta = session_meta(name, data)
     session = meta.get("session")

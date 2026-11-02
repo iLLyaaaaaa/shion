@@ -2,6 +2,7 @@
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+from shion.limits import number
 
 from shion.usage import FIELDS, Pricing
 
@@ -20,6 +21,8 @@ def clean_stats(raw):
             continue
         if isinstance(values, dict):
             result[day] = {k: v for k in COUNTERS if type(v := values.get(k)) is int and v >= 0}
+            if number(values.get('seven_day_peak')):
+                result[day]['seven_day_peak'] = values['seven_day_peak']
     return dict(sorted(result.items())[-56:])
 
 
@@ -82,7 +85,11 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None):
                   nights=sum(m >= 1200 for m in minutes),
                   approvals_denials_pats=totals['approvals'] + totals['denials'] + totals['pats'])
     price, partial = (pricing or Pricing()).estimate(selected)
-    # No rate limit source in step 1. Missing quota is omitted entirely.
+    peaks = [stats.get(day, {}).get('seven_day_peak') for day in days]
+    peaks = [v for v in peaks if number(v)]
+    if peaks:
+        totals['seven_day_peak'] = max(peaks)
+        totals['quota'] = max(peaks)
     return {'start': str(start), 'end': str(start + timedelta(days=6)), 'totals': totals,
             'daily': daily if enabled else [stats.get(d, {}).get('tasks', 0) for d in days],
             'latest': f'{(latest + 300) // 60 % 24:02}:{(latest + 300) % 60:02}' if latest is not None else None,

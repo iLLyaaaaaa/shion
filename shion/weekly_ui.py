@@ -98,6 +98,8 @@ def render_card(data, branding=True):
             text(780, 686, 350, 35, ui('weekly_partial' if data['partial'] else 'weekly_estimate'), 22, '#9C8A84')
         else:
             text(64, 510, 1000, 80, ui('weekly_disabled'), 36, '#9C8A84')
+        if 'seven_day_peak' in totals:
+            text(64, 650, 650, 45, ui('weekly_quota', value=f"{totals['seven_day_peak']:g}"), 26, '#9C8A84')
         metrics = [('weekly_tasks', totals['tasks']), ('weekly_hours', f"{totals['seconds'] / 3600:.1f} h"),
                    ('weekly_approvals', totals['approvals']), ('weekly_denials', totals['denials']),
                    ('weekly_pats', totals['pats']), ('weekly_snacks', totals['snacks'])]

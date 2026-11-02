@@ -332,10 +332,10 @@ def test_install_writes_status_in_save_language(tmp_path, monkeypatch):
     monkeypatch.setenv("SHION_DATA_DIR", str(tmp_path))
     (tmp_path / "state.json").write_text(json.dumps({"language": "en"}), encoding="utf-8")
     settings = tmp_path / "settings.json"
-    assert hc.run("install", str(settings), PY, SCRIPT) == 0
+    assert hc.run("install", str(settings), hc.default_python(), hc.default_hook_script()) == 0
     data = json.loads(settings.read_text(encoding="utf-8"))
     assert data["hooks"]["PreToolUse"][0]["hooks"][0]["statusMessage"] == STATUS["en"]
-    assert hc.run("install", str(settings), PY, SCRIPT, lang="ja") == 0  # 换语言重装：替换，不重复
+    assert hc.run("install", str(settings), hc.default_python(), hc.default_hook_script(), lang="ja") == 0  # 换语言重装：替换，不重复
     data = json.loads(settings.read_text(encoding="utf-8"))
     assert len(data["hooks"]["PostToolUse"]) == 1
     assert data["hooks"]["PostToolUse"][0]["hooks"][0]["statusMessage"] == STATUS["ja"]

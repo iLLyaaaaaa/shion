@@ -414,7 +414,7 @@
     "connection_stale": "Invalid path or incomplete connection",
     "connection_error": "Cannot read settings",
     "connection_title": "Shion",
-    "connection_explain": "Connect to Claude Code?\nShion will add its hooks to the user settings below, enabling integration across projects:\n{path}\n\nExisting files are backed up first. Other settings are preserved. Old hooks in this project are removed only when running from source. When connecting with the exe, run tools\\uninstall_hooks.py in the old project to prevent duplicate events. You can disconnect from the right-click menu later.",
+    "connection_explain": "Connect to Claude Code?\nShion will add hooks and relay statusLine to observe terminal quotas in the user settings below:\n{path}\n\nExisting files are backed up first. Your status bar keeps running and is restored on disconnect; conflicts stop the operation. Other settings are preserved. Old hooks in this project are removed only when running from source. With the exe, run tools\\uninstall_hooks.py in the old project to prevent duplicate events. You can disconnect from the right-click menu later.",
     "connection_accept": "Connect",
     "connection_later": "Maybe later",
     "connection_success": "Connection settings saved.",
@@ -498,6 +498,14 @@
     "chatgpt_review": "Review the exact diff in Details. Confirmation only inserts Shion entries; no copy of your configuration is kept. Writes are journaled and verified; conflicts stop the transaction. Disconnecting removes exactly what was recorded. Failure rolls back files only if unchanged by others. Review each hook in the client afterward.",
     "chatgpt_trust": "Configuration installed. Review each Shion hook in Codex /hooks and check /mcp. Restart the client for first installation, then create or reopen a session; hot reload of existing sessions is unverified.",
     "chatgpt_removed": "Owned Shion configuration removed; trust records in Codex are left as they are.",
-    "chatgpt_config_error": "ChatGPT configuration operation incomplete: {error}"
+    "chatgpt_config_error": "ChatGPT configuration operation incomplete: {error}",
+    "stamina_yawn": "A little sleepy... still here with you.",
+    "stamina_desk": "Just resting here for a moment...",
+    "stamina_down": "I... need a break...",
+    "stamina_revive": "Back on my feet! Ready to go!",
+    "quota_five_hour": "5-hour quota {value}%",
+    "quota_seven_day": "7-day quota {value}%",
+    "weekly_quota": "Weekly 7-day quota peak {value}%",
+    "stamina_ready": "Feeling fresh! Let’s get going!"
   }
 }

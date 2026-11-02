@@ -19,6 +19,7 @@ from typing import Callable, Optional
 
 from .loopback import bind_exclusive, new_token, valid_token
 from .remote import DISABLED, RemoteHub
+from .limits import parse_limits
 
 log = logging.getLogger("shion.server")
 
@@ -186,6 +187,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/event":
             self._post_event()
+        elif self.path == "/usage/limits":
+            self._post_limits()
         elif self.path == "/feedback/take":
             self._post_take_feedback()
         elif self.path == "/pause/wait":
@@ -201,6 +204,25 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": "not found"})
 
+    def _post_limits(self):
+        data = self._read_json()
+        if data is None:
+            return
+        try:
+            data = parse_limits(data)
+        except ValueError:
+            self._send(400, {"error": "invalid quota metadata"})
+            return
+        if not self.server.hub.link_enabled:
+            self._send(200, {"ok": True, "ignored": True})
+            return
+        try:
+            self.server.emit_event('usage_limits', None, data)
+        except Exception:
+            self._send(500, {"error": "internal error"})
+            return
+        self._send(200, {"ok": True})
+
     def _post_event(self):
         data = self._read_json()
         if data is None:
@@ -215,8 +237,12 @@ class _Handler(BaseHTTPRequestHandler):
         if detail is not None and not isinstance(detail, str):
             self._send(400, {"error": "detail 必须是字符串或 null"})
             return
-        if etype == INTERNAL_STOPPED:
+        if etype in (INTERNAL_STOPPED, 'usage_limits'):
             self._send(400, {"error": "内部事件，不能从外部发送"})
+            return
+        if etype in ('quota_down', 'quota_revive') and (set(data) != {'type', 'session'}
+                or not isinstance(data.get('session'), str) or not 0 < len(data['session']) <= ID_MAX):
+            self._send(400, {"error": "invalid quota signal"})
             return
         meta = parse_meta(data)
         if meta is None:

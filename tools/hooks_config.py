@@ -17,7 +17,7 @@ MARKER = "shion_hook.py"
 ROOT = Path(__file__).resolve().parent.parent
 EVENTS = [
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "Stop",
-    "Notification",
+    "Notification", "StopFailure",
 ]
 TIMEOUTS = {"SessionStart": 15, "PreToolUse": 1900, "PostToolUse": 1900, "PermissionRequest": 180}  # 要等用户点按钮，比各自的等待上限长
 DEFAULT_TIMEOUT = 5
@@ -196,16 +196,25 @@ def _stage(path: Path, content: bytes) -> Path:
         raise
 
 
-def apply_changes(edits: list[tuple[Path, dict, dict]]) -> WriteResult:
+def apply_changes(edits: list[tuple[Path, dict, dict]], *, raw_after=None, expected_raw=None) -> WriteResult:
     """全部校验/备份/暂存后依次替换；失败时恢复本次已经替换的文件。"""
     staged, backups, written = [], [], []
     try:
+        def check_expected():
+            written_raw = {p: content for p, _, content, _ in written}
+            for target, baseline in (expected_raw or {}).items():
+                actual = target.read_bytes() if target.exists() else None
+                if actual != written_raw.get(target, baseline):
+                    raise OSError(f"配置已被其他程序修改，请重试：{target}")
+        check_expected()
         for path, before, after in edits:
             validate(after)
             if before == after:
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
             original = path.read_bytes() if path.exists() else None
+            if expected_raw is not None and path in expected_raw and original != expected_raw[path]:
+                raise OSError(f"配置已被其他程序修改，请重试：{path}")
             if load(path) != before:
                 raise OSError(f"配置已被其他程序修改，请重试：{path}")
             if original is not None:
@@ -216,8 +225,13 @@ def apply_changes(edits: list[tuple[Path, dict, dict]]) -> WriteResult:
                     raise OSError(f"备份期间配置发生变化，请重试：{path}")
                 backups.append(backup)
             content = (json.dumps(after, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            if raw_after and path in raw_after:
+                content = raw_after[path]
+                if json.loads(content) != after:
+                    raise ValueError("暂存的配置字节不匹配")
             staged.append((path, original, content, _stage(path, content)))
         for entry in staged:
+            check_expected()
             path, original, content, tmp = entry
             if (path.read_bytes() if path.exists() else None) != original:
                 raise OSError(f"配置已被其他程序修改，请重试：{path}")
@@ -249,7 +263,93 @@ def apply_changes(edits: list[tuple[Path, dict, dict]]) -> WriteResult:
 
 
 def user_settings_path() -> Path:
-    return Path.home() / ".claude" / "settings.json"
+    directory = os.environ.get("CLAUDE_CONFIG_DIR")
+    return (Path(directory) if directory else Path.home() / ".claude") / "settings.json"
+
+
+def statusline_span(raw: bytes):
+    """Locate the top-level JSON value, preserving its whitespace/escapes exactly."""
+    text = raw.decode("utf-8-sig")
+    decoder = json.JSONDecoder()
+    pos, seen, found = text.index("{") + 1, set(), None
+    while True:
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if text[pos] == "}":
+            return text, found
+        key, pos = decoder.raw_decode(text, pos)
+        if key in seen:
+            raise ValueError("配置含重复键，拒绝修改")
+        seen.add(key)
+        while text[pos].isspace():
+            pos += 1
+        if text[pos] != ":":
+            raise ValueError("无效配置")
+        pos += 1
+        while text[pos].isspace():
+            pos += 1
+        start = pos
+        _, pos = decoder.raw_decode(text, pos)
+        if key == "statusLine":
+            found = (start, pos)
+        while text[pos].isspace():
+            pos += 1
+        if text[pos] == ",":
+            pos += 1
+
+
+def statusline_shell() -> list[str]:
+    """Use Claude Code's documented Git Bash / PowerShell order on Windows."""
+    if os.name != 'nt':
+        return [shutil.which('bash') or '/bin/sh', '-c']
+    configured = os.environ.get('CLAUDE_CODE_GIT_BASH_PATH')
+    if configured:
+        return [configured, '-c']
+    git = shutil.which('git')
+    if git:
+        base = Path(git).resolve().parent.parent
+        # Git Bash puts mingw64/bin before cmd on PATH.
+        for directory in (base, base.parent):
+            for path in (directory / 'bin/bash.exe', directory / 'usr/bin/bash.exe'):
+                if path.is_file():
+                    return [str(path), '-c']
+    for key in ('ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'):
+        directory = os.environ.get(key)
+        if directory:
+            for suffix in ('Git/bin/bash.exe', 'Programs/Git/bin/bash.exe'):
+                path = Path(directory) / suffix
+                if path.is_file():
+                    return [str(path), '-c']
+    powershell = shutil.which('powershell') or str(
+        Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe')
+    return [powershell, '-NoProfile', '-Command']
+
+
+def statusline_command(root: Path, record: Path) -> dict:
+    if getattr(sys, "frozen", False):
+        args = [Path(sys.executable).resolve().as_posix(), "--statusline"]
+    else:
+        args = [default_python(root), (root / "hooks/shion_statusline.py").as_posix()]
+    args += ["--record", record.as_posix()]
+    if statusline_shell()[-1] == '-Command':
+        command = '& ' + ' '.join("'" + arg.replace("'", "''") + "'" for arg in args)
+    else:
+        command = shlex.join(args)
+    return {"type": "command", "command": command}
+
+
+def _snapshot(path):
+    raw = path.read_bytes() if path.exists() else None
+    data = json.loads(raw.decode("utf-8-sig")) if raw is not None else {}
+    validate(data)
+    if raw is not None:
+        statusline_span(raw)  # Reject ambiguous top-level duplicate keys.
+    return data, raw
+
+
+def _looks_statusline(value):
+    command = value.get('command') if isinstance(value, dict) else None
+    return isinstance(command, str) and ('--statusline' in command or 'shion_statusline.py' in command)
 
 
 def runtime_command(root: Path = ROOT) -> tuple[str, str]:
@@ -270,14 +370,41 @@ class HookConnection:
         self.user = user if user is not None else user_settings_path()
         self.project = project if project is not None else root / ".claude" / "settings.local.json"
         self.root = root
+        self.record = self.user.with_name(self.user.name + ".shion-statusline.json")
+
+    def _record(self, settings):
+        record, raw = _snapshot(self.record)
+        if record:
+            if (type(record.get('version')) is not int or record['version'] != 1
+                    or 'original_raw' not in record or not isinstance(record.get("installed"), dict)
+                    or record['installed'].get('type') != 'command'
+                    or not isinstance(record['installed'].get('command'), str)
+                    or not isinstance(record.get("original_raw"), (str, type(None)))
+                    or settings.get("statusLine") != record["installed"]):
+                raise ValueError("statusLine 或安装记录已变化，拒绝覆盖；请先核对差异")
+            if record['original_raw'] is not None:
+                json.loads(record['original_raw'])
+        elif _looks_statusline(settings.get('statusLine')):
+            raise ValueError("statusLine 安装记录缺失，拒绝覆盖")
+        return record, raw
 
     def inspect(self) -> ConnectionStatus:
         try:
             settings = load(self.user)
             own = [(event, group, h) for event, groups in settings.get("hooks", {}).items()
                    for group in groups for h in group["hooks"] if _is_shion(h)]
-            if not own:
+            record, _ = _snapshot(self.record)
+            if not own and not record and not _looks_statusline(settings.get('statusLine')):
                 return ConnectionStatus("disconnected")
+            try:
+                self._record(settings)
+            except ValueError:
+                return ConnectionStatus("stale")
+            if (not record or settings.get("statusLine", {}).get('command') !=
+                    statusline_command(self.root, self.record)['command']
+                    or (not getattr(sys, "frozen", False)
+                        and not (self.root / "hooks/shion_statusline.py").is_file())):
+                return ConnectionStatus("stale")
             if len(own) != len(EVENTS):
                 return ConnectionStatus("stale")
             try:
@@ -302,18 +429,53 @@ class HookConnection:
         except (ValueError, OSError) as exc:
             return ConnectionStatus("error", str(exc))
 
-    def connect(self, lang: str = "zh") -> WriteResult:
-        user, project = load(self.user), load(self.project)
+    def connect(self, lang: str = "zh", command_override=None, migrate=True) -> WriteResult:
+        user, user_raw = _snapshot(self.user)
+        project, project_raw = _snapshot(self.project) if migrate else ({}, None)
+        record, record_raw = self._record(user)
         command, prefix = runtime_command(self.root)
+        if command_override is not None:
+            command, prefix = command_override
         if not Path(command).is_file() or (prefix != "--hook" and not Path(prefix).is_file()):
             raise ValueError("诗音的运行路径已失效")
+        if not getattr(sys, 'frozen', False) and not (self.root / 'hooks/shion_statusline.py').is_file():
+            raise ValueError("诗音的 statusLine 路径已失效")
         installed = merge(user, command, prefix, status_message(lang, self.root))
+        line = statusline_command(self.root, self.record)
+        if not record:
+            text, span = statusline_span(user_raw or b"{}")
+            record = {"version": 1, "original_raw": text[slice(*span)] if span else None,
+                      "installed": line}
+        original = json.loads(record['original_raw']) if record['original_raw'] is not None else None
+        if isinstance(original, dict):
+            line = {**original, **line}  # Keep layout options such as padding.
+        updated = {**record, "installed": line}
+        installed["statusLine"] = line
         # 先移除旧项目条目，避免同一事件双发；失败由 apply_changes 恢复。
-        return apply_changes([(self.project, project, remove(project)), (self.user, user, installed)])
+        edits = [(self.record, json.loads(record_raw) if record_raw else {}, updated)]
+        expected = {self.user: user_raw, self.record: record_raw}
+        if migrate:
+            edits.append((self.project, project, remove(project)))
+            expected[self.project] = project_raw
+        edits.append((self.user, user, installed))
+        return apply_changes(edits, expected_raw=expected)
 
     def disconnect(self) -> WriteResult:
-        current = load(self.user)
-        return apply_changes([(self.user, current, remove(current))])
+        current, current_raw = _snapshot(self.user)
+        record, record_raw = self._record(current)
+        restored = remove(current)
+        raw_after = {}
+        if record:
+            original = record["original_raw"]
+            if original is None:
+                restored.pop("statusLine", None)
+            else:
+                restored["statusLine"] = json.loads(original)
+                raw = (json.dumps(restored, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                text, span = statusline_span(raw)
+                raw_after[self.user] = (text[:span[0]] + original + text[span[1]:]).encode("utf-8")
+        return apply_changes([(self.user, current, restored), (self.record, record, {})], raw_after=raw_after,
+                             expected_raw={self.user: current_raw, self.record: record_raw})
 
 
 def run(action: str, settings_path: str | None, python: str | None = None, script: str | None = None,
@@ -329,16 +491,11 @@ def run(action: str, settings_path: str | None, python: str | None = None, scrip
             print(f"已{'安装' if action == 'install' else '卸载'}：{path}" +
                   (f"（备份：{', '.join(map(str, result.backups))}）" if result.backups else ""))
             return 0
-        current = load(path)
-        if action == "install":
-            status = status_message(lang if lang in LANGS else save_language())
-            new = merge(current, python or default_python(), script or default_hook_script(), status)
-        else:
-            new = remove(current)
-        if new == current and path.exists():
-            print(f"没有变化，未改动：{path}")
-            return 0
-        backup = save_with_backup(path, new)
+        connection = HookConnection(user=path)
+        result = (connection.connect(lang if lang in LANGS else save_language(),
+                                     (python or default_python(), script or default_hook_script()), migrate=False)
+                  if action == 'install' else connection.disconnect())
+        backup = result.backups[0] if result.backups else None
     except (ValueError, OSError) as e:  # json.JSONDecodeError 是 ValueError
         outcome = "请按备份位置检查并恢复文件" if "恢复失败" in str(e) else "原文件未被改写"
         print(f"失败：{path}（{e}）；{outcome}", file=sys.stderr)

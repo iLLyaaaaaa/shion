@@ -489,3 +489,29 @@ def test_start_linked_end_to_end_with_the_real_hook_reader(tmp_path, monkeypatch
         stop_linked(srv, tmp_path / "data")
     h = load_hook()
     assert h.link_token() is None  # 退出后令牌已删
+
+
+def test_limits_endpoint_auth_validation_and_control_isolation():
+    events=[]
+    srv=ShionServer(lambda *args:events.append(args),lambda:'',port=0)
+    srv.start()
+    try:
+        body={'session':'s','five_hour':{'used_percentage':101,'resets_at':2000000000}}
+        assert req(srv,'/usage/limits','POST',body,token=None)[0]==403
+        assert req(srv,'/usage/limits','POST',{**body,'cwd':'forbidden'})[0]==400
+        assert req(srv,'/usage/limits','POST',{**body,'five_hour':{'used_percentage':True,'resets_at':5}})[0]==400
+        pending=srv.hub.permissions.open('Bash','synthetic',session='s')
+        srv.hub.pause('s')
+        assert req(srv,'/usage/limits','POST',body)[0]==200
+        assert events==[('usage_limits',None,body)]
+        assert srv.hub.permissions.pending()[0].id==pending and srv.hub.is_paused
+        assert req(srv,'/event','POST',{'type':'quota_down','session':'s'})[0]==200
+        assert srv.hub.permissions.pending()[0].id==pending and srv.hub.is_paused
+        assert req(srv,'/event','POST',{'type':'quota_revive','session':'s','detail':'forbidden'})[0]==400
+        assert req(srv,'/event','POST',{'type':'usage_limits',**body})[0]==400
+        srv.hub.set_link_enabled(False)
+        size=len(events)
+        assert req(srv,'/usage/limits','POST',body)==(200,{'ok':True,'ignored':True})
+        assert len(events)==size
+    finally:
+        srv.stop()

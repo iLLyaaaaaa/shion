@@ -21,7 +21,7 @@ def isolated_home(value: str) -> Path:
     combined = os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")
     if not combined or Path(combined).resolve() != home:
         raise ValueError("自检要求隔离 HOMEDRIVE/HOMEPATH")
-    for key in ("APPDATA", "SHION_DATA_DIR"):
+    for key in ("APPDATA", "SHION_DATA_DIR", "CLAUDE_CONFIG_DIR"):
         value = os.environ.get(key)
         if (key == "APPDATA" and not value) or (value and not Path(value).resolve().is_relative_to(home)):
             raise ValueError(f"自检要求隔离 {key}")
@@ -60,7 +60,9 @@ def check_connection(value: str) -> dict:
         result = connection.connect(language)
         installed = hc.load(connection.user)
         require(connection.inspect().state == "connected", f"connect-{language}")
-        require(hc.remove(installed) == original, f"preserve-{language}")
+        require(hc.remove(installed) == {**original, 'statusLine': installed['statusLine']}, f"preserve-{language}")
+        require(hc.load(connection.record)['original_raw'] is not None and
+                installed['statusLine']['type'] == 'command', f"statusline-record-{language}")
         require(hc.load(connection.project) == hc.remove(project), f"migrate-{language}")
         require(all(backup.is_file() for backup in result.backups), f"backups-{language}")
         own = [h for groups in installed["hooks"].values() for group in groups

@@ -18,7 +18,7 @@ from tests.test_controller import Env, env, find_action, qapp
 @pytest.fixture
 def connected_env(env, tmp_path):
     root = tmp_path / "source app"
-    for name in (".venv/Scripts/python.exe", "hooks/shion_hook.py"):
+    for name in (".venv/Scripts/python.exe", "hooks/shion_hook.py", "hooks/shion_statusline.py"):
         p = root / name
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"test")

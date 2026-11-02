@@ -4,10 +4,10 @@
 
 ## 当前状态总览
 
-- 当前分支 `feature/v2-observer-lease-scheduler`；v1.0.1 hook 延迟热修、调度 GUI 审查修复、菜单 Claude Code 标名和 v2.0.0 发布前安全修复均已合并。2026-11-01 已替换本机 Shion-dev 开发预览包（安全修复版）；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
+- 当前分支 `master`（本地 V2.1 开发）；v1.0.1 hook 延迟热修、调度 GUI 审查修复、菜单 Claude Code 标名和 v2.0.0 发布前安全修复均已合并。2026-11-01 已替换本机 Shion-dev 开发预览包（安全修复版）；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
 - 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 更新为菜单标名开发包（替换记录核验 228 文件）。替换记录确认配置哈希未变，旧包保留为 `Shion-dev-before-menu-label-20261030`；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
-- 最近一次全量为 2026-11-02：`--basetemp=.venv/preview-run/release-prep2`，结果 `1 failed, 2049 passed, 8 skipped, 2 warnings in 603.42s (0:10:03)`。唯一失败是 `test_real_process_tree_is_terminated`，满载时出现（连续 3 次全量都出现），单独跑能通过，详见下方 2026-11-01 记录。更早一次全量通过是 2026-10-30 恢复 `.venv` 后实际执行：`.venv\Scripts\python -m pytest -q --basetemp=.venv/preview-run/env-recovery`。汇总原文：`1829 passed, 9 skipped, 2 warnings in 602.93s (0:10:02)`，退出码 0；两条均为既有 Pillow `getdata()` 弃用警告。日志在忽略目录 `build/menu-label-replacement-20261030/pytest-env-recovery.log`，`pip check` 同时通过。
+- V2.1 第 2 步本轮全量（2026-11-03，修正前）：`1 failed, 2147 passed, 9 skipped, 2 warnings in 643.42s`，日志 `build/stamina-full.log`。唯一失败是旧安装提示测试使用不存在的示例程序路径，被新增安装前校验拒绝；已改用有效路径，单独及后续专项复核通过。不是全量全绿；后续改动按下方专项/打包验证记录，未再次全量。较早的中断时序、ZIP 替换失败记录保留在各日摘要，不视为已修复。
 - 分支 `feature/menu-claude-label`（从 `4c4db02` 派生，功能提交 `81b8361`，交接提交 `a4edba0`）已快进合并到当前分支，分支保留、未 push；菜单标名已随本次 Shion-dev 开发包替换部署，详见下方 2026-10-30 记录。
 - 分支 `feature/menu-parity`（从 `dc9fe3d` 派生）：右键菜单 Claude Code / ChatGPT 连接管理对齐，并新增 Claude 的“临时关闭联动”。未合并、未部署、未 push；本分支全量结果见下方 2026-10-30 记录。
 - 分支 `feature/remove-codex-autolaunch`（从 `fad0e3a` 派生）：删除 Codex 新开会话自动拉起诗音，保留 Claude 拉起、单实例互斥锁和 Codex 窗口层级跟随。未合并、未 push，详见下方 2026-10-31 记录。
@@ -40,7 +40,7 @@
 
 ## 正在进行的阶段与下一步
 
-- **2026-11-02 V2.1 第 1 步周报开发完成（本地提交，不 push）**：后台用量扫描、周报计数、称号/分档价格、三语卡片、菜单及合成快照已完成；价格和 v3 外观已获用户确认。按用户可选要求微调日文为 Yu Gothic UI / Medium，标题 Bold，新增日文 v4 快照；周报测试 36 项通过，隐私检查通过。全量基线为 2081 通过、9 跳过、1 个 ZIP 替换拒绝访问，疑似文件被占用、原因未确认，发布测试单跑 4 项通过。真实窗口/导出观感另待人工验收。下一步为第 2 步 statusLine 串联与体力，先给用户计划；当前未开发第 2 步，未改真实配置或已安装 Shion-dev。
+- **2026-11-03 V2.1 第 2 步开发完成（代码及合成预览已验收，本地提交，不 push）**：statusLine 串联、配置原值恢复/冲突保护、认证额度接口、终端四档与 hook 两档、状态气泡和周报额度峰值已接通；沿用现有替代图。第 1 步已提交 `6d6801f`，未 push。第 2 步计划、代码和合成预览均已获用户确认；本轮只用隔离 HOME / APPDATA / CLAUDE_CONFIG_DIR 与合成数据，未读真实对话，未修改真实配置或替换已安装 Shion-dev。用户已授权本地提交；下一步由用户安排真实接入验收或第 3 步新图，不自动改配置、部署或开始新步骤。
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
 - **v2.0.0 已发布（2026-11-02）**：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.0.0 ，详见下方发布记录。原定的三项发布前人工专测（立即中断后工具进程是否结束、Codex 配置断开再重连、真实干净环境解压运行）没有做，改为**发布后日常使用中验证**；Codex 配置的安装/卸载/冲突已有隔离自动测试，但不代替真实 Codex 客户端里的断开再重连。
 - 下一步由用户决定：日常使用中留意上面三项和下方清单；`test_real_process_tree_is_terminated` 满载时失败的根因仍未确认。
@@ -54,10 +54,13 @@
 
 V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；平时碰不到的项目（立即中断后工具进程是否结束、Codex 配置断开再重连、干净环境解压运行）原定发布前专测，v2.0.0 发布时未做，改为发布后日常使用中验证。
 
+- [x] V2.1 第 2 步代码及合成预览（2026-11-03 用户确认通过，可本地提交，不 push）：statusLine 串联与恢复保护、体力隔离路径、四档替代图/三语台词、双击状态行、周报额度峰值行。
+- [ ] V2.1 第 2 步真机动态观感：延后播报与复活跳跃、授权期间临时站起、双击状态行及不同 DPI；代码与合成预览验收不代替这些真实体验。
+- [ ] V2.1 真实接入：先审阅实际 settings 差异再授权安装，确认已有 statusLine 输入/输出、冲突拒绝与断开恢复；本轮未改真实 settings。
 - [x] V2.1 周报外观（2026-11-02 用户确认）：v3 三语卡片、日文比例字形、标签/数字基线对齐、价格右栏、柱图区分隔与首末日标注；按用户可选要求追加 Yu Gothic UI / Medium 字重，新快照 `build/weekly-ja-ui-medium-v4.png`，授权的小改已完成。真实窗口/导出仍按下项人工验收。
 - [ ] V2.1 周报真机：本周/上周切换、窗口显示不抢焦点、主动点击后 Esc 关闭、不同 DPI/屏幕定位、保存 PNG / 复制粘贴观感、统计用量/署名开关。
 - [ ] V2.1 周报真机：周一或之后首次启动的提醒，必须在问候与连接引导结束、无授权或输入面板时出现；点击查看上一周。本轮仅合成/隔离验证，未部署 Shion-dev、未重扫真实对话。
-- [ ] V2.1 桌面 hook 两档体力：Code 标签页真实撞限额时是否触发 `StopFailure.error=rate_limit`，额度等待后自动继续时是否触发 `Notification.notification_type=quota_auto_resume_fired`；确认倒地/复活只改变待机，不影响授权、暂停、继续和中断。当前仅文档核对，尚无真实触发样本。
+- [ ] V2.1 桌面 hook 两档体力：Code 标签页真实撞限额时是否触发 `StopFailure.error=rate_limit`，额度等待后自动继续时是否触发 `Notification.notification_type=quota_auto_resume_fired`；确认倒地/复活只改变待机，不影响授权、暂停、继续和中断。已通过合成路径和权限优先级测试，尚无桌面真实触发样本。
 
 - [ ] 阶段 1：修复后桌面普通任务的完整生命周期、真实故障画面、活动中断连；原会话自动恢复或明确的恢复边界。
 - [ ] 人工权限长等待、实际 PermissionRequest 语义；工具执行中 Interrupt 后工具进程及时终止。现有视觉“轮次 0、无异常”和官方 turn interrupted 不等于工具被及时终止。
@@ -105,6 +108,15 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-03 V2.1 第 2 步 statusLine 与体力（代码及合成预览已获用户确认，本地提交，不 push）**：
+  - **串联与配置**：标准库 `hooks/shion_statusline.py` / `--statusline` 读取 stdin，仅转发会话和两个窗口各两项数字，认证 POST `/usage/limits`，单次超时 0.3 秒；无效字段或不可达静默。原命令收到同一份原始输入，stdout 不做解码或修改，最多等待 1 秒，超时只保留已收到的原始输出。Windows 按官方规则用 Git Bash / PowerShell，兼容自定义 Bash 路径和 mingw64/bin，避免改成 cmd 语义；保留原 padding。安装记录与 settings 共用现有备份/原子替换事务，保留原 JSON 值字节，恢复只处理接管项；当前接管项、记录或任一事务依赖漂移时停止，回滚也不覆盖外部新内容。缺失活动记录时拒绝接管/断开，重复连接不写盘。
+  - **额度与体力**：两个窗口独立校验有限非负数，允许超过 100%，过期/缺失隐藏。逐会话保存，展示有效观测最大值；statusLine 会话使用终端四档，不再被该会话的 hook 锁成两档。未知客户端的 `rate_limit` / `quota_auto_resume_fired` 仅设置/清除各自两档信号，不推断百分比、不看错误正文、不结算授权/暂停、不以普通消息复活。体力只在底层待机生效，工作/授权/暂停/拖动/手动表情/喂食优先；授权期间临时站起，播报等待空闲和气泡结束。终端去重用 v5 可选 `stamina_announced`，只存窗口时间和枚举，跨重启同档不重播。
+  - **周报与文档**：只把本次收到且未过期的 seven_day 记入接收日期的峰值，保留 8 周；有值才显示额度行，参与“额度刺客”称号。不把旧会话的值重记到新日。同步三语文案、连接说明、README 和 spec；替代图沿用 blink/desk/sleep，没有制作新图或更改原始素材。
+  - **测试**：首轮专项 510 通过、2 个新增测试把编号误当对象，修正后专项 80 通过；后补去重/记录冲突/存档/打包配置专项 `183 passed in 12.56s`。全量见总览：2147 通过、9 跳过，唯一旧测试失败已修正。最后专项 `369 passed, 1 skipped`，另有旧认证路由测试 WinError 10053（关闭未读完的 HTTP 连接）；该例及额度接口、旧安装提示、Bash/PowerShell 选择复核 `5 passed in 2.05s`，不宣称全量全绿。早一轮周报缓存原子替换曾出现 WinError 5，疑似文件被占用，原因未确认；随后该用例在 80 项中复核通过，未修改 usage 扫描实现。日志均在忽略目录 `build/stamina-*.log`。
+  - **收尾验证**：PowerShell / Git Bash 最终专项 `85 passed in 9.88s`（`build/stamina-powershell-final.log`）；峰值未增加时不再反复推迟存档或重绘卡片，新增频繁更新回归，最新核心专项 `210 passed in 14.50s`（`build/stamina-complete.log`）。`check_private.py` 默认暂存区扫描通过；另外用同一检查器检查全部 28 个改动/新增文件，零命中（`build/stamina-worktree-private.txt`），`git diff --check` 通过。用户已确认代码与合成预览通过并授权本地提交（不 push）；提交前按 28 文件清单精确暂存并重跑暂存区隐私检查。
+  - **打包验证**：仅在 `build/stamina-package/` 构建隔离测试包，未替换 dist 发行目录或已安装 Shion-dev。第一次直接调用打包器漏用 `tools.build.build_environment()`，包中混入不同的 ICU / UCRT 等 DLL，诊断见 QtCore 入口加载失败并表现为快照超时，具体故障 DLL 未单独定位；临时诊断脚本/包只在 build 中。按项目净化环境重打后整包冒烟 `102` 项通过（初次通过日志 `build/stamina-package-clean-check.log`，最终代码复核日志 `build/stamina-package-final-check.log` 同为 102 项），包括三语连接/恢复、快照、原状态栏串联、认证白名单和活实例事件。移除 Qt 的隔离副本也分别通过 PowerShell / Bash 的精确输入输出与认证元数据验证（`build/stamina-frozen-report.json`），最终再次验证两种 shell 均通过，普通冻结版快照重试 1.125 秒成功（`build/stamina-frozen-final.log`），确认 statusLine 无 Qt 依赖；源码模式同样有无 Qt 导入测试。最精简 PATH 找不到 PowerShell 的问题已改为系统绝对路径回退并复核。
+  - **预览**：全为合成数据，终端四档 `build/stamina-step2-20261103-overview.png`；带 93% 峰值和对应称号的三语周报 `build/weekly-quota-step2-20261103-v2-{zh,en,ja}.png`，无数据隐藏由测试验证。新文件名避免旧图片缓存。真正桌面 hook 是否发出、窗口焦点/动态跳跃/高 DPI 仍待人工验收，未部署、未改真实配置。
 
 - **2026-11-02 V2.1 第 1 步周报完成（用户已确认，可本地提交，不 push）**：
   - **范围**：新增 `usage.py`（标准库扫描/缓存/计价）、`usage_service.py`（单后台线程与取消）、`weekly.py`（纯数据计数/称号/周区间）、`weekly_ui.py`（QPainter 卡片/窗口）。接入状态存档 v5 可选字段、控制器现有事件与设置菜单、快照入口；打包清单补价格和称号 JSON。不增加依赖，不修改真实 settings、正式 hook 逻辑、体力或已安装 Shion-dev。
