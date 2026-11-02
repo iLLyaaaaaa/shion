@@ -102,7 +102,7 @@ Only **newly started** Claude Code sessions pick up the change.
 
 The ChatGPT integration is installed separately: right-click → **AI connections** → **ChatGPT** → **Connect / inspect configuration**.
 
-- Shion first shows the exact changes to your Codex config (`config.toml` and `hooks.json`, by default in `%USERPROFILE%\.codex`) and writes only after you confirm. Files are backed up first and only Shion's own entries change
+- Shion first shows the exact changes to your Codex config (`config.toml` and `hooks.json`, by default in `%USERPROFILE%\.codex`) and writes only after you confirm. Only Shion's own entries are inserted and no copy of your config is kept; disconnecting removes exactly those entries, and if they no longer match, Shion stops instead of overwriting your edits
 - Afterwards, review each Shion hook in Codex with `/hooks` and check the connection with `/mcp`. After the first install, restart Codex, then start or reopen a session
 - **Disable integration temporarily** and **Disconnect and remove configuration** are in the same submenu
 

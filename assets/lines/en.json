@@ -470,9 +470,9 @@
     "chatgpt_disconnected_say": "I lost contact with ChatGPT... I have no idea what it's doing now.",
     "chatgpt_ended": "ChatGPT stopped over there... I can't see how it went, so go take a look yourself.",
     "chatgpt_interrupted": "ChatGPT got interrupted. If you want it to keep going, don't forget to go back and tell it.",
-    "chatgpt_review": "Review the exact diff in Details. Confirmation changes only Shion entries. Files are backed up and verified; conflicts stop the transaction. Failure rolls back files only if unchanged by others. Review each hook in the client afterward.",
+    "chatgpt_review": "Review the exact diff in Details. Confirmation only inserts Shion entries; no copy of your configuration is kept. Writes are journaled and verified; conflicts stop the transaction. Disconnecting removes exactly what was recorded. Failure rolls back files only if unchanged by others. Review each hook in the client afterward.",
     "chatgpt_trust": "Configuration installed. Review each Shion hook in Codex /hooks and check /mcp. Restart the client for first installation, then create or reopen a session; hot reload of existing sessions is unverified.",
-    "chatgpt_removed": "Owned Shion configuration removed; backups and trust records retained.",
+    "chatgpt_removed": "Owned Shion configuration removed; trust records in Codex are left as they are.",
     "chatgpt_config_error": "ChatGPT configuration operation incomplete: {error}"
   }
 }
