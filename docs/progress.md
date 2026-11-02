@@ -40,6 +40,7 @@
 
 ## 正在进行的阶段与下一步
 
+- **2026-11-02 V2.1 第 0 步可行性探测已完成（只做 Claude Code）**：真实 usage 聚合可读；终端 statusLine 已取得 five_hour/seven_day，桌面版原会话与新会话均无记录；hook 两档退路仍只有官方文档候选、未实测。临时配置已按备份恢复，恢复前后哈希核验通过。下一步为第 1 步周报开发，由用户另行安排；本次不开始。spec 的周报、体力和安装器变更仍是规划。
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
 - **v2.0.0 已发布（2026-11-02）**：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.0.0 ，详见下方发布记录。原定的三项发布前人工专测（立即中断后工具进程是否结束、Codex 配置断开再重连、真实干净环境解压运行）没有做，改为**发布后日常使用中验证**；Codex 配置的安装/卸载/冲突已有隔离自动测试，但不代替真实 Codex 客户端里的断开再重连。
 - 下一步由用户决定：日常使用中留意上面三项和下方清单；`test_real_process_tree_is_terminated` 满载时失败的根因仍未确认。
@@ -99,6 +100,16 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-02 V2.1 第 0 步可行性探测完成（本地提交，不 push）**：
+  - **范围**：只新增标准库工具 `tools/probe_usage.py` 及隔离测试，未修改 `shion/`、正式 hooks 或安装器；真实 statusLine 经用户确认临时修改，现已按字节恢复。已有 spec/progress 规划改动按用户要求纳入本任务；三语 README 补上规划功能的平台限制，不表示功能已经实现。
+  - **usage 结果**：真实只读扫描 199 个 jsonl；assistant usage 行 16,154，合格条目去重前 16,154、去重后 7,016；本地日期范围 2026-10-02～2026-11-02。最近 7 天四项逐日合计、模型名列表、客户端字段分布只写在忽略目录 `build/probe-usage.txt`，没有路径、项目名、对话内容或消息标识。`entrypoint` 分布：`claude-desktop` 35,728、`claude-vscode` 165、`cli` 861、`sdk-cli` 272；这是带该字段的顶层记录分布，不等于 usage 条目数，也不证明每条 usage 都能区分客户端。未知客户端值和不符合公开 Claude 模型名格式的值分别合并为 `<other>` / `<other-model>`，不回显自由文本。
+  - **统计口径与局限**：完整扫描并按 `(message.id, requestId)` 去重，缺两种标识或日期/数值非法的条目不纳入；本次重复键保留首次遇到的有效记录。坏行及超过 1 MiB 的行在内存计数，不增加规格以外的报告项。第 1 步仍须明确流式重复记录的 usage 是否变化、应采用哪条；本探测不作为账单核验。按本机时区取本地日期，测试同时隔离 HOME / APPDATA / 配置目录，未运行产品全量测试。
+  - **hook 调研**（官方文档核对；本机终端 CLI `2.1.289`）：[StopFailure](https://code.claude.com/docs/en/hooks#stopfailure) 的 `error == "rate_limit"` 是限流候选信号；[Notification](https://code.claude.com/docs/en/hooks#notification) 的 `quota_auto_resume_fired` 表示额度等待后自动继续，`quota_auto_resume_stale` / `quota_auto_resume_disabled` 不表示任务已经继续，这三种类型要求 2.1.234+。这些字段不能提供 five_hour/seven_day 百分比；rate_limit 也不保证是订阅窗口耗尽，自动继续不保证已用比例回到 50 以下。未新增真实 hook、未故意撞限额；桌面版支持和实际触发仍未验证，不能把文档信号当作真机验收通过。
+  - **statusLine 实测**：已有第三方命令，临时接收器只投影顶层键名和额度数字，并串联原命令（1 秒超时）；未知键名合并为占位。用户在桌面版现有会话发两条并等回复：0 条记录；新开桌面版会话重试两条并等回复：仍为 0。之后终端发两条并等回复：共 6 条调用记录，其中 4 条未带 rate_limits，后续 2 条带 `five_hour.used_percentage=9` / `resets_at=1793627400` 和 `seven_day.used_percentage=8` / `resets_at=1794186000`。调用次数不等于消息数；没有记录只能说明本次未观测到桌面调用，不能推断所有版本都不支持。聚合元数据只在忽略目录 `build/probe-statusline.jsonl`。
+  - **恢复核验**：原始备份 SHA-256 `88446db17715def1e3924ca0043a678567d025b2ac5d67eea6b497d6a5b130b5`；临时写入后 SHA-256 `e2706d60e3639e2f800c5df6bd9485a78a9af9ea5b8664a288bc56c78a9a1c51`。恢复前确认当前哈希等于临时写入后哈希，原子替换前再核对原字节未变；原始备份哈希通过后恢复，恢复后 SHA-256 与原始备份完全一致。无并发冲突。备份留在用户配置目录，文件名及阶段记录只在忽略目录 `build/probe-statusline-state.json`；接收器恢复后停止记录，防止会话缓存临时命令继续采样。隔离的安装/备份/并发修改拒绝恢复/原字节恢复测试均通过。
+  - **结论与下一步**：token 周报的数据源可行；额度入口目前只有终端获得真机证据，桌面体力暂不承诺支持。StopFailure 和额度自动继续通知值得以后单独验证，但本步未安装它们，也不把普通限流或自动继续等同于五小时窗口耗尽/刷新。第 1 步先做周报；第 2 步若仍无已验证的桌面 hook 退路，体力只对终端开放，未知额度保持隐藏。
+  - **验证**：隔离 `tests/test_probe_usage.py` 6 项通过，覆盖跨文件重复、坏行/截断/超长行、非法标识/计数、时区、未知模型和客户端字段的隐私隔离、输入字节不变与固定输出位置。初次测试有一处期望数误写（把 user 行也算入 assistant 行），已修正；收尾重跑仍为 6 项通过。`tools/check_private.py` 暂存区检查与 `git diff --cached --check` 通过；真实聚合输出、临时接收器/控制器和状态记录均忽略、不入库。未运行产品全量测试。
 
 - **2026-11-02 发布 v2.0.0**（证据在忽略目录 `build/release-2.0.0-check/`、`build/release-build-2.0.0-final.log`、`build/release-final-pytest.log`）：
   - **Codex 联动隔离测试**（`codex_isolated.py`，走菜单同一函数 `review_connection`，确认框自动点“是”，观察端命令指向打包版 `Shion.exe`；CODEX_HOME / HOME / USERPROFILE / APPDATA / SHION_DATA_DIR / SHION_INSTANCE_NAME / SHION_PORT 全部指向临时目录和空闲端口）：准备一份带注释、怪格式、末尾无换行、其他 MCP 和其他 hook 的 config.toml / hooks.json。两轮“安装 → 卸载”：安装后只有插入、原有字节逐字保留，MCP 只多 `shion_lifecycle_v1`，hook 多 7 组；按配置命令能启动打包版观察端；卸载后两个文件与原始字节完全一致，无残留。冲突 A（安装后改用户自己的行再卸载）：只移除诗音条目，用户修改保留。冲突 B（改诗音自己的条目再卸载）：拒绝卸载，文件不动。无残留进程，临时目录已删除。

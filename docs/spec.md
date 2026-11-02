@@ -276,7 +276,7 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 - `PreToolUse`：**检查点**。先问 `/pause/wait`；停下等待中就按 25 秒一段一直等，直到“继续”或 `prompt` 解除；诗音没开、连不上、返回内容不对一律放行（`stop`/`paused` 必须恰好是 `true` 才算数）。被立即中断或等满上限时输出 `{"continue": false, "stopReason": …}` 并附带 `permissionDecision: deny`（保证这次工具不执行），不发 `working`；等满上限（`remote.pause_timeout`，默认 30 分钟）同样处理并发 `pause_timeout`
 - `stopReason` 按存档语言取 `ui.hook_stop`（默认“用户通过诗音让这一轮工作停下，请等待用户指示”）；等满上限取 `ui.hook_stop_timeout`（默认“用户很久没有回应，这一轮先结束，请等待用户指示”）。官方文档：`continue: false` 让 Claude 在 hook 运行后完全停止处理，优先于任何事件专属的决定字段；`stopReason` 显示给用户并留在对话里；对 PreToolUse 和 PostToolUse 都有效
 - `SessionStart`：如果 `/health` 不通，就启动桌宠（`.venv\Scripts\pythonw.exe -m shion`，脱离父进程，不弹出控制台窗口），然后发送 `session_start` 事件。
-- `Stop`：只发送 `{"type":"stop"}`，不读取/转发 `last_assistant_message`，不打开 `transcript_path`。只说当前语言的完成提醒。
+- `Stop`：只发送 `{"type":"stop"}`，不读取/转发 `last_assistant_message`，不打开 `transcript_path`。只说当前语言的完成提醒。（token 统计由主程序另行只读扫描，见「V2.1 诗音周报与体力」）
 - 其他事件（`PreToolUse` 发 `working`）只负责转发。
 - 配置写进**用户级** `~/.claude/settings.json` 的 `hooks` 字段，这样终端和桌面端的 Code 标签页都会加载。写之前先备份原文件，**合并而不是覆盖**用户已有的配置。另外写一个 `tools/install_hooks.py`（安装）和 `tools/uninstall_hooks.py`（卸载）。
 - **转圈文字**：PreToolUse / PostToolUse 两个检查点条目带官方通用字段 `statusMessage`（“hook 运行时显示的自定义转圈文字”），取 `ui.hook_status_waiting`：中“诗音在看着～（一直停在这里就是暂停了，右键诗音点继续）”/ 英 / 日，写成平时一闪而过不奇怪、停下时一直显示也看得懂。其他事件不加。文字在**安装时**按诗音存档语言写入（`--lang zh|en|ja` 可指定）；在诗音里换语言后要重跑一次 `install_hooks.py` 才会跟着变。**转圈文字只在终端版显示**，桌面端 Code 标签页不显示 hook 的 statusMessage（已知限制，用户验收 2026-10-21，不修），桌面端靠暂停标签
@@ -550,7 +550,7 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
    - 菜单结构（2026-10-30 对齐）：顶层每个提供方一行“{名称}：{连接状态} · {活动}”，截断到 240 像素，全文挂 tooltip（ChatGPT 行的 tooltip 另附原多行状态）；v2 调度开关打开时额外的那一行不变。“AI 连接”下并列“Claude Code ›”和“ChatGPT ›”（Claude Code 在前，未启用 ChatGPT 时只有前者），两边结构相同：禁用的“连接：{状态}”“活动：{状态}”两行（不带提供方前缀，截断到 360 像素挂 tooltip）、分隔线、上述三个操作项，文案两边一致。Claude 连接用 `connection.state`，活动依次取已临时关闭 / 已停下 / 等待授权 / 正在工作 / 空闲；ChatGPT 连接取已临时关闭 / 已安装 / 未安装 / 无法读取配置（只读 Shion 安装记录），活动显示观察到的活动轮次，不确定时标“待确认”并在 tooltip 说明只统计本次观察。Claude 的“连接 / 查看配置”在任何状态都打开连接面板；“断开并移除配置”只在已连接、路径失效、无法读取时出现，`connection.detail` tooltip 挂在最后一个连接项上。双击状态气泡仍用不含品牌名的“连接状态：…”
    - **临时关闭联动（Claude）**：诗音表现得像没开。hook 照常调用，服务端立即响应：`/event` 只校验后忽略（不改状态、不说话）；`/pause/wait` 立即放行；`/permission/open` 不登记、不给 id，hook 不输出决定，交回 CC 自己的授权框；`/permission/wait` 一律 gone；`/feedback/take` 返回空且不取走反馈队列。切换为关闭时撤回全部授权请求（含已决定未取走的）、放行正在检查点等待的 hook（不带停下）、清掉暂停和中断标记，诗音回到空闲，“工作遥控”子菜单整体置灰。重新开启时不补播关闭期间的事件，从空闲开始。开关存进 `state.json` 的 `claude_link_enabled`（ChatGPT 的开关同样存在数据目录里），旧存档缺字段时为开启
    - 确认面板说明会合并写入 `%USERPROFILE%\.claude\settings.json`、备份及迁移。沿用 `tools/hooks_config.py`，CLI 安装/卸载与界面共用；事件、command + args、matcher、timeout、statusMessage 均沿用现有定义
-   - 只处理明确的诗音脚本/打包命令，兼容旧命令格式，不按子串删除第三方条目；statusLine、modelSettings、未知键及混合分组中的其他 hooks 均保留。重复连接无变化时不写盘、不备份
+   - 只处理明确的诗音脚本/打包命令，兼容旧命令格式，不按子串删除第三方条目；modelSettings、未知键及混合分组中的其他 hooks 均保留；statusLine 自 V2.1 起由诗音接管并串联原命令、断开时按字节恢复（见「V2.1 诗音周报与体力」）。重复连接无变化时不写盘、不备份
    - 写前校验用户级及本项目 `.claude/settings.local.json`，损坏/空 JSON 和非法 hooks 结构拒绝写入。所有变更文件先备份原始字节并暂存，再先移除项目级旧诗音 hooks、后写用户级配置，避免双发；任一步失败恢复已改文件，恢复失败明确报告备份位置。检测到并发修改时拒绝覆盖。**迁移旧项目 hooks 只在源码运行时有效**，且只处理当前源码项目，不扫描其他旧项目；用 exe 连接时，请在旧项目里运行 `tools\uninstall_hooks.py`，再使用用户级连接，避免重复事件。连接确认面板中英日均明确说明此限制
    - 断开只删用户级诗音条目，不恢复旧项目级 hooks，不修改其他设置；变更前同样备份。hooks 路径指向当前运行位置，移动/缺失/条目不完整时可重新连接修复
 
@@ -622,3 +622,90 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 - **决定**：Codex 观察端（`shion/codex_mcp.py`，入口 `Shion.exe --codex-observer`）只做事件转发、2 秒心跳和租约，**不拉起诗音**。`668962c` 加入的“收到 SessionStart 且命名管道不存在时拉起”已删除（`autolaunch()`、`codex_link_enabled()`、`_AUTOLAUNCH` 及 `dispatch()` 中的调用，连同 `launcher.AutoLaunch` 及其冷却逻辑）；`git diff d907e33 -- shion/codex_mcp.py` 为空。Codex 用户改为在右键菜单 → 设置中开启“开机自启”，三语 README 的常见问题里已写明。
 - **原因（诊断结论）**：Codex 把 MCP 观察端放进设置了 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 且不允许脱离（breakaway）的 Job Object。观察端拉起的诗音即使带 `CREATE_BREAKAWAY_FROM_JOB` 也留在这个 Job 里，Codex 退出或关闭 MCP 子进程时，Job 关闭，诗音被一起结束，所以这条路径做不到“拉起后独立存活”。Claude 的 hook 子进程不在这样的 Job 里，行为不受影响。
 - **保留不变**：Claude hook 的 SessionStart 拉起及 `claude_link_enabled` 临时关闭判断；`shion/launcher.py` 的 `shion_running()`、`launch_shion()`、`INSTANCE_NAME`（hook 和 `app.py` 在用）；单实例命名互斥锁（`fad0e3a`）；未开“置于最上层”时对 Codex 桌面端窗口的层级跟随（`4a6e9eb`）。
+
+## V2.1 诗音周报与体力（2026-11-02 规划，尚未开发）
+
+只做 Claude Code，不做 Codex/ChatGPT。目标是给诗音一个值得晒、值得宣传的功能。用户 2026-11-02 已同意：为统计 token 改动下方隐私规则；周报带 API 价格估算。
+
+### 隐私规则（本版改动）
+
+- hook 仍**不打开** `transcript_path`，`Stop` 规则不变。token 统计由**诗音主程序**在后台线程只读扫描 CC 本地对话记录。
+- 扫描只取 `type == "assistant"` 且带 `message.usage` 的行中的：`timestamp`、`message.id`、`requestId`、`message.model`，以及 usage 的 `input_tokens`、`output_tokens`、`cache_creation_input_tokens`、`cache_read_input_tokens`。**绝不读取、保存、记录或显示**对话内容、`cwd`、文件路径和项目目录名；日志中只写计数。
+- 落盘只有按本地日期（和模型）的聚合数，以及增量扫描所需的“文件 → 已读字节偏移”。缓存里的文件以路径 sha256 前 16 位作为键，不存明文路径。
+- 设置菜单新增“统计用量”开关，默认开启。关闭后不扫描，周报里隐藏 token 和价格两行。隐私模式不影响用量统计，因为它们只是数字。
+
+### 数据源 A：token 用量（`shion/usage.py`）
+
+- 目录：设置了 `CLAUDE_CONFIG_DIR` 时用 `<它>/projects`，否则用 `%USERPROFILE%\.claude\projects`，递归读取其中的 `*.jsonl`。目录不存在就视为没有数据，不报错。
+- 逐行流式读取：先用 `'"usage"' in line` 预筛，再解析 JSON；坏行跳过并计数，单行超过 1 MB 也跳过。
+- **去重**：同一条回复会被写入多次，按 `(message.id, requestId)` 去重，两者都缺失的行不计入。增量扫描的去重集合只保留最近 8 天的键。
+- 文件被截断或替换（大小小于已记偏移）时，从头重读该文件。去重集合保证不会重复计数。
+- 时间戳按本机时区换算成本地日期，日界是 00:00。`usage.json`（位于 `%APPDATA%\Shion`）只保留最近 8 周的每日聚合：`{date: {model: {in, out, cw, cr}}}`。写入方式与存档相同：先写临时文件，再原子替换。
+- 触发时机：启动后 10 秒、每次 `Stop` 事件后（30 秒防抖）、打开周报时。扫描在后台线程进行，不阻塞 GUI 和 hook 响应。
+- “总 token”是四项之和，“输出 token”只算 `output_tokens`。
+
+### 数据源 B：额度（statusLine）
+
+- CC 把 statusLine 的 JSON 通过 stdin 传给 statusLine 命令。Pro/Max 订阅从会话的第一条回复之后开始带 `rate_limits.five_hour` / `rate_limits.seven_day`，各含 `used_percentage`（0～100，可能超过 100）和 `resets_at`（Unix 秒）。每个窗口都可能单独缺失，API 账号则完全没有。
+- 新增入口 `Shion.exe --statusline`（源码运行时为 `hooks/shion_statusline.py`，只用标准库）。它读完 stdin，只取上述 4 个数加上 `session_id`，带令牌 POST 到 `/usage/limits`，超时 0.3 秒；失败时静默。其他字段一律不转发。
+- **与用户已有的 statusLine 串联**：连接时如果 `settings.json` 里已有第三方的 `statusLine`，把它的原值原样保存到诗音的安装记录中。之后运行时用同一份 stdin 调用原命令（超时 1 秒），把它的 stdout 原样输出。没有原命令时什么都不输出。断开时按字节恢复原值。
+- 写入、断开和备份全部走 `tools/hooks_config.py` 现有的事务、备份和并发检测逻辑，“已连接”的判定加上 statusLine 这一项。修改 spec「一键连接」中“statusLine 保留”那条规则时要同步更新：诗音只接管自己写入的那一项，并负责恢复原值。
+- 数据超过 `resets_at` 后视为过期，过期或从未收到时显示为“未知”。
+
+### 体力（只用 five_hour）
+
+| 已用 | 状态 | 表现（新图到位前的替代图） |
+| --- | --- | --- |
+| < 50% | 精神 | 正常 |
+| 50～80% | 打哈欠 | 待机动作里加入打哈欠（先用 `blink`） |
+| 80～95% | 趴下 | 待机改为趴着（先用 `desk_*`） |
+| ≥ 95% | 倒地 | 待机改为倒地（先用 `sleep`），台词“今天……撑不住了……” |
+
+- 进入每一档时说一次三语台词，同一个 5 小时窗口内每档最多一次。下一次窗口刷新（`used_percentage` 回落到 50 以下，或越过 `resets_at`）后播放“满血复活”：跳一下并说一句台词。
+- **铁律**：体力只改变待机外观。授权面板、检查点面板、暂停/继续/中断、拖动、固定表情、喂零食都优先于体力状态。倒地时来了授权请求，必须照常弹出、照常可点，面板打开期间诗音临时站起来。
+- 额度未知时隐藏体力，不猜测，也不显示错误状态。双击状态气泡增加一行“5 小时额度 42% · 7 天 73%”，未知时这一行不显示。
+
+### 诗音周报
+
+- **周**：本地时间的周一到周日。每周一（或之后）的第一次启动，在问候结束、没有授权或输入面板时，诗音举着报告说“这周的报告出来了！”，点一下打开**上一周**的周报。右键菜单的“周报”可以随时查看**本周到目前为止**和上一周。
+- **统计项**：
+  - token：总量、输出量，以及 7 天柱状图（每天总量）
+  - API 价格估算（见下）
+  - 7 天额度：本周观测到的 `seven_day.used_percentage` 最大值，没有收到时显示“未获取”
+  - 诗音自己记录的数据：完成任务数（`Stop` 次数）、工作时长（每个会话从 `UserPromptSubmit` 到 `Stop` 的时长之和，单轮最多算 2 小时，没收到 Stop 的不算）、通过诗音批准和拒绝的次数、摸头和喂零食次数、最晚活动时间（日界按 05:00 算，例如 02:41 算前一天的深夜）
+- 诗音自己的统计新增存档可选字段 `weekly_stats: {date: {...计数}}`，只保留 8 周，规则沿用 v5 可选字段：缺失或非法时为空，不升 schema。
+- **称号**：数据放在 `assets/weekly_titles.json`（三语名称、一句评语、条件、优先级、使用的立绘），按优先级取第一个满足条件的称号。首批：
+  - 额度刺客：7 天额度 ≥ 90%
+  - 夜猫子：至少 2 天在凌晨 01:00 后还有活动
+  - 吞金兽：总 token ≥ 1 亿
+  - 审批狂魔：批准 ≥ 50 次
+  - 甩手掌柜：任务 ≥ 20，且批准、拒绝、摸头加起来 ≤ 3
+  - 投喂达人：零食 ≥ 20 或摸头 ≥ 50
+  - 摸鱼周：任务 ≤ 2
+  - 勤劳搭档：兜底称号
+
+  阈值都写在 JSON 里，方便以后调整，也方便内容包扩展。
+- **卡片**：用 QPainter 渲染成 1200×1500（4:5）的 PNG，语言跟随当前设置，采用终端风格。卡片包含：周范围、称号和评语、诗音立绘、上述统计、7 天柱状图，角落是 `github.com/iLLyaaaaaa/shion`（设置里可以关掉）。**不得出现**文件名、路径、项目名、提示词或会话摘要。
+- 数字格式：中文用 万 / 亿，英文用 K / M / B，日文用 万 / 億。
+- 周报窗口有两个按钮：“保存图片”（默认保存为 `图片\Shion-weekly-<周一日期>.png`）和“复制到剪贴板”。窗口不抢焦点，Esc 关闭。
+- 预览命令：`python -m shion --snapshot <out.png> --weekly-preview [--lang zh|en|ja]`，使用合成数据。
+
+### API 价格估算
+
+- `assets/pricing.json`：按模型名前缀匹配，填写每百万 token 的 input / output / cache write / cache read 美元单价，带 `as_of` 日期，价格以 Anthropic 官方公开价格为准。
+- 卡片上写“按 API 公开价格约 $xx”，再用小字注明“估算，仅供参考”。出现无法匹配价格的模型时，小字改为“部分模型未计价”。价格变动时只需要改这份 JSON。
+
+### 开发步骤
+
+0. **可行性探测**（用户已授权**只读**读取真实 `~/.claude`，本步不改程序）：
+   - `tools/probe_usage.py` 只输出聚合结果到 `build/probe-usage.txt`：文件数、带 usage 的行数、去重前后条数、最近 7 天每日四项合计、模型名列表、最早和最晚日期、`entrypoint` 等区分客户端的字段名及取值分布。**不输出任何路径和内容**。
+     - 探测口径：客户端分布只统计预设客户端字段在顶层记录中的出现次数，不把它等同于 assistant usage 数；未知自由文本值合并为占位，模型名也限制为公开命名格式。去重前条数只含标识、日期和 token 数值合格的行，本次去重保留首次遇到的有效记录；正式统计前另行确认流式重复记录的取值策略。
+   - statusLine 探测：经用户确认后，备份 `settings.json`，临时设置一个 statusLine，把收到的顶层键名和 `rate_limits` 追加写入 `build/probe-statusline.jsonl`。用户分别在**桌面版 Code 标签页**和**终端**各发两条消息并等回复；桌面版没有任何记录时，再新开一个会话重试。恢复前先核对当前配置哈希与探测写入后哈希一致，不一致就停下展示差异、不得覆盖；一致时按备份恢复配置，并核验恢复后哈希与原始备份一致。
+   - 同时确认是否有 hook 事件能携带“撞到限额”的信号，可以作为桌面版不运行 statusLine 时的两档退路（倒地 / 复活）。
+   - 结论写进 progress。如果桌面版不运行 statusLine，又没有可用的 hook 信号，体力就只在终端可用，README 中注明。
+   - **第 0 步结果（2026-11-02）**：usage 聚合可读；桌面版原会话和新会话均未观测到 statusLine 调用，终端取得 five_hour/seven_day 数字。配置已按备份恢复且原始哈希一致。StopFailure / Notification 的额度自动继续类型是官方文档候选，尚无桌面真机证据；当前只确认终端额度入口可用，体力功能仍未实现。详见 progress 当日记录。
+1. `usage.py`、`weekly_stats`、称号、价格、周报卡片和菜单入口（先不做体力）。
+2. statusLine 入口与串联、`/usage/limits`、体力状态和双击状态行。
+3. 新图：打哈欠、趴下、倒地、举报告卡（GPT 画图后通过 `tools/process_sprites.py` 处理），替换掉替代图。
+
+测试仍在隔离的 HOME / APPDATA 下运行，使用合成 jsonl（包含重复行、坏行、截断文件、跨时区日期和未知模型）。只有第 0 步获准读取真实数据。

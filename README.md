@@ -153,6 +153,7 @@ Apps packaged with PyInstaller are occasionally misdetected. You can review the 
 
 ## Known limitations
 
+- **Planned V2.1 stamina (not implemented yet):** quota data was observed only in the Claude Code terminal probe; existing and new Desktop Code sessions produced no statusLine records. Desktop hook fallbacks remain unverified.
 - ChatGPT (Codex) is observation only: Shion can't approve, stop or interrupt it, and **Work remote** applies to Claude Code only
 - The Codex desktop app sends no "start" event, so "Working" appears only after its first tool call
 - Codex doesn't launch Shion automatically (see the FAQ above; turning on **Start with Windows** helps)
