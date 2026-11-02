@@ -40,7 +40,7 @@
 
 ## 正在进行的阶段与下一步
 
-- **2026-11-02 V2.1 第 0 步可行性探测已完成（只做 Claude Code）**：真实 usage 聚合可读；终端 statusLine 已取得 five_hour/seven_day，桌面版原会话与新会话均无记录；hook 两档退路仍只有官方文档候选、未实测。临时配置已按备份恢复，恢复前后哈希核验通过。下一步为第 1 步周报开发，由用户另行安排；本次不开始。spec 的周报、体力和安装器变更仍是规划。
+- **2026-11-02 V2.1 第 0 步结论已获用户确认；下一步为第 1 步周报计划**：桌面版不运行 statusLine，终端版 rate_limits 在首条回复后出现；配置已按哈希恢复。规格确定终端 statusLine 四档、桌面 hook 两档（rate_limit 倒地 / quota_auto_resume_fired 复活），桌面真实 hook 触发待人工验收；吞金兽阈值为总 token ≥ 2 亿。第 1 步仅做周报，不含体力；先给用户看计划，确认后编码。
 - 当前是阶段 2 开发预览、阶段 1 人工验收暂缓；暂缓不阻塞独立开发，也不代表阶段 1 全部验收通过。
 - **v2.0.0 已发布（2026-11-02）**：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.0.0 ，详见下方发布记录。原定的三项发布前人工专测（立即中断后工具进程是否结束、Codex 配置断开再重连、真实干净环境解压运行）没有做，改为**发布后日常使用中验证**；Codex 配置的安装/卸载/冲突已有隔离自动测试，但不代替真实 Codex 客户端里的断开再重连。
 - 下一步由用户决定：日常使用中留意上面三项和下方清单；`test_real_process_tree_is_terminated` 满载时失败的根因仍未确认。
@@ -53,6 +53,8 @@
 以下是当前交接清单；历史原文中的 125 条未勾选明细全部留在月度归档（包括后续版本已取代的旧方案/旧计划，不自动改勾）。需要执行某项时用 `rg -n '关键词|\[ \]' docs/progress-archive/2026-10.md` 定位对应小节，并以最新实现为准。
 
 V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；平时碰不到的项目（立即中断后工具进程是否结束、Codex 配置断开再重连、干净环境解压运行）原定发布前专测，v2.0.0 发布时未做，改为发布后日常使用中验证。
+
+- [ ] V2.1 桌面 hook 两档体力：Code 标签页真实撞限额时是否触发 `StopFailure.error=rate_limit`，额度等待后自动继续时是否触发 `Notification.notification_type=quota_auto_resume_fired`；确认倒地/复活只改变待机，不影响授权、暂停、继续和中断。当前仅文档核对，尚无真实触发样本。
 
 - [ ] 阶段 1：修复后桌面普通任务的完整生命周期、真实故障画面、活动中断连；原会话自动恢复或明确的恢复边界。
 - [ ] 人工权限长等待、实际 PermissionRequest 语义；工具执行中 Interrupt 后工具进程及时终止。现有视觉“轮次 0、无异常”和官方 turn interrupted 不等于工具被及时终止。
@@ -92,7 +94,7 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 ## v1.1 待办
 - [x] hook ↔ 服务端令牌认证 + `SO_EXCLUSIVEADDRUSE`（安全审查建议）：`feature/v2-security-fixes` 已实现、合并并部署 Shion-dev（2026-11-01），剩余真机项见验收清单
 - [x] hook 耗时：诗音没开时的等待已在 v1.0.1 热修里去掉（见当前状态）。诗音运行时 PreToolUse 仍约 354 ms（源码）/ 435 ms（exe）：主要是进程启动，`find_cc_process` 只占约 26 ms；是否继续降另议
-- [ ] 实验：桌面端能否拿到 statusLine 的 `rate_limits.seven_day`（每任务额度上限的前提）
+- [x] V2.1 第 0 步 statusLine 探测：桌面版不运行（现有/新会话均无记录），终端 rate_limits 在首条回复后出现；四档体力仅终端可用，桌面采用 hook 两档，真实触发见人工验收项。
 - [ ] 接入 GPT / Codex
 - [ ] V2.1 候选：Codex 控制能力。实验结论：授权可行（异常时交回 Codex 自己处理，桌面端未测）；停下只能做到"检查点暂停 → 继续"；中断目前不可行。详见 docs/experiments/shion-v2-codex-control.md。
 
@@ -103,12 +105,13 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 - **2026-11-02 V2.1 第 0 步可行性探测完成（本地提交，不 push）**：
   - **范围**：只新增标准库工具 `tools/probe_usage.py` 及隔离测试，未修改 `shion/`、正式 hooks 或安装器；真实 statusLine 经用户确认临时修改，现已按字节恢复。已有 spec/progress 规划改动按用户要求纳入本任务；三语 README 补上规划功能的平台限制，不表示功能已经实现。
+  - **入库边界**：临时 statusLine probe 接收器/控制器及所有探测输出留在忽略目录 `build/`，不入库；`tools/probe_usage.py` 和 `tests/test_probe_usage.py` 按用户要求保留在 Git。此次只同步结论与规格，不修改产品代码或真实配置；提交前再次运行 `tools/check_private.py`。
   - **usage 结果**：真实只读扫描 199 个 jsonl；assistant usage 行 16,154，合格条目去重前 16,154、去重后 7,016；本地日期范围 2026-10-02～2026-11-02。最近 7 天四项逐日合计、模型名列表、客户端字段分布只写在忽略目录 `build/probe-usage.txt`，没有路径、项目名、对话内容或消息标识。`entrypoint` 分布：`claude-desktop` 35,728、`claude-vscode` 165、`cli` 861、`sdk-cli` 272；这是带该字段的顶层记录分布，不等于 usage 条目数，也不证明每条 usage 都能区分客户端。未知客户端值和不符合公开 Claude 模型名格式的值分别合并为 `<other>` / `<other-model>`，不回显自由文本。
   - **统计口径与局限**：完整扫描并按 `(message.id, requestId)` 去重，缺两种标识或日期/数值非法的条目不纳入；本次重复键保留首次遇到的有效记录。坏行及超过 1 MiB 的行在内存计数，不增加规格以外的报告项。第 1 步仍须明确流式重复记录的 usage 是否变化、应采用哪条；本探测不作为账单核验。按本机时区取本地日期，测试同时隔离 HOME / APPDATA / 配置目录，未运行产品全量测试。
   - **hook 调研**（官方文档核对；本机终端 CLI `2.1.289`）：[StopFailure](https://code.claude.com/docs/en/hooks#stopfailure) 的 `error == "rate_limit"` 是限流候选信号；[Notification](https://code.claude.com/docs/en/hooks#notification) 的 `quota_auto_resume_fired` 表示额度等待后自动继续，`quota_auto_resume_stale` / `quota_auto_resume_disabled` 不表示任务已经继续，这三种类型要求 2.1.234+。这些字段不能提供 five_hour/seven_day 百分比；rate_limit 也不保证是订阅窗口耗尽，自动继续不保证已用比例回到 50 以下。未新增真实 hook、未故意撞限额；桌面版支持和实际触发仍未验证，不能把文档信号当作真机验收通过。
-  - **statusLine 实测**：已有第三方命令，临时接收器只投影顶层键名和额度数字，并串联原命令（1 秒超时）；未知键名合并为占位。用户在桌面版现有会话发两条并等回复：0 条记录；新开桌面版会话重试两条并等回复：仍为 0。之后终端发两条并等回复：共 6 条调用记录，其中 4 条未带 rate_limits，后续 2 条带 `five_hour.used_percentage=9` / `resets_at=1793627400` 和 `seven_day.used_percentage=8` / `resets_at=1794186000`。调用次数不等于消息数；没有记录只能说明本次未观测到桌面调用，不能推断所有版本都不支持。聚合元数据只在忽略目录 `build/probe-statusline.jsonl`。
+  - **statusLine 实测**：已有第三方命令，临时接收器只投影顶层键名和额度数字，并串联原命令（1 秒超时）；未知键名合并为占位。用户在桌面版现有会话发两条并等回复：0 条记录；新开桌面版会话重试两条并等回复：仍为 0。终端版 rate_limits 在首条回复后出现；终端发两条并等回复：共 6 条调用记录，其中 4 条未带 rate_limits，后续 2 条带 `five_hour.used_percentage=9` / `resets_at=1793627400` 和 `seven_day.used_percentage=8` / `resets_at=1794186000`。调用次数不等于消息数；本次用户确认的结论为桌面版不运行 statusLine；版本变化后可重新验证。聚合元数据只在忽略目录 `build/probe-statusline.jsonl`。
   - **恢复核验**：原始备份 SHA-256 `88446db17715def1e3924ca0043a678567d025b2ac5d67eea6b497d6a5b130b5`；临时写入后 SHA-256 `e2706d60e3639e2f800c5df6bd9485a78a9af9ea5b8664a288bc56c78a9a1c51`。恢复前确认当前哈希等于临时写入后哈希，原子替换前再核对原字节未变；原始备份哈希通过后恢复，恢复后 SHA-256 与原始备份完全一致。无并发冲突。备份留在用户配置目录，文件名及阶段记录只在忽略目录 `build/probe-statusline-state.json`；接收器恢复后停止记录，防止会话缓存临时命令继续采样。隔离的安装/备份/并发修改拒绝恢复/原字节恢复测试均通过。
-  - **结论与下一步**：token 周报的数据源可行；额度入口目前只有终端获得真机证据，桌面体力暂不承诺支持。StopFailure 和额度自动继续通知值得以后单独验证，但本步未安装它们，也不把普通限流或自动继续等同于五小时窗口耗尽/刷新。第 1 步先做周报；第 2 步若仍无已验证的桌面 hook 退路，体力只对终端开放，未知额度保持隐藏。
+  - **结论与下一步（用户确认后更新）**：token 周报的数据源可行；桌面版不运行 statusLine，终端版 rate_limits 在首条回复后出现，临时配置已按哈希恢复。终端采用 statusLine 四档；桌面采用 `StopFailure.error=rate_limit` → 倒地、`Notification.notification_type=quota_auto_resume_fired` → 复活的 hook 两档，真实触发仍待人工验收。README 已注明四档仅终端可用；吞金兽阈值改为总 token ≥ 2 亿。第 1 步先做周报，体力和额度接入留在第 2 步。
   - **验证**：隔离 `tests/test_probe_usage.py` 6 项通过，覆盖跨文件重复、坏行/截断/超长行、非法标识/计数、时区、未知模型和客户端字段的隐私隔离、输入字节不变与固定输出位置。初次测试有一处期望数误写（把 user 行也算入 assistant 行），已修正；收尾重跑仍为 6 项通过。`tools/check_private.py` 暂存区检查与 `git diff --cached --check` 通过；真实聚合输出、临时接收器/控制器和状态记录均忽略、不入库。未运行产品全量测试。
 
 - **2026-11-02 发布 v2.0.0**（证据在忽略目录 `build/release-2.0.0-check/`、`build/release-build-2.0.0-final.log`、`build/release-final-pytest.log`）：
