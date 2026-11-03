@@ -251,6 +251,7 @@ def test_weekly_notice_waits_for_greeting_and_permission_then_once(env):
     ctl.hub.permissions.withdraw(pending)
     ctl._try_weekly_notice(env.now)
     assert ctl._weekly_offer
+    assert ctl.state.current(env.now) == 'cheer'
     ctl._on_click()
     assert ctl._weekly_previous and ctl._weekly_window.isVisible()
     assert env.data.weekly_announced == str(week_start(env.now.date()))

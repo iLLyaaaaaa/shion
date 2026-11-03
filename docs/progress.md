@@ -109,6 +109,12 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-11-03 V2.1 第 3 步 体力正式图（用户验收通过，本地提交，不 push）**：
+  - **素材**：`process_sprites.py --only yawn cheer slump collapse` 只新增这 4 张 448×512 图，其他 PNG 和 `fx_z.png` 不变。yawn、cheer 在 `STANDING`，slump、collapse 在 `SCALE_FROM_STANDING`。坑 1：yawn/cheer 进 `STANDING` 会让平均缩放比 0.8277→0.8239，使 sleep 重新生成与入库图不一致（`test_process_sheets` 失败）；新增 `AVG_EXCLUDE={yawn,cheer}` 让它们不参与平均，旧图可逐字节复现。坑 2：slump 横躺比画布宽（485>448），头居中会被裁；`EXTRA_SCALE["slump"]=0.90`，并在图宽≤画布时把整体夹进画布（对现有图无影响）。头大小只用数字与 idle 对比，没看原图。验收后 collapse 头偏小（宽约 277px vs 站立图约 295px），加 `EXTRA_SCALE["collapse"]=1.08` 并 `--only collapse` 重新生成（scale 0.439，尺寸 325×438），并排对比图 `build/s3-collapse-compare.png`。
+  - **接入**：体力 1 档待机表情 yawn（替换 blink）、2 档 slump（替换 desk）、3 档 collapse（替换 sleep）；周报提醒用 cheer（`TEMP_STATES` 加 cheer，3 秒，不进菜单表情）。slump/collapse 与 desk/sleep 同样视为安静、不待机动作、不播时段台词；collapse 无 Z、不进 bed。授权面板弹出仍站起。同步 `bundle_smoke` 快照、spec 精灵表/体力表和测试。
+  - **测试**：首次全量 `3 failed, 2159 passed, 8 skipped`（`build/step3-full.log`）；collapse 调整并修复坑 1 后再跑全量 `2 failed, 2160 passed, 8 skipped in 649.65s`（`build/step3-full2.log`），失败仅下面两项环境相关用例，不是全绿。失败项：`test_process_sheets` 首次失败已按坑 1 修复，第二次全量通过；`test_make_media` 在基线（stash 后）同样失败，原因是 pytest 临时目录在 C: 而仓库在 D:（`os.path.relpath` 跨盘），与本步无关；`test_find_cc_process…` 依赖本机是否有 claude 进程，基线单独复测通过，两次全量都失败，基线单独复测曾通过，原因未确认，疑似环境相关。
+  - **下一步**：真机看动态观感、体力档位真实切换。
+
 - **2026-11-03 V2.1 第 2 步 statusLine 与体力（代码及合成预览已获用户确认，本地提交，不 push）**：
   - **串联与配置**：标准库 `hooks/shion_statusline.py` / `--statusline` 读取 stdin，仅转发会话和两个窗口各两项数字，认证 POST `/usage/limits`，单次超时 0.3 秒；无效字段或不可达静默。原命令收到同一份原始输入，stdout 不做解码或修改，最多等待 1 秒，超时只保留已收到的原始输出。Windows 按官方规则用 Git Bash / PowerShell，兼容自定义 Bash 路径和 mingw64/bin，避免改成 cmd 语义；保留原 padding。安装记录与 settings 共用现有备份/原子替换事务，保留原 JSON 值字节，恢复只处理接管项；当前接管项、记录或任一事务依赖漂移时停止，回滚也不覆盖外部新内容。缺失活动记录时拒绝接管/断开，重复连接不写盘。
   - **额度与体力**：两个窗口独立校验有限非负数，允许超过 100%，过期/缺失隐藏。逐会话保存，展示有效观测最大值；statusLine 会话使用终端四档，不再被该会话的 hook 锁成两档。未知客户端的 `rate_limit` / `quota_auto_resume_fired` 仅设置/清除各自两档信号，不推断百分比、不看错误正文、不结算授权/暂停、不以普通消息复活。体力只在底层待机生效，工作/授权/暂停/拖动/手动表情/喂食优先；授权期间临时站起，播报等待空闲和气泡结束。终端去重用 v5 可选 `stamina_announced`，只存窗口时间和枚举，跨重启同档不重播。

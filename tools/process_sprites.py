@@ -23,9 +23,10 @@ CANVAS = (448, 512)       # 输出画布（宽, 高）
 FIG_H = 480               # idle 人物在输出中的高度
 BOTTOM = 8                # 脚底离画布底边的距离
 HEAD_FRAC = 0.40          # 用人物上部多少比例来算头部重心
-STANDING = ["idle", "blink", "happy", "proud", "stop", "dizzy", "working", "done", "neglect1"]
-SCALE_FROM_STANDING = ["sleep", "drag", "neglect2"]
-EXTRA_SCALE = {"neglect2": 0.82, "sleep": 1.06}  # 目测微调：让头的大小和 idle 一致
+STANDING = ["idle", "blink", "happy", "proud", "stop", "dizzy", "working", "done", "neglect1", "yawn", "cheer"]
+SCALE_FROM_STANDING = ["sleep", "drag", "neglect2", "slump", "collapse"]
+AVG_EXCLUDE = {"yawn", "cheer"}  # 不参与平均比例：保证 sleep / drag / neglect2 重新生成时与已入库的图逐字节一致
+EXTRA_SCALE = {"neglect2": 0.82, "sleep": 1.06, "slump": 0.90, "collapse": 1.08}  # 目测微调：让头的大小和 idle 一致
 
 
 def largest_component(img: Image.Image, rank: int = 0) -> Image.Image:
@@ -92,7 +93,7 @@ def main(only: list[str] | None = None):
         if n in imgs:
             scales[n] = FIG_H / imgs[n].height
     # 站立图相对 idle 被 GPT 放大了多少，坐着/悬空的图按同样比例缩
-    ratios = [scales[n] / base for n in scales if n != "idle"]
+    ratios = [scales[n] / base for n in scales if n != "idle" and n not in AVG_EXCLUDE]
     avg = float(np.mean(ratios)) if ratios else 1.0
     for n in SCALE_FROM_STANDING:
         if n in imgs:
@@ -105,6 +106,8 @@ def main(only: list[str] | None = None):
         fig = img.resize((round(img.width * s), round(img.height * s)), Image.LANCZOS)
         cx = head_center_x(fig)
         x = round(W / 2 - cx)
+        if fig.width <= W:
+            x = min(max(x, 0), W - fig.width)  # 宽姿势（如 slump）头居中会被裁掉，改为整体贴进画布
         y = H - BOTTOM - fig.height
         canvas = Image.new("RGBA", CANVAS, (0, 0, 0, 0))
         canvas.alpha_composite(fig, (x, y)) if x >= 0 and y >= 0 else canvas.paste(fig, (x, y), fig)

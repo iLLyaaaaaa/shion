@@ -22,7 +22,7 @@ from shion.limits import clean_announced
 log = logging.getLogger("shion.state")
 
 # 有持续时间的临时状态（同时也是 react 事件允许的表情名）
-TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud")
+TEMP_STATES = ("happy", "stop", "dizzy", "done", "proud", "cheer")
 EXPRESSIONS = ("happy", "proud", "stop", "dizzy", "working", "done", "sleep", "idle", "neglect2")
 ACTIVITY_LEVELS = ("quiet", "normal", "lively")
 SAVE_VERSION = 5  # v5 增加等级和每日好感记录；保留旧存档迁移
@@ -86,6 +86,7 @@ class Config:
     dizzy_for: timedelta = timedelta(seconds=3)
     done_for: timedelta = timedelta(seconds=3)
     proud_for: timedelta = timedelta(seconds=3)
+    cheer_for: timedelta = timedelta(seconds=3)
     react_for: timedelta = timedelta(seconds=3)
     tool_error_for: timedelta = timedelta(seconds=2)
 
@@ -522,7 +523,7 @@ class PetState:
         if self._is_asleep(now):
             return "sleep"
         if self.stamina_level >= 2:
-            return "sleep" if self.stamina_level >= 3 else "desk"
+            return "collapse" if self.stamina_level >= 3 else "slump"
         if self._resting and (not self._resting_auto or self._neglect_level(now) == 1):
             return "desk"
         if self._idle_expression and now < self._idle_expression[1]:
@@ -555,7 +556,7 @@ class PetState:
     def can_idle(self, now: datetime) -> bool:
         return (
             not self._dragging and not self.is_working(now) and not self.observed_working
-            and not self.paused and self.current(now) not in ("desk", "sleep")
+            and not self.paused and self.current(now) not in ("desk", "sleep", "slump", "collapse")
             and self._eating_until is None
             and not self.save.fixed_expression and not self._is_asleep(now)
             and not (self._manual and now < self._manual[1])
@@ -566,7 +567,7 @@ class PetState:
         """仅查询，不消耗资格；用真实工作/睡眠状态，避免临时表情掩盖。"""
         key = time_speech_period(now)
         if (key is None or self.is_working(now) or self.save.bubble_muted
-                or self._is_asleep(now) or self.current(now) == "sleep" or self.paused):
+                or self._is_asleep(now) or self.current(now) in ("sleep", "collapse") or self.paused):
             return None
         record = self.save.time_speech
         if record["date"] == now.date().isoformat() and key in record["spoken"]:
@@ -606,7 +607,7 @@ class PetState:
         self._changed(now)
 
     def idle_expression(self, name: str, now: datetime) -> None:
-        if self.can_idle(now) and name in ("happy", "idle", "blink"):
+        if self.can_idle(now) and name in ("happy", "idle", "blink", "yawn"):
             self._idle_expression = (name, now + self.config.idle_expression_for)
 
     # ------------------------------------------------------------ 输入

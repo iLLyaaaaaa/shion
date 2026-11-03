@@ -208,7 +208,7 @@ class PetController(QObject):
             self._neglect_checked = False
         calm = (
             self.state.is_working(now) or bool(self.state.save.fixed_expression)
-            or cur in ("sleep", "desk") or self.state.save.activity_level == "quiet"
+            or cur in ("sleep", "desk", "slump", "collapse") or self.state.save.activity_level == "quiet"
         )
         self.window.set_calm(calm)
         self.window.set_activity(self.state.save.activity_level)
@@ -256,7 +256,7 @@ class PetController(QObject):
             self.window.jump(automatic=True)
         elif action == "expression":
             self.state.idle_expression(
-                "blink" if self.limits.level == 1 else
+                "yawn" if self.limits.level == 1 else
                 self._rng.choices(IDLE_EXPRESSIONS, weights=IDLE_EXPRESSION_WEIGHTS, k=1)[0], now
             )
             self.sync()
@@ -1289,7 +1289,7 @@ class PetController(QObject):
             self._weekly_offer = week
             self.state.save.weekly_announced = week
             self.scheduler.mark_dirty(now)
-            self.state.menu_talk(now, "proud")
+            self.state.menu_talk(now, "cheer")
 
     def _try_stamina_notice(self, now):
         pending = self.limits.pending
@@ -1313,7 +1313,7 @@ class PetController(QObject):
             if level == 0 and self.limits.reviving:
                 self.window.jump()
             elif level == 1:
-                state.idle_expression('blink', now)
+                state.idle_expression('yawn', now)
             self.sync()
 
     def status_text(self, now: Optional[datetime] = None) -> str:

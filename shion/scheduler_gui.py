@@ -99,5 +99,5 @@ class SchedulerGUI:
         if d.priority == Priority.P3:
             return "stop" if d.state == "interrupted" else "idle"  # Neutral end.
         if d.priority == Priority.P4:
-            return "working" if current in ("idle", "working", "sleep", "bed", "desk", "neglect1", "neglect2") else current
+            return "working" if current in ("idle", "working", "sleep", "bed", "desk", "neglect1", "neglect2", "slump", "collapse") else current
         return current

@@ -37,6 +37,7 @@ SPRITE_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites"
 STATES = [
     "idle", "blink", "happy", "proud", "stop", "dizzy",
     "working", "done", "sleep", "drag", "neglect1", "neglect2",
+    "yawn", "slump", "collapse", "cheer",
 ]
 PROP_STATES = ("bed", "desk")
 SEQUENCE_GROUPS = ("jump", "drag", "tickle", "cheek", "bed", "desk")

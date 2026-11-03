@@ -13,7 +13,7 @@ def update(e, value=96, **kwargs):
 def test_terminal_stamina_and_status_only_show_live_numbers(env):
     e=env
     update(e,96)
-    assert e.win.sprite_name=='sleep'
+    assert e.win.sprite_name=='collapse'
     assert '5 小时额度 96%' in e.ctl.status_text()
     assert e.data.stats['claude_tasks']==0
     assert e.data.weekly_stats[str(e.now.date())]['seven_day_peak']==73
@@ -31,7 +31,7 @@ def test_quota_down_does_not_settle_authorization_and_stands_for_panel(env):
     assert e.ctl._perm_panel.isVisible() and e.win.sprite_name=='idle'
     e.ctl._on_permission_decided(rid,True)
     e.ctl.sync()
-    assert e.win.sprite_name=='sleep'
+    assert e.win.sprite_name=='collapse'
     assert e.data.weekly_stats[str(e.now.date())]['approvals']==1
     assert '额度' not in e.ctl.status_text()
 
@@ -63,7 +63,7 @@ def test_revive_only_after_last_session_and_idle_speech_gate(env,monkeypatch):
     assert e.said[-1]=='今天……撑不住了……'
     e.ctl.handle_event('quota_revive',None,{'session':'a'})
     e.ctl._try_stamina_notice(e.now)
-    assert not jumps and e.win.sprite_name=='sleep'
+    assert not jumps and e.win.sprite_name=='collapse'
     e.ctl.handle_event('quota_revive',None,{'session':'b'})
     e.mono[0]+=30
     e.ctl._try_stamina_notice(e.now)
@@ -140,3 +140,22 @@ def test_repeated_quota_updates_do_not_defer_save_or_redraw_weekly(env,monkeypat
         assert len(dirty)==len(draws)==2
     finally:
         e.ctl._weekly_window=None
+
+
+def test_lower_tiers_use_dedicated_sprites(env):
+    e=env
+    update(e,60)
+    assert e.state.stamina_level==1
+    e.state.idle_expression('yawn',e.now)
+    assert e.state.current(e.now)=='yawn'
+    e.state._idle_expression=None
+    update(e,85)
+    assert e.state.stamina_level==2 and e.state.current(e.now)=='slump'
+
+
+def test_new_stamina_sprites_exist_with_canvas_size():
+    from PIL import Image
+    from shion.pet_window import SPRITE_DIR
+    for name in ('yawn','slump','collapse','cheer'):
+        with Image.open(SPRITE_DIR/f'{name}.png') as img:
+            assert img.size==(448,512)

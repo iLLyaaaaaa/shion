@@ -338,6 +338,7 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
                 ("working", ["--state", "working", "--nod", "--at", "0.2"]),
                 ("bed", ["--state", "bed", "--at", "1"]),
                 ("desk", ["--state", "desk", "--desk-blink", "double", "--at", "0.2"]),
+                *[(name, ["--state", name]) for name in ("yawn", "slump", "collapse", "cheer")],
                 ("snacks", ["--panel", "snacks", "--lang", "ja"]),
                 *[(f"connection-{lang}", ["--panel", "connection", "--with-pet", "--lang", lang])
                   for lang in ("zh", "en", "ja")],
