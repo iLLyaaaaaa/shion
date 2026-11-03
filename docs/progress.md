@@ -56,7 +56,7 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 - [x] V2.1 第 2 步代码及合成预览（2026-11-03 用户确认通过，可本地提交，不 push）：statusLine 串联与恢复保护、体力隔离路径、四档替代图/三语台词、双击状态行、周报额度峰值行。
 - [ ] V2.1 第 2 步真机动态观感：延后播报与复活跳跃、授权期间临时站起、双击状态行及不同 DPI；代码与合成预览验收不代替这些真实体验。
-- [ ] V2.1 真实接入：先审阅实际 settings 差异再授权安装，确认已有 statusLine 输入/输出、冲突拒绝与断开恢复；本轮未改真实 settings。
+- [ ] V2.1 真实接入：先审阅实际 settings 差异再授权安装，确认已有 statusLine 输入/输出、冲突拒绝与断开恢复；本轮未改真实 settings。（2026-11-03 已在副本上 dry-run 出连接差异给用户审阅，见下方记录；尚未授权连接。）
 - [x] V2.1 周报外观（2026-11-02 用户确认）：v3 三语卡片、日文比例字形、标签/数字基线对齐、价格右栏、柱图区分隔与首末日标注；按用户可选要求追加 Yu Gothic UI / Medium 字重，新快照 `build/weekly-ja-ui-medium-v4.png`，授权的小改已完成。真实窗口/导出仍按下项人工验收。
 - [ ] V2.1 周报真机：本周/上周切换、窗口显示不抢焦点、主动点击后 Esc 关闭、不同 DPI/屏幕定位、保存 PNG / 复制粘贴观感、统计用量/署名开关。
 - [ ] V2.1 周报真机：周一或之后首次启动的提醒，必须在问候与连接引导结束、无授权或输入面板时出现；点击查看上一周。本轮仅合成/隔离验证，未部署 Shion-dev、未重扫真实对话。
@@ -108,6 +108,12 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [ ] ChatGPT 观察端凭据 `chatgpt-observer.json` 的读写仍走 `observer_files.reject_reparse`（检查所有上级目录）：用户目录在 junction 下时 ChatGPT 观察会报错。Claude 联动令牌已在 `feature/v2-security-fixes` 改为只查最后两层；观察端涉及 Codex 配置事务和 ACL 审查，未在该分支改动（范围外发现）。
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
+
+- **2026-11-03 V2.1 真实接入验收准备：替换 Shion-dev + 连接差异 dry-run**（证据在忽略目录 `build/v21-replacement-20261103/`；未连接、未改真实配置、未 push）：
+  - **打包**：沿用 `security-replacement-20261101` 的 `build_no_zip.py`（调用 `tools/build.py` 的 `build_environment()`），从 `081111a` 构建，不生成 ZIP，依赖版本一致，226 文件，exe `ee5e6b9a…aeada60ba`。第 1 次 bundle_smoke 失败 `statusline-chains-original`：隔离环境 PATH 无 Git，原命令回落 PowerShell，冷启动超过原命令 1 秒上限，输出为空；隔离复现第 1 次空、之后正常（约 0.5 秒）。同一包重跑 bundle_smoke **110 项通过**（第 1 次结果留 `*-attempt1`）。观察端烟测通过、响应与上次一致。**遗留**：没有 Git Bash 的机器上，首次 statusLine 刷新可能丢掉原状态栏输出（时序边界，未改代码）。
+  - **替换**：替换器等用户退出诗音后原地替换，两次改名均一次成功；旧包 220 文件逐个核对后保留为 `D:\desktop	ools\Shion-dev-before-v2.1-20261103`，新目录 226 文件逐个核对一致。Codex / CC 配置哈希与任务开始时一致，存档 `v2_scheduler_enabled=false`、`claude_link_enabled=true` 未变，`Shion-2.0.0-win64.zip` 未变，没有强制结束进程。旧 exe `b1c65811…278d6a`。坑：本会话每次工具调用都会触发 hook 短暂启动 `Shion-dev\Shion.exe`，替换器“连续无进程”检测会被干扰，等待期间不要调用工具。
+  - **dry-run**：把真实 `settings.json` 复制到临时目录，模拟打包版菜单连接（`sys.frozen`、exe 指向 Shion-dev、root 为 `_internal`，Git Bash），只对副本执行 connect / disconnect；真实文件哈希不变、真实目录无新文件。当前状态 `stale`（缺 statusLine 记录）。语义变化只有两处：`statusLine` 由原 `python <home>/.claude/statusline.py` 换成 `Shion.exe --statusline --record <home>/.claude/settings.json.shion-statusline.json`（原值存记录文件并串联），新增 `StopFailure` hook；已有 8 个 hook 事件不变，其他键值不变但 `statusLine` 被挪到最前。真实连接还会产生 1 个 `settings.json.shion-backup-*` 和记录文件。副本上断开：statusLine 恢复原值，但会同时移除诗音全部 hook（断开语义），记录文件留下内容 `{}`。脱敏 diff 在 `dryrun/`。
+  - **下一步**：用户审阅差异后决定是否授权真实连接。
 
 - **2026-11-03 V2.1 第 3 步 体力正式图（用户验收通过，本地提交，不 push）**：
   - **素材**：`process_sprites.py --only yawn cheer slump collapse` 只新增这 4 张 448×512 图，其他 PNG 和 `fx_z.png` 不变。yawn、cheer 在 `STANDING`，slump、collapse 在 `SCALE_FROM_STANDING`。坑 1：yawn/cheer 进 `STANDING` 会让平均缩放比 0.8277→0.8239，使 sleep 重新生成与入库图不一致（`test_process_sheets` 失败）；新增 `AVG_EXCLUDE={yawn,cheer}` 让它们不参与平均，旧图可逐字节复现。坑 2：slump 横躺比画布宽（485>448），头居中会被裁；`EXTRA_SCALE["slump"]=0.90`，并在图宽≤画布时把整体夹进画布（对现有图无影响）。头大小只用数字与 idle 对比，没看原图。验收后 collapse 头偏小（宽约 277px vs 站立图约 295px），加 `EXTRA_SCALE["collapse"]=1.08` 并 `--only collapse` 重新生成（scale 0.439，尺寸 325×438），并排对比图 `build/s3-collapse-compare.png`。
