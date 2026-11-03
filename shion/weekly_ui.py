@@ -27,9 +27,12 @@ QPushButton:checked, QPushButton:pressed {{ background: {ACCENT}; color: {BACKGR
 """
 
 
-def card_font(lang, size, bold=False):
+def card_font(lang, size, bold=False, hero=False):
     font = QFont()
-    font.setFamilies(['Yu Gothic UI', 'Yu Gothic', 'Microsoft YaHei', 'Consolas'] if lang == 'ja' else FONTS)
+    families = ['Yu Gothic UI', 'Yu Gothic', 'Microsoft YaHei', 'Consolas'] if lang == 'ja' else FONTS
+    if hero and lang == 'en':
+        families = ['Segoe UI'] + FONTS  # Bold Segoe UI for the big English title and total.
+    font.setFamilies(families)
     font.setPixelSize(size)
     font.setBold(bold)
     font.setLetterSpacing(QFont.AbsoluteSpacing, 0)
@@ -66,7 +69,8 @@ def ensure_fonts():
     # fonts for snapshot QA; do not bundle or copy any font files.
     if not QFontDatabase.families():
         directory = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts'
-        for filename in ('msyh.ttc', 'YuGothR.ttc', 'YuGothM.ttc', 'YuGothB.ttc', 'consola.ttf'):
+        for filename in ('msyh.ttc', 'msyhbd.ttc', 'segoeui.ttf', 'segoeuib.ttf', 'YuGothR.ttc', 'YuGothM.ttc',
+                         'YuGothB.ttc', 'consola.ttf'):
             path = directory / filename
             if path.is_file():
                 QFontDatabase.addApplicationFont(str(path))
@@ -94,8 +98,44 @@ def range_label(start, end):
     return f'{first:%Y.%m.%d} — {tail}'
 
 
+NO_LINE_START = set('，。！？、；：…～—）」』》,.!?;:)%')
+NO_LINE_END = set('（「『《(')
+SOFT_BREAK = set(' ，。！？、；：,.!?;:')
+
+
+def balanced_break(font, value, width):
+    """Best two-line split of value, or None. Prefers even lines, breaks after spaces and
+    full-width punctuation, never leaves a 1-2 character last line or splits a Latin word."""
+    metrics = QFontMetrics(font)
+    best = None
+    for i in range(1, len(value)):
+        before, after = value[i - 1], value[i]
+        left, right = value[:i].rstrip(), value[i:].lstrip()
+        if after.isspace() or not left or len(right.replace(' ', '')) < 3:
+            continue
+        if after in NO_LINE_START or before in NO_LINE_END:
+            continue
+        if before.isascii() and not before.isspace() and after.isascii():  # break Latin text at spaces only
+            continue
+        first, second = metrics.horizontalAdvance(left), metrics.horizontalAdvance(right)
+        if first > width or second > width:
+            continue
+        # Even lines, a slightly longer top line, and a bonus for breaking after punctuation/space.
+        score = abs(first - second) + (50 if first < second else 0) - (60 if before in SOFT_BREAK else 0)
+        if best is None or score < best[0]:
+            best = (score, [left, right])
+    return best[1] if best else None
+
+
 def wrap_lines(font, value, width, max_lines):
     """Break text into at most max_lines lines (CJK-aware); the last one is elided."""
+    metrics = QFontMetrics(font)
+    if metrics.horizontalAdvance(value) <= width:
+        return [value]
+    if max_lines >= 2:
+        balanced = balanced_break(font, value, width)
+        if balanced:
+            return balanced
     layout = QTextLayout(value, font)
     option = QTextOption()
     option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
@@ -112,7 +152,7 @@ def wrap_lines(font, value, width, max_lines):
     lines = [value[a:a + n].strip() for a, n in spans]
     if len(lines) > max_lines:
         rest = value[spans[max_lines - 1][0]:].strip()
-        lines = lines[:max_lines - 1] + [QFontMetrics(font).elidedText(rest, Qt.ElideRight, int(width))]
+        lines = lines[:max_lines - 1] + [metrics.elidedText(rest, Qt.ElideRight, int(width))]
     return lines
 
 
@@ -126,8 +166,8 @@ def paint_card(painter, data, branding=True):
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
     def text(x, y, width, height, value, size=MIN_FONT, color=PRIMARY, bold=False,
-             align=Qt.AlignLeft, baseline=None):
-        font = card_font(lang, size, bold)
+             align=Qt.AlignLeft, baseline=None, hero=False):
+        font = card_font(lang, size, bold, hero)
         painter.setFont(font)
         painter.setPen(QColor(color))
         # Fit localizations and large counts without clipping or overlap.
@@ -177,12 +217,11 @@ def paint_card(painter, data, branding=True):
     painter.setBrush(Qt.NoBrush)
 
     if data.get('ongoing'):
-        text(64, 178, 620, 40, ui('weekly_title_label'), 28, LABEL)
-        text(64, 222, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True)
+        text(64, 222, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True, hero=True)
         sprite_name = 'idle'
     else:
         text(64, 178, 620, 40, ui('weekly_title_label'), 28, LABEL)
-        text(64, 222, 620, 140, data['title']['name'], 128, ACCENT, True)
+        text(64, 222, 620, 140, data['title']['name'], 128, ACCENT, True, hero=True)
         wrapped(64, 372, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
         sprite_name = data['title']['sprite']
     sprite = QImage(str(ROOT / 'assets/sprites' / (sprite_name + '.png')))
@@ -195,8 +234,8 @@ def paint_card(painter, data, branding=True):
 
     totals = data['totals']
     if data['enabled']:
-        text(64, 484, 620, 40, ui('weekly_total'), 28, LABEL)
-        text(64, 520, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=650)
+        text(64, 492, 620, 40, ui('weekly_total'), 28, LABEL)
+        text(64, 520, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=650, hero=True)
     else:
         text(64, 560, 620, 80, ui('weekly_disabled'), 36, LABEL)
     if 'seven_day_peak' in totals:

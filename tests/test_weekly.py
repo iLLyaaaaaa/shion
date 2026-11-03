@@ -388,15 +388,16 @@ def usage_for(start, values):
                      for i, v in enumerate(values) if v}, 'activity': {}}
 
 
-def test_ongoing_week_has_no_title_future_days_and_peak_only_in_past():
+def test_ongoing_week_has_no_title_future_days_and_peak_includes_today():
     start = date(2026, 11, 2)
-    usage = usage_for(start, [100, 300, 900, 0, 0, 0, 0])  # today (Wednesday) is largest
+    usage = usage_for(start, [100, 300, 900, 0, 0, 0, 0])  # today (Wednesday) is the largest
     card = report(start, {}, usage, today=date(2026, 11, 4))
     assert card['ongoing'] and card['day_n'] == 3 and card['title'] is None
     assert card['future'] == [False, False, False, True, True, True, True]
-    assert card['peak_day'] == 1
+    assert card['peak_day'] == 2  # today counts; future days never do
     monday = report(start, {}, usage, today=start)
-    assert monday['day_n'] == 1 and monday['peak_day'] is None
+    assert monday['day_n'] == 1 and monday['peak_day'] == 0
+    assert report(start, {}, usage_for(start, [0] * 7), today=start)['peak_day'] is None
     finished = report(start, {}, usage, today=date(2026, 11, 9))
     assert not finished['ongoing'] and finished['title'] and finished['peak_day'] == 2
     assert not any(finished['future'])
@@ -580,6 +581,7 @@ def draws(monkeypatch):
         if isinstance(geometry, (QRectF, QPointF)):
             font = painter.font()
             record.texts.append(dict(text=args[-1], geom=geometry, size=font.pixelSize(), bold=font.bold(),
+                                     family=(font.families() or [font.family()])[0],
                                      color=painter.pen().color().name().upper(),
                                      advance=painter.fontMetrics().horizontalAdvance(args[-1])))
         return text_original(painter, *args)
@@ -765,3 +767,113 @@ def test_nothing_overflows_or_gets_elided_in_any_language(qapp, draws, lang):
         comment = [t['text'] for t in draws.texts if t['size'] == 34]
         if index == 4:  # The deliberately over-long comment is cut on its second line only.
             assert len(comment) == 2 and comment[1].endswith('…') and not comment[0].endswith('…')
+
+
+def test_hero_fonts_use_real_bold_faces_only_for_title_and_total(qapp, draws):
+    from shion.weekly_ui import card_font
+    zh, en, ja = (card_font(lang, 128, True, hero=True) for lang in ('zh', 'en', 'ja'))
+    assert zh.bold() and zh.families()[0] == 'Microsoft YaHei'
+    assert en.bold() and en.families()[0] == 'Segoe UI'
+    assert ja.families() == ['Yu Gothic UI', 'Yu Gothic', 'Microsoft YaHei', 'Consolas']
+    assert card_font('en', 28).families()[0] == 'Microsoft YaHei'  # ordinary text is unchanged
+    for lang, family in (('zh', 'Microsoft YaHei'), ('en', 'Segoe UI')):
+        draws.texts.clear()
+        card = finished_card(lang)
+        render_card(card)
+        total = draws.one(number(card['totals']['total_tokens'], lang))
+        title = draws.one(card['title']['name'])
+        assert total['bold'] and title['bold'] and total['family'] == title['family'] == family
+
+
+def test_comment_breaks_evenly_without_tiny_last_lines(qapp):
+    from shion.lines import Lines
+    from shion.weekly_ui import NO_LINE_START, card_font, ensure_fonts, wrap_lines
+    ensure_fonts()
+    zh = card_font('zh', 34)
+    assert wrap_lines(zh, '这周的 token 一口一口全吃光啦，好能吃！', 620, 2) == ['这周的 token 一口一口', '全吃光啦，好能吃！']
+    assert wrap_lines(zh, '这周也一起走过来了，辛苦啦！', 620, 2) == ['这周也一起走过来了，辛苦啦！']
+    rules = json.loads((Path(__file__).parents[1] / 'assets/weekly_titles.json').read_text(encoding='utf-8'))
+    for lang in ('zh', 'en', 'ja'):
+        font = card_font(lang, 34)
+        for rule in rules:
+            comment = rule['comment'][lang]
+            lines = wrap_lines(font, comment, 620, 2)
+            assert 1 <= len(lines) <= 2 and ''.join(lines).replace(' ', '') == comment.replace(' ', '')
+            assert all(__import__('PySide6.QtGui', fromlist=['QFontMetrics']).QFontMetrics(font).horizontalAdvance(l) <= 620
+                       for l in lines)
+            if len(lines) == 2:
+                assert len(lines[1].replace(' ', '')) >= 3 and lines[1][0] not in NO_LINE_START
+                if lang == 'en':
+                    assert ' '.join(lines) == comment  # never splits inside a word
+
+
+def test_forty_pixel_gap_between_comment_and_total_label(qapp):
+    from PySide6.QtGui import qGray
+    card = finished_card()
+    card['title'] = {**card['title'], 'comment': '这周的 token 一口一口全吃光啦，好能吃！'}  # two lines
+    image = render_card(card)
+    inked = [y for y in range(360, 540)
+             if any(qGray(image.pixelColor(x, y).rgb()) > 100 for x in range(64, 560, 2))]
+    runs, start = [], inked[0]
+    for before, after in zip(inked, inked[1:] + [None]):
+        if after != before + 1:
+            runs.append((start, before))
+            start = after
+    assert len(runs) >= 2
+    gap = runs[-1][0] - runs[-2][1]  # last comment line to the "total" label glyphs
+    assert 36 <= gap <= 54, runs
+
+
+def test_busiest_day_card_and_highlighted_bar_always_agree(qapp, draws):
+    from shion.weekly_ui import CHART_BASE, bar_center
+    start = date(2026, 11, 2)
+    today = date(2026, 11, 4)
+    usage = usage_for(start, [100, 300, 900, 0, 0, 0, 0])  # today (Wednesday) is the largest day
+    card = report(start, {}, usage, 'zh', True, today=today)
+    image = render_card(card)
+    lit = [i for i in range(7) if image.pixelColor(int(bar_center(i)), CHART_BASE - 3).name().upper() == '#F4772E']
+    counted = card['daily'][:card['days_elapsed']]
+    assert lit == [card['peak_day']] == [counted.index(max(counted))] == [2]
+    value = next(t for t in draws.texts if t['size'] == 44 and t['color'] == '#F4772E')
+    assert value['text'] == (start + timedelta(days=2)).strftime('%m-%d')
+    # A finished week also agrees.
+    finished = report(start, {}, usage, 'zh', True, today=date(2026, 11, 10))
+    image = render_card(finished)
+    lit = [i for i in range(7) if image.pixelColor(int(bar_center(i)), CHART_BASE - 3).name().upper() == '#F4772E']
+    assert lit == [finished['peak_day']]
+
+
+def test_weekly_title_label_is_hidden_while_the_week_is_unfinished(qapp, draws):
+    from shion.lines import Lines
+    start = date(2026, 11, 2)
+    ongoing = report(start, {}, usage_for(start, [5] * 7), 'zh', True, today=date(2026, 11, 3))
+    render_card(ongoing)
+    assert not draws.by_text(Lines('zh').ui('weekly_title_label')) and draws.by_text('本周进行中 · 第 2 天')
+    draws.texts.clear()
+    render_card(finished_card())
+    assert draws.by_text(Lines('zh').ui('weekly_title_label'))
+
+
+def test_english_labels_are_uppercase_and_estimate_wording(qapp, draws):
+    from shion.lines import Lines
+    ui = Lines('en').ui
+    labels = ['weekly_title_label', 'weekly_total', 'weekly_output', 'weekly_price_label', 'weekly_daily_avg',
+              'weekly_active_days', 'weekly_latest_label', 'weekly_peak', 'weekly_chart', 'weekly_chip_tasks',
+              'weekly_chip_hours', 'weekly_chip_approvals', 'weekly_chip_denials', 'weekly_chip_pats',
+              'weekly_chip_snacks']
+    assert all(ui(k).isupper() for k in labels), [ui(k) for k in labels if not ui(k).isupper()]
+    assert ui('weekly_peak') == 'HARDEST DAY' and ui('weekly_estimate') == 'Estimate only'
+    assert ui('weekly_partial').startswith('Estimate only')
+    render_card(finished_card('en'))
+    assert draws.one('HARDEST DAY') and draws.one('Estimate only')
+
+
+@pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
+@pytest.mark.parametrize('partial', [False, True])
+def test_first_row_cards_have_equal_height(qapp, lang, partial):
+    image = render_card(finished_card(lang, partial=partial))
+    bottoms = []
+    for column in range(3):
+        x = 64 + column * 364 + 330
+        bottoms.append(next(y for y in range(800, 1000) if image.pixelColor(x, y).name().upper() == '#33241F'))
+    assert len(set(bottoms)) == 1, bottoms

@@ -101,8 +101,9 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
         totals['seven_day_peak'] = max(peaks)
         totals['quota'] = max(peaks)
     shown = daily if enabled else [stats.get(d, {}).get('tasks', 0) for d in days]
-    # Only fully past days compete for the busiest day; today is still running.
-    past = shown[:elapsed]
+    # The busiest day is picked from past days plus today (never future days); the card
+    # and the highlighted bar both use this one value.
+    past = shown[:days_elapsed]
     peak_day = past.index(max(past)) if past and max(past) > 0 else None
     return {'start': str(start), 'end': str(start + timedelta(days=6)), 'totals': totals,
             'daily': shown, 'future': [i > elapsed for i in range(7)] if ongoing else [False] * 7,

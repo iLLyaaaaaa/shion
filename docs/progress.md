@@ -110,6 +110,14 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-11-03 V2.1 周报第三轮修正**（用户验收真实数据预览通过，本地提交，不 push）：
+  - **字体**：称号和总 TOKEN 大数字用真粗体（`card_font(..., hero=True)`：zh Microsoft YaHei Bold；en Segoe UI Bold，其余文字不变；ja 保持）。离屏渲染原先只加载 `msyh.ttc`，粗体没有真字库所以预览里偏细，`ensure_fonts()` 补加载本机已安装的 `msyhbd.ttc`、`segoeui.ttf`、`segoeuib.ttf`（只读系统字体，不复制不打包）。
+  - **评语换行**：`wrap_lines` 改为两行均衡断行（`balanced_break`）：偏好两行等宽、上行略长、断在空格/全角标点后；不拆拉丁文本（英文只在空格处断）；末行至少 3 个非空字符；行首不出现 `，。！？…` 等。zh 示例得到“这周的 token 一口一口 / 全吃光啦，好能吃！”。纯宽度均衡会断成“一口一 / 口全…”，所以加了上行偏长的偏好。
+  - **版面**：评语与“总 TOKEN”标签间距约 40px（标签 y 484→492）；本周未结束时隐藏“本周称号”标签。
+  - **最拼的一天**：`peak_day` 改为在“已过去的日子 + 今天”中选（不含未来），卡片和高亮柱共用同一个值；周一只有今天有用量时为当天。
+  - **英文**：标签统一全大写（`HARDEST DAY` 等）；估算说明 `Estimate only`，未计价为 `Estimate only · Some models not priced`；窄卡标签全大写，`APPROVED` 放不下被截成 `APPROV…`，改用 `ALLOWED`；第一排三张卡片等高有测试。
+  - **两个偶发测试复核**（`test_permission::test_no_http_route_can_set_a_decision[extra5]`、`test_server::test_every_route_rejects_missing_or_wrong_token[token4-POST-/pause/wait]`）：上一轮全量里失败的错误类型都是 `ConnectionAbortedError: [WinError 10053]`（连接被中止，`socket.py` 读取处）。单独各重跑 3 次，共 6 次全部通过（日志 `build/flaky-*.log`）；之后全量（`build/weekly-fix-full3.log`）这两项也通过。判断为满载时的连接关闭类偶发，不是逻辑问题，未改代码。
+  - **测试**：周报测试 80 项通过（新增字体、断行、40px 间距、最拼的一天一致、标签隐藏、英文大写与说明、首行等高）；全量 `1 failed, 2205 passed, 8 skipped`，唯一失败仍是 `test_make_media` 的跨盘 relpath（改动前同样失败，未处理）。
 - **2026-11-03 V2.1 周报第二轮重排**（用户逐轮验收真实数据预览通过，本地提交，不 push）：
   - **称号**：`assets/weekly_titles.json` 八条评语（三语）和立绘按用户给的文案替换（quota→collapse、night→yawn、gold→cheer、approval/partner→done、hands_off→idle、treats→happy、quiet→slump），额度刺客日文名“枠キラー”；测试保证文案不含产品名。
   - **版面**（`shion/weekly_ui.py` 的 `paint_card` 重写，坐标仍以 1200×1500 为基准）：顶栏一行（左标题，日期 30px 以立绘轴线 x≈877 居中，跨年显示完整年份）；称号区“本周称号”标签 + 128px 粗体称号（过长自动缩字）+ 34px 评语最多两行（`QTextLayout` 断行）；立绘高 430（x 689～1066、y 225～655）加居中光晕；总 TOKEN 136px；3×2 圆角卡片格（输出 TOKEN / API 估价含卡内估算注 / 日均 TOKEN / 活跃天数 / 最晚活动 / 最拼的一天强调色边框）；诗音自身计数有记录时追加一行 6 张窄卡（新增紧凑标签 `weekly_chip_*`）；柱图占剩余高度，柱宽 118、顶部圆角，最高柱数字强调色加粗，不再单独写“最拼的一天”；底栏左项目链接（受开关控制）右“诗音 · Shion”。旧分隔线全部去掉。
