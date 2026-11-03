@@ -155,8 +155,8 @@
     "sprite": "desk",
     "all": [
       {
-        "field": "tasks",
-        "max": 2
+        "field": "usage_days",
+        "max": 1
       }
     ],
     "any": []

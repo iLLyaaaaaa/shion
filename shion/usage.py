@@ -14,6 +14,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS = ('in', 'out', 'cw5', 'cw1', 'cr')
 MAX_LINE = 1024 * 1024
+CACHE_VERSION = 2  # 2: <synthetic> is kept apart from <unknown>.
+SYNTHETIC = '<synthetic>'
 
 
 def sha(value: bytes) -> str:
@@ -70,6 +72,9 @@ class Pricing:
             for model, tiers in models.items():
                 item = self.model(model)
                 for threshold, counts in tiers.items():
+                    # Client-generated and empty rows cost nothing; never mark them unpriced.
+                    if model == SYNTHETIC or not any(counts.get(k, 0) for k in FIELDS):
+                        continue
                     tier = next((t for t in item['tiers'] if str(t['above_input_tokens']) == threshold), None) if item else None
                     if tier is None:
                         partial = True
@@ -100,6 +105,8 @@ def timestamp(value):
 
 def model_name(value):
     # Retain safe unknown model identifiers for partial-pricing reports.
+    if value == SYNTHETIC:
+        return value
     return value if isinstance(value, str) and re.fullmatch(r'claude-[a-z0-9-]{1,80}', value) else '<unknown>'
 
 
@@ -119,13 +126,13 @@ def counts_from(usage):
 
 
 def empty(signature):
-    return {'version': 1, 'pricing_shape': signature, 'days': {}, 'activity': {}, 'files': {}, 'seen': {}}
+    return {'version': CACHE_VERSION, 'pricing_shape': signature, 'days': {}, 'activity': {}, 'files': {}, 'seen': {}}
 
 
 def load_cache(path, signature):
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
-        if data['version'] != 1 or data['pricing_shape'] != signature:
+        if data['version'] != CACHE_VERSION or data['pricing_shape'] != signature:
             raise ValueError()
         # Reject unexpected shapes; malformed caches trigger a clean rebuild.
         for key in ('days', 'activity', 'files', 'seen'):

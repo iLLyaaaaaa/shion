@@ -229,9 +229,16 @@ def test_weekly_menu_opens_correct_week_and_switches_hide_numbers(env):
     ctl = env.ctl
     ctl.usage.data = {'days': {}, 'activity': {}}
     menu = ctl.build_menu()
-    find_action(menu, '上一周').trigger()
-    assert ctl._weekly_window.data['start'] == str(week_start(env.now.date()) - timedelta(days=7))
+    find_action(menu, '诗音周报').trigger()
+    window = ctl._weekly_window
+    assert window.data['start'] == str(week_start(env.now.date()) - timedelta(days=7))
+    assert window.prev_button.isChecked() and window.data['title'] is not None
     assert ctl.usage.due is not None
+    window.this_button.click()
+    assert window.data['start'] == str(week_start(env.now.date())) and window.data['ongoing']
+    assert window.this_button.isChecked() and window.data['title'] is None
+    window.prev_button.click()
+    assert window.data['start'] == str(week_start(env.now.date()) - timedelta(days=7))
     find_action(menu, '统计用量').trigger()
     assert not env.data.usage_enabled and not ctl._weekly_window.data['enabled']
     assert ctl.usage.due is None and ctl.usage.cancel.is_set()
@@ -304,7 +311,7 @@ def test_card_and_window_are_exportable_without_focus(qapp, lang, tmp_path):
     window.update_report(preview(lang, enabled=False))
     assert not window.data['enabled']
     window.close(); window.deleteLater()
-    assert number(200000000, lang) in ('2亿', '200M', '2億')
+    assert number(200000000, lang) in ('2.00亿', '200M', '2.00億')
 
 
 def test_card_uses_shion_palette_and_highlights_only_peak(qapp):
@@ -351,12 +358,13 @@ def test_first_and_last_peak_labels_are_centered_and_within_margins(qapp, monkey
     data = preview(lang)
     data['daily'] = [80] * 7
     data['daily'][peak_day] = 100
+    data['peak_day'] = peak_day
     image = render_card(data)
     assert len(draws) == 1  # The label stays complete, with no clipped ellipsis.
     bounds, text_width, font_size = draws[0]
-    assert bounds.center().x() == pytest.approx(85 + 153 * peak_day + 95 / 2)
+    assert bounds.left() <= 85 + 153 * peak_day + 95 / 2 <= bounds.right()
     assert bounds.left() >= 64 and bounds.right() <= 1136
-    assert text_width <= bounds.width() and font_size <= 20
+    assert text_width <= bounds.width() and font_size == 28
     colors = [image.pixelColor(100 + 153 * day, 1200).name().upper() for day in range(7)]
     assert colors.count('#F4772E') == 1 and colors[peak_day] == '#F4772E'
     assert image.pixelColor(100, 1006).name().upper() == '#33241F'
@@ -394,3 +402,123 @@ def test_japanese_font_has_no_added_spacing_and_uses_proportional_kana(qapp):
         # UI already has proportional kana; palt is intentionally idempotent.
         metrics = QFontMetricsF(font)
         assert metrics.horizontalAdvance('夜更かしさん') < metrics.horizontalAdvance('夜' * 6)
+
+
+def test_unpriced_ignores_synthetic_and_all_zero_entries():
+    zero = dict.fromkeys(FIELDS, 0)
+    days = {'2026-11-02': {'<synthetic>': {'0': dict.fromkeys(FIELDS, 5)},
+                           'claude-opus-4-1': {'0': zero}, 'claude-haiku-5-5': {'0': dict.fromkeys(FIELDS, 10)}}}
+    price, partial = Pricing().estimate(days)
+    assert price > 0 and not partial
+    days['2026-11-02']['claude-opus-4-1'] = {'0': dict.fromkeys(FIELDS, 1)}
+    assert Pricing().estimate(days)[1]
+
+
+def test_synthetic_model_is_kept_and_old_cache_version_rebuilds(tmp_path):
+    from shion.usage import load_cache, model_name
+    assert model_name('<synthetic>') == '<synthetic>' and model_name('gpt-x') == '<unknown>'
+    write(tmp_path / 'projects/p/a.jsonl', [row('s', model='<synthetic>', inp=0, out=0, cw=0, cr=0)])
+    result = scanner(tmp_path).scan(TODAY)
+    assert '<synthetic>' in result['days']['2026-11-02']
+    cache = tmp_path / 'cache.json'
+    old = json.loads(cache.read_text(encoding='utf-8'))
+    old['version'] = 1
+    cache.write_text(json.dumps(old), encoding='utf-8')
+    assert load_cache(cache, Pricing().signature())['days'] == {}
+
+
+def usage_for(start, values):
+    return {'days': {str(start + timedelta(days=i)): {'claude-haiku-5-5': {'0': dict(zip(FIELDS, (v, 0, 0, 0, 0)))}}
+                     for i, v in enumerate(values) if v}, 'activity': {}}
+
+
+def test_ongoing_week_has_no_title_future_days_and_peak_only_in_past():
+    start = date(2026, 11, 2)
+    usage = usage_for(start, [100, 300, 900, 0, 0, 0, 0])  # today (Wednesday) is largest
+    card = report(start, {}, usage, today=date(2026, 11, 4))
+    assert card['ongoing'] and card['day_n'] == 3 and card['title'] is None
+    assert card['future'] == [False, False, False, True, True, True, True]
+    assert card['peak_day'] == 1
+    monday = report(start, {}, usage, today=start)
+    assert monday['day_n'] == 1 and monday['peak_day'] is None
+    finished = report(start, {}, usage, today=date(2026, 11, 9))
+    assert not finished['ongoing'] and finished['title'] and finished['peak_day'] == 2
+    assert not any(finished['future'])
+    assert report(start, {}, usage, today=date(2026, 11, 8))['ongoing']  # Sunday is still running
+
+
+def test_easy_week_uses_token_days_not_shion_counters():
+    start = date(2026, 10, 26)
+    stats = {str(start): {'tasks': 0}}
+    one_day = report(start, stats, usage_for(start, [5, 0, 0, 0, 0, 0, 0]), today=TODAY)
+    assert one_day['totals']['usage_days'] == 1 and one_day['title']['name'] == '摸鱼周'
+    busy = report(start, stats, usage_for(start, [5, 5, 0, 0, 0, 0, 0]), today=TODAY)
+    assert busy['title']['name'] == '勤劳搭档'
+    off = report(start, stats, usage_for(start, [5, 0, 0, 0, 0, 0, 0]), enabled=False, today=TODAY)
+    assert 'usage_days' not in off['totals'] and off['title']['name'] == '勤劳搭档'
+
+
+def test_shion_counters_empty_flag():
+    start = date(2026, 10, 26)
+    assert not report(start, {}, usage_for(start, [5] * 7), today=TODAY)['has_stats']
+    assert report(start, {str(start): {'pats': 1}}, {}, today=TODAY)['has_stats']
+
+
+@pytest.mark.parametrize('value, zh, en', [
+    (42894321, '4289万', '43M'), (123456789, '1.23亿', '123M'), (1234567890, '12.35亿', '1.23B'),
+    (5234567, '523.5万', '5.2M'), (99999999, '1.00亿', '100M'), (999999999, '10.00亿', '1.00B'), (950, '950', '950')])
+def test_number_rounding(value, zh, en):
+    assert number(value, 'zh') == zh and number(value, 'en') == en
+    assert number(value, 'ja') == zh.replace('亿', '億')
+
+
+def capture_texts(monkeypatch):
+    from PySide6.QtGui import QPainter
+    seen = []
+    original = QPainter.drawText
+
+    def capture(painter, *args):
+        if args[-1]:
+            seen.append((painter.font().pixelSize(), args[-1]))
+        return original(painter, *args)
+    monkeypatch.setattr(QPainter, 'drawText', capture)
+    return seen
+
+
+@pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
+def test_card_text_is_at_least_28px(qapp, monkeypatch, lang):
+    seen = capture_texts(monkeypatch)
+    render_card(preview(lang))
+    start = date(2026, 11, 2)
+    render_card(report(start, {}, usage_for(start, [10 ** 7, 0, 0]), lang, today=date(2026, 11, 3)))
+    assert seen and min(size for size, _ in seen) >= 28
+
+
+def test_ongoing_card_shows_day_and_empty_stats_line_without_future_numbers(qapp, monkeypatch):
+    from shion.lines import Lines
+    seen = capture_texts(monkeypatch)
+    start = date(2026, 11, 2)
+    card = report(start, {}, usage_for(start, [10 ** 7, 0, 0]), today=date(2026, 11, 3))
+    image = render_card(card)
+    texts = [t for _, t in seen]
+    ui = Lines('zh').ui
+    assert ui('weekly_ongoing', n=2) in texts and ui('weekly_no_stats') in texts
+    assert ui('weekly_tasks') not in texts and ui('weekly_peak') in texts
+    assert texts.count('0') == 2  # output tokens and Tuesday (today); future days show no number.
+    assert image.pixelColor(85 + 153 * 4 + 47, 1220).name().upper() == '#1A1212'  # dashed box is hollow
+
+
+def test_window_repaints_at_real_size_and_fills_85_percent(qapp, monkeypatch):
+    from shion import weekly_ui
+    painted = []
+    original = weekly_ui.paint_card
+    monkeypatch.setattr(weekly_ui, 'paint_card', lambda p, *a: painted.append(p.device().width()) or original(p, *a))
+    window = WeeklyWindow(preview())
+    screen = window.screen() or QApplication.primaryScreen()
+    assert abs(window.height() - screen.availableGeometry().height() * 0.85) <= 2
+    assert abs(window.view.width() / window.view.height() - 1200 / 1500) < 0.01
+    window.view.grab()
+    assert window.view.width() in painted  # painted straight onto the widget, at its own size
+    assert window.image.width() == 1200 and window.image.height() == 1500
+    assert '#1A1212' in window.styleSheet() and '#F4772E' in window.styleSheet()
+    window.close(); window.deleteLater()

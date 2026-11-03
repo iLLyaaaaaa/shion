@@ -60,7 +60,10 @@ def title_for(metrics, lang, rules=None):
     for item in sorted(rules, key=lambda r: r['priority']):
         conditions = item.get('all', [])
         def matches(c):
-            value = metrics.get(c['field'], 0)
+            # A missing metric (for example usage when statistics are off) never matches.
+            if c['field'] not in metrics:
+                return False
+            value = metrics[c['field']]
             return value >= c.get('min', 0) and value <= c.get('max', float('inf'))
         if all(matches(c) for c in conditions) and (not item.get('any') or any(matches(c) for c in item['any'])):
             return {'name': item['name'].get(lang, item['name']['en']),
@@ -68,8 +71,11 @@ def title_for(metrics, lang, rules=None):
     raise ValueError('No fallback weekly title')
 
 
-def report(start, stats, usage, lang='zh', enabled=True, pricing=None):
+def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=None):
+    # today=None means a finished week (previews, tests of completed weeks).
     days = [str(start + timedelta(days=i)) for i in range(7)]
+    elapsed = 7 if today is None else max(0, min(7, (today - start).days))
+    ongoing = today is not None and today <= start + timedelta(days=6)
     totals = {k: sum(stats.get(day, {}).get(k, 0) for day in days) for k in COUNTERS}
     selected = {d: usage.get('days', {}).get(d, {}) for d in days} if enabled else {}
     daily = []
@@ -81,6 +87,9 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None):
     activity = {d: usage.get('activity', {}).get(d) for d in days}
     minutes = [m for m in activity.values() if type(m) is int and 0 <= m < 1440]
     latest = max(minutes) if minutes else None
+    has_stats = any(totals[k] for k in COUNTERS)
+    if enabled:
+        totals['usage_days'] = sum(v > 0 for v in daily)
     totals.update(total_tokens=sum(daily), output_tokens=output,
                   nights=sum(m >= 1200 for m in minutes),
                   approvals_denials_pats=totals['approvals'] + totals['denials'] + totals['pats'])
@@ -90,10 +99,16 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None):
     if peaks:
         totals['seven_day_peak'] = max(peaks)
         totals['quota'] = max(peaks)
+    shown = daily if enabled else [stats.get(d, {}).get('tasks', 0) for d in days]
+    # Only fully past days compete for the busiest day; today is still running.
+    past = shown[:elapsed]
+    peak_day = past.index(max(past)) if past and max(past) > 0 else None
     return {'start': str(start), 'end': str(start + timedelta(days=6)), 'totals': totals,
-            'daily': daily if enabled else [stats.get(d, {}).get('tasks', 0) for d in days],
+            'daily': shown, 'future': [i > elapsed for i in range(7)] if ongoing else [False] * 7,
+            'peak_day': peak_day, 'ongoing': ongoing,
+            'day_n': elapsed + 1 if ongoing else None, 'has_stats': has_stats,
             'latest': f'{(latest + 300) // 60 % 24:02}:{(latest + 300) % 60:02}' if latest is not None else None,
-            'title': title_for(totals, lang), 'price': price, 'partial': partial,
+            'title': None if ongoing else title_for(totals, lang), 'price': price, 'partial': partial,
             'enabled': enabled, 'lang': lang}
 
 

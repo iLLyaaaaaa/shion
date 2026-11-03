@@ -1241,9 +1241,14 @@ class PetController(QObject):
     def _weekly_data(self):
         start = week_start(self._now().date()) - timedelta(days=7 if self._weekly_previous else 0)
         return weekly_report(start, self.state.save.weekly_stats, self.usage.data,
-                             self.lines.lang, self.state.save.usage_enabled)
+                             self.lines.lang, self.state.save.usage_enabled, today=self._now().date())
 
-    def open_weekly(self, previous=False):
+    def switch_weekly(self, previous):
+        self._weekly_previous = bool(previous)
+        if self._weekly_window is not None:
+            self._weekly_window.update_report(self._weekly_data())
+
+    def open_weekly(self, previous=True):
         self._weekly_previous = previous
         self._weekly_offer = None
         if self.state.save.usage_enabled:
@@ -1251,7 +1256,8 @@ class PetController(QObject):
         if self._weekly_window is not None:
             self._weekly_window.close()
             self._weekly_window.deleteLater()
-        self._weekly_window = WeeklyWindow(self._weekly_data(), self.state.save.weekly_branding)
+        self._weekly_window = WeeklyWindow(self._weekly_data(), self.state.save.weekly_branding,
+                                           self.switch_weekly)
         set_topmost(self._weekly_window, self.state.save.always_on_top)
         self._weekly_window.show()
         position_dialog(self._weekly_window, self.window.body_rect())
@@ -1730,9 +1736,8 @@ class PetController(QObject):
         branding.triggered.connect(self.set_weekly_branding)
 
 
-        weekly_menu = menu.addMenu(ui("weekly_report"))
-        weekly_menu.addAction(ui("weekly_this")).triggered.connect(lambda: self.open_weekly(False))
-        weekly_menu.addAction(ui("weekly_previous")).triggered.connect(lambda: self.open_weekly(True))
+        # 默认打开上周（已完成、有称号）；窗口里可切换本周。
+        menu.addAction(ui("weekly_report")).triggered.connect(lambda: self.open_weekly(True))
 
         menu.addSeparator()
         menu.addAction(ui("menu_about")).triggered.connect(self.show_about)
