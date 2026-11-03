@@ -110,6 +110,13 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-11-03 V2.1 周报第二轮重排**（用户逐轮验收真实数据预览通过，本地提交，不 push）：
+  - **称号**：`assets/weekly_titles.json` 八条评语（三语）和立绘按用户给的文案替换（quota→collapse、night→yawn、gold→cheer、approval/partner→done、hands_off→idle、treats→happy、quiet→slump），额度刺客日文名“枠キラー”；测试保证文案不含产品名。
+  - **版面**（`shion/weekly_ui.py` 的 `paint_card` 重写，坐标仍以 1200×1500 为基准）：顶栏一行（左标题，日期 30px 以立绘轴线 x≈877 居中，跨年显示完整年份）；称号区“本周称号”标签 + 128px 粗体称号（过长自动缩字）+ 34px 评语最多两行（`QTextLayout` 断行）；立绘高 430（x 689～1066、y 225～655）加居中光晕；总 TOKEN 136px；3×2 圆角卡片格（输出 TOKEN / API 估价含卡内估算注 / 日均 TOKEN / 活跃天数 / 最晚活动 / 最拼的一天强调色边框）；诗音自身计数有记录时追加一行 6 张窄卡（新增紧凑标签 `weekly_chip_*`）；柱图占剩余高度，柱宽 118、顶部圆角，最高柱数字强调色加粗，不再单独写“最拼的一天”；底栏左项目链接（受开关控制）右“诗音 · Shion”。旧分隔线全部去掉。
+  - **统计**：`report()` 增加 `active_days`、`days_elapsed`、`daily_avg`（总量 ÷ 已过天数，本周含今天）；用量关闭时这些不显示。
+  - **台词**：新增 `weekly_title_label`、`weekly_active_days`、`weekly_daily_avg`、`weekly_latest_label`、`weekly_price_label`、`weekly_chip_*`；删除 `weekly_price`、`weekly_latest`、`weekly_no_stats`。
+  - **测试**：周报测试 68 项通过（含逐语言“不溢出、不被省略号截断”、卡片格几何/颜色像素、立绘位置、最小字号 ≥28）。全量（`build/weekly-fix-full2.log`）`3 failed, 2191 passed, 8 skipped`：`test_make_media` 跨盘 relpath（改动前同样失败，未处理）；`test_permission`、`test_server` 各一项满载时偶发，单独重跑 190 项全通过。菜单指纹基准 `scheduler_disabled_a55825f.json` 已随上一轮更新。
+  - **遗留**：内容最拥挤时（计数行 + 额度峰值行 + 未计价两行注）柱图只剩约 40px 高；真实数据未出现。日文估算注在卡内偶尔折出单字孤行。
 - **2026-11-03 V2.1 周报真机验收问题修复**（用户验收通过，本地提交，不 push）：
   - **probe**：上周一至今触发“部分模型未计价”的模型名只有 `<synthetic>`（原先被 `model_name()` 归进 `<unknown>`）。
   - **显示**：`paint_card()` 以 1200×1500 为坐标基准；导出/复制仍画 1200×1500 位图，窗口用 `CardView` 在 `paintEvent` 里按实际尺寸缩放坐标直接重绘（不缩放位图）。窗口总高 = 屏幕可用高度 × 85%。卡片最小字号 28px（自动缩字下限也是 28，放不下省略）。底色 `#1A1212`，按钮深底橙边、选中橙底。“最拼的一天”标签框在首末日向内收以保持边距。

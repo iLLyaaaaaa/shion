@@ -317,8 +317,8 @@ def test_card_and_window_are_exportable_without_focus(qapp, lang, tmp_path):
 def test_card_uses_shion_palette_and_highlights_only_peak(qapp):
     image = render_card(preview())
     assert image.pixelColor(0, 0).name().upper() == '#1A1212'
-    assert image.pixelColor(100, 1200).name().upper() == '#5A3A2C'
-    assert image.pixelColor(1040, 1200).name().upper() == '#F4772E'
+    assert image.pixelColor(100, 1340).name().upper() == '#5A3A2C'
+    assert image.pixelColor(1040, 1340).name().upper() == '#F4772E'
 
 
 def test_window_escape_save_and_clipboard_under_mocked_ui(qapp, tmp_path, monkeypatch):
@@ -339,54 +339,10 @@ def test_window_escape_save_and_clipboard_under_mocked_ui(qapp, tmp_path, monkey
     window.deleteLater()
 
 
-@pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
-@pytest.mark.parametrize('peak_day', [0, 6])
-def test_first_and_last_peak_labels_are_centered_and_within_margins(qapp, monkeypatch, lang, peak_day):
-    from PySide6.QtGui import QPainter
-    from PySide6.QtCore import QRectF
-    from shion.lines import Lines
-    draws = []
-    original = QPainter.drawText
-
-    def capture(painter, *args):
-        if isinstance(args[0], QRectF) and args[-1] == Lines(lang).ui('weekly_peak'):
-            draws.append((QRectF(args[0]), painter.fontMetrics().horizontalAdvance(args[-1]),
-                          painter.font().pixelSize()))
-        return original(painter, *args)
-
-    monkeypatch.setattr(QPainter, 'drawText', capture)
-    data = preview(lang)
-    data['daily'] = [80] * 7
-    data['daily'][peak_day] = 100
-    data['peak_day'] = peak_day
-    image = render_card(data)
-    assert len(draws) == 1  # The label stays complete, with no clipped ellipsis.
-    bounds, text_width, font_size = draws[0]
-    assert bounds.left() <= 85 + 153 * peak_day + 95 / 2 <= bounds.right()
-    assert bounds.left() >= 64 and bounds.right() <= 1136
-    assert text_width <= bounds.width() and font_size == 28
-    colors = [image.pixelColor(100 + 153 * day, 1200).name().upper() for day in range(7)]
-    assert colors.count('#F4772E') == 1 and colors[peak_day] == '#F4772E'
-    assert image.pixelColor(100, 1006).name().upper() == '#33241F'
 
 
-def test_token_numbers_share_baseline_and_english_header_is_weekly(qapp, monkeypatch):
-    from PySide6.QtGui import QPainter
-    from PySide6.QtCore import QPointF
-    original = QPainter.drawText
-    draws = []
 
-    def capture(painter, *args):
-        draws.append(args)
-        return original(painter, *args)
 
-    monkeypatch.setattr(QPainter, 'drawText', capture)
-    data = preview('en')
-    render_card(data)
-    values = {number(data['totals'][key], 'en') for key in ('total_tokens', 'output_tokens')}
-    baselines = [args[0].y() for args in draws if isinstance(args[0], QPointF) and args[-1] in values]
-    assert len(baselines) == 2 and baselines[0] == baselines[1]
-    assert any(args[-1] == '> SHION / WEEKLY' for args in draws)
 
 
 def test_japanese_font_has_no_added_spacing_and_uses_proportional_kana(qapp):
@@ -502,7 +458,7 @@ def test_ongoing_card_shows_day_and_empty_stats_line_without_future_numbers(qapp
     image = render_card(card)
     texts = [t for _, t in seen]
     ui = Lines('zh').ui
-    assert ui('weekly_ongoing', n=2) in texts and ui('weekly_no_stats') in texts
+    assert ui('weekly_ongoing', n=2) in texts and ui('weekly_active_days') in texts and '1/2' in texts
     assert ui('weekly_tasks') not in texts and ui('weekly_peak') in texts
     assert texts.count('0') == 2  # output tokens and Tuesday (today); future days show no number.
     assert image.pixelColor(85 + 153 * 4 + 47, 1220).name().upper() == '#1A1212'  # dashed box is hollow
@@ -522,3 +478,290 @@ def test_window_repaints_at_real_size_and_fills_85_percent(qapp, monkeypatch):
     assert window.image.width() == 1200 and window.image.height() == 1500
     assert '#1A1212' in window.styleSheet() and '#F4772E' in window.styleSheet()
     window.close(); window.deleteLater()
+
+
+EXPECTED_TITLES = {
+    'quota': ('collapse', '额度都快被你榨干了……诗音也要倒下了啦'),
+    'night': ('yawn', '半夜还在写代码……诗音都困了，快去睡觉！'),
+    'gold': ('cheer', '这周的 token 一口一口全吃光啦，好能吃！'),
+    'approval': ('done', '批准、批准、再批准——手速真快呢'),
+    'hands_off': ('idle', '活全丢给 AI 干，自己去摸鱼了吧？哼，诗音都看见了'),
+    'treats': ('happy', '零食和摸头都收到啦……诗音才、才没有很开心！'),
+    'quiet': ('slump', '这周很悠闲嘛……偶尔休息一下也不错'),
+    'partner': ('done', '这周也一起走过来了，辛苦啦！'),
+}
+
+
+def test_titles_have_new_comments_sprites_and_no_product_name():
+    from shion.lines import Lines
+    rules = json.loads((Path(__file__).parents[1] / 'assets/weekly_titles.json').read_text(encoding='utf-8'))
+    assert {r['id'] for r in rules} == set(EXPECTED_TITLES)
+    for rule in rules:
+        sprite, zh = EXPECTED_TITLES[rule['id']]
+        assert rule['sprite'] == sprite and rule['comment']['zh'] == zh
+        assert (Path(__file__).parents[1] / 'assets/sprites' / (sprite + '.png')).is_file()
+        for lang in ('zh', 'en', 'ja'):
+            assert rule['name'][lang] and rule['comment'][lang]
+    quota = next(r for r in rules if r['id'] == 'quota')
+    assert quota['name']['ja'] == '枠キラー'
+    assert next(r for r in rules if r['id'] == 'hands_off')['comment']['en'].startswith('Left all the work to the AI')
+    blob = json.dumps(rules, ensure_ascii=False)
+    for lang in ('zh', 'en', 'ja'):
+        ui = Lines(lang).ui
+        blob += ''.join(ui(k) for k in ('weekly_report', 'weekly_active_days', 'weekly_daily_avg', 'weekly_latest_label',
+                                        'weekly_estimate', 'weekly_partial', 'weekly_ongoing', 'weekly_quota'))
+    assert 'claude' not in blob.lower()
+
+
+def test_active_days_and_daily_average_use_elapsed_days():
+    start = date(2026, 11, 2)
+    usage = usage_for(start, [100, 0, 300, 0, 0, 0, 0])
+    ongoing = report(start, {}, usage, today=date(2026, 11, 4))
+    assert ongoing['active_days'] == 2 and ongoing['days_elapsed'] == 3 and ongoing['daily_avg'] == pytest.approx(400 / 3)
+    finished = report(start, {}, usage, today=date(2026, 11, 9))
+    assert finished['active_days'] == 2 and finished['days_elapsed'] == 7 and finished['daily_avg'] == pytest.approx(400 / 7)
+    off = report(start, {}, usage, enabled=False, today=date(2026, 11, 9))
+    assert off['active_days'] is None and off['daily_avg'] is None
+
+
+def test_stats_always_show_token_items_and_counters_only_when_recorded(qapp, monkeypatch):
+    from shion.lines import Lines
+    ui = Lines('zh').ui
+    start = date(2026, 10, 26)
+    seen = capture_texts(monkeypatch)
+    render_card(report(start, {}, usage_for(start, [10 ** 6] * 6 + [0]), today=TODAY))
+    texts = [t for _, t in seen]
+    assert '6/7' in texts and ui('weekly_daily_avg') in texts and ui('weekly_latest_label') in texts
+    assert ui('weekly_tasks') not in texts and ui('weekly_pats') not in texts
+    seen.clear()
+    render_card(report(start, {str(start): {'tasks': 3, 'pats': 2}}, usage_for(start, [10 ** 6] * 6 + [0]), today=TODAY))
+    texts = [t for _, t in seen]
+    assert ui('weekly_tasks') in texts and ui('weekly_snacks') in texts and ui('weekly_latest_label') in texts
+
+
+def capture_boxes(monkeypatch):
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QPainter
+    boxes = {}
+    original = QPainter.drawText
+
+    def capture(painter, *args):
+        if isinstance(args[0], (QRectF, QPointF)):
+            boxes[args[-1]] = args[0]
+        return original(painter, *args)
+    monkeypatch.setattr(QPainter, 'drawText', capture)
+    return boxes
+
+
+class Draws:
+    """Records every drawText/drawImage/drawEllipse call of a card render."""
+
+    def __init__(self):
+        self.texts, self.images, self.ellipses = [], [], []
+
+    def by_text(self, value):
+        return [t for t in self.texts if t['text'] == value]
+
+    def one(self, value):
+        found = self.by_text(value)
+        assert len(found) == 1, (value, len(found))
+        return found[0]
+
+
+@pytest.fixture
+def draws(monkeypatch):
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QPainter
+    record = Draws()
+    text_original, image_original, ellipse_original = QPainter.drawText, QPainter.drawImage, QPainter.drawEllipse
+
+    def text(painter, *args):
+        geometry = args[0]
+        if isinstance(geometry, (QRectF, QPointF)):
+            font = painter.font()
+            record.texts.append(dict(text=args[-1], geom=geometry, size=font.pixelSize(), bold=font.bold(),
+                                     color=painter.pen().color().name().upper(),
+                                     advance=painter.fontMetrics().horizontalAdvance(args[-1])))
+        return text_original(painter, *args)
+
+    def image(painter, *args):
+        record.images.append(QRectF(args[0]))
+        return image_original(painter, *args)
+
+    def ellipse(painter, *args):
+        record.ellipses.append(args)
+        return ellipse_original(painter, *args)
+
+    monkeypatch.setattr(QPainter, 'drawText', text)
+    monkeypatch.setattr(QPainter, 'drawImage', image)
+    monkeypatch.setattr(QPainter, 'drawEllipse', ellipse)
+    return record
+
+
+def finished_card(lang='zh', **changes):
+    start = date(2026, 10, 26)
+    stats = {str(start + timedelta(days=i)): dict(tasks=3, seconds=3600, approvals=4, denials=1, pats=2, snacks=1)
+             for i in range(7)}
+    usage = {'days': {str(start + timedelta(days=i)): {'claude-sonnet-5-5': {'0': dict(zip(FIELDS, (
+        10, 20000 + i * 1000, 5, 5, 1000000 * (i + 1))))}} for i in range(7)}, 'activity': {str(start): 1301}}
+    return {**report(start, stats, usage, lang, True, today=date(2026, 11, 3)), **changes}
+
+
+def test_range_label_drops_repeated_year_but_keeps_it_across_years():
+    from shion.weekly_ui import range_label
+    assert range_label('2026-10-26', '2026-11-01') == '2026.10.26 — 11.01'
+    assert range_label('2026-12-28', '2027-01-03') == '2026.12.28 — 2027.01.03'
+
+
+def test_top_bar_date_is_centered_on_sprite_axis_and_on_header_row(qapp, draws):
+    card = finished_card()
+    render_card(card)
+    date_text = draws.one('2026.10.26 — 11.01')
+    header = draws.one('> SHION / 诗音周报')
+    assert date_text['size'] == 30 and date_text['geom'].center().x() == pytest.approx((689 + 1066) / 2, abs=1)
+    assert date_text['geom'].center().y() == header['geom'].center().y() and 64 <= header['geom'].y() <= 110
+
+
+def test_sprite_and_glow_sit_beside_total_number_above_the_grid(qapp, draws):
+    render_card(finished_card())
+    sprite = draws.images[0]
+    assert sprite.top() == 225 and sprite.bottom() == pytest.approx(655, abs=1) and sprite.height() == pytest.approx(430, abs=1)
+    assert 689 <= sprite.left() and sprite.right() <= 1066.5 and sprite.bottom() < 753
+    center, radius_x, radius_y = draws.ellipses[0]
+    assert (center.x(), center.y()) == (sprite.center().x(), 440) and radius_x == radius_y
+    total = draws.one(number(finished_card()['totals']['total_tokens'], 'zh'))
+    assert total['size'] == 136 and total['bold'] and total['color'] == '#F4772E' and total['geom'].x() == 64
+    assert total['geom'].y() <= 655 and total['geom'].x() + total['advance'] < sprite.left()
+
+
+@pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
+def test_title_area_has_label_big_bold_title_and_two_line_comment(qapp, draws, lang):
+    from shion.lines import Lines
+    card = finished_card(lang)
+    render_card(card)
+    assert draws.one(Lines(lang).ui('weekly_title_label'))['color'] == '#9C8A84'
+    title = draws.one(card['title']['name'])
+    assert title['bold'] and title['color'] == '#F4772E' and 60 <= title['size'] <= 128
+    parts = [t for t in draws.texts if t['size'] == 34]
+    assert 1 <= len(parts) <= 2 and ''.join(p['text'] for p in parts).replace(' ', '') == card['title']['comment'].replace(' ', '')
+
+
+def test_grid_is_three_by_two_rounded_cards_with_accent_on_busiest_day(qapp, draws):
+    from shion.lines import Lines
+    ui = Lines('zh').ui
+    card = finished_card()
+    image = render_card(card)
+    labels = [ui('weekly_output'), ui('weekly_price_label'), ui('weekly_daily_avg'),
+              ui('weekly_active_days'), ui('weekly_latest_label'), ui('weekly_peak')]
+    rects = [draws.one(label)['geom'] for label in labels]
+    assert [r.x() - 22 for r in rects[:3]] == [64, 64 + 364, 64 + 728] == [r.x() - 22 for r in rects[3:]]
+    assert rects[0].y() - 14 == 753 and rects[3].y() > rects[0].y() + 124
+    fill, edge, accent = '#231917', '#33241F', '#F4772E'
+    for i, rect in enumerate(rects):
+        x, y = rect.x() - 22, rect.y() - 14
+        assert image.pixelColor(int(x) + 330, int(y) + 100).name().upper() == fill
+        assert image.pixelColor(int(x) + 172, int(y)).name().upper() == (accent if i == 5 else edge)
+        assert image.pixelColor(int(x) + 1, int(y) + 1).name().upper() == '#1A1212'  # rounded corner
+    peak = next(t for t in draws.by_text('11-01') if t['size'] == 44)
+    assert peak['color'] == accent and peak['bold']
+    assert draws.by_text(ui('weekly_peak'))[0]['geom'].y() > 753  # a card label now, not a chart caption
+
+
+@pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
+@pytest.mark.parametrize('partial', [False, True])
+def test_estimate_note_is_inside_price_card_and_never_elided(qapp, draws, lang, partial):
+    from shion.lines import Lines
+    ui = Lines(lang).ui
+    card = finished_card(lang, partial=partial)
+    render_card(card)
+    note = ui('weekly_partial' if partial else 'weekly_estimate')
+    price_label = draws.one(ui('weekly_price_label'))['geom']
+    price = draws.one(f"${card['price']:.2f}")
+    card_y, card_x = price_label.y() - 14, price_label.x() - 22
+    row2_y = draws.one(ui('weekly_active_days'))['geom'].y() - 14
+    parts = [t for t in draws.texts if t['geom'].x() == card_x + 22 and t['geom'].y() > price['geom'].y() + 40
+             and t['geom'].y() < row2_y and t['size'] == 28]
+    assert 1 <= len(parts) <= 2
+    assert ''.join(p['text'] for p in parts).replace(' ', '') == note.replace(' ', '')
+    assert all(p['geom'].bottom() <= row2_y - 20 - 8 for p in parts)  # inside the card, with padding
+    assert price['geom'].y() > card_y and '…' not in ''.join(p['text'] for p in parts)
+
+
+def test_counter_cards_appear_only_when_shion_recorded_something(qapp, draws):
+    from shion.lines import Lines
+    ui = Lines('en').ui
+    render_card(finished_card('en'))
+    keys = ['weekly_chip_tasks', 'weekly_chip_hours', 'weekly_chip_approvals', 'weekly_chip_denials',
+            'weekly_chip_pats', 'weekly_chip_snacks']
+    chips = [draws.one(ui(k))['geom'] for k in keys]
+    assert len({round(c.y()) for c in chips}) == 1 and chips == sorted(chips, key=lambda c: c.x())
+    assert chips[0].y() > draws.one(ui('weekly_active_days'))['geom'].y()
+    draws.texts.clear()
+    render_card(finished_card('en', has_stats=False))
+    assert not any(t['text'] == ui('weekly_chip_tasks') for t in draws.texts)
+
+
+def test_bars_are_wide_rounded_on_top_and_peak_number_is_bold_accent(qapp, draws):
+    from shion.lines import Lines
+    from shion.weekly_ui import BAR_W, CHART_BASE, bar_x
+    card = finished_card()
+    image = render_card(card)
+    assert BAR_W == 118
+    x = bar_x(6)
+    mid = int(x + 59)
+    assert image.pixelColor(mid, CHART_BASE - 10).name().upper() == '#F4772E'
+    assert image.pixelColor(int(x) + 2, CHART_BASE - 10).name().upper() == '#F4772E'
+    assert image.pixelColor(int(x) - 4, CHART_BASE - 10).name().upper() == '#1A1212'
+    top = CHART_BASE - 1
+    while image.pixelColor(mid, top - 1).name().upper() == '#F4772E':
+        top -= 1
+    assert image.pixelColor(int(x) + 1, top).name().upper() != '#F4772E'  # rounded corner
+    peak_number = draws.one(number(card['daily'][6], 'zh'))
+    assert peak_number['bold'] and peak_number['color'] == '#F4772E'
+    other = draws.one(number(card['daily'][5], 'zh'))
+    assert not other['bold'] and other['color'] == '#F2EDEA'
+    assert len(draws.by_text(Lines('zh').ui('weekly_peak'))) == 1  # no separate chart caption
+
+
+def test_footer_has_link_left_and_name_right_and_link_follows_branding_switch(qapp, draws):
+    render_card(finished_card())
+    link, name = draws.one('github.com/iLLyaaaaaa/shion'), draws.one('诗音 · Shion')
+    assert link['geom'].x() == 64 and name['geom'].right() == 1136 and link['geom'].y() == name['geom'].y()
+    draws.texts.clear()
+    render_card(finished_card(), branding=False)
+    assert not draws.by_text('github.com/iLLyaaaaaa/shion') and draws.by_text('诗音 · Shion')
+
+
+def crowded_cards(lang):
+    start = date(2026, 10, 26)
+    stats = {str(start + timedelta(days=i)): dict(tasks=12, seconds=7000, approvals=88, denials=3, pats=61,
+                                                  snacks=40, seven_day_peak=96) for i in range(7)}
+    usage = {'days': {str(start + timedelta(days=i)): {
+        'claude-sonnet-5-5': {'0': dict(zip(FIELDS, (25000, 900000 + i * 2000000, 40000, 5000, 200000000 + i * 90000000)))},
+        'claude-haiku-9-9': {'0': dict.fromkeys(FIELDS, 1000)}} for i in range(7)}, 'activity': {str(start): 1301}}
+    finished = report(start, stats, usage, lang, True, today=date(2026, 11, 3))
+    ongoing_start = date(2026, 11, 2)
+    ongoing = report(ongoing_start, {str(ongoing_start + timedelta(days=i)): v for i, v in enumerate(stats.values())},
+                     {'days': {str(ongoing_start + timedelta(days=i)): v for i, v in enumerate(usage['days'].values())},
+                      'activity': {}}, lang, True, today=date(2026, 11, 3))
+    off = report(start, stats, usage, lang, False, today=date(2026, 11, 3))
+    return [finished, ongoing, off, {**finished, 'has_stats': False}, {**finished, 'title': {**finished['title'],
+            'comment': finished['title']['comment'] * 3}}]
+
+
+@pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
+def test_nothing_overflows_or_gets_elided_in_any_language(qapp, draws, lang):
+    for index, card in enumerate(crowded_cards(lang)):
+        draws.texts.clear()
+        render_card(card)
+        for item in draws.texts:
+            geometry = item['geom']
+            assert item['size'] >= 28
+            if hasattr(geometry, 'width'):
+                assert item['advance'] <= geometry.width() + 1, item['text']
+                assert geometry.left() >= 0 and geometry.right() <= 1200 and geometry.bottom() <= 1500
+        # Comments legitimately contain "……"; every other string must be drawn whole.
+        assert not [t['text'] for t in draws.texts if t['size'] != 34 and '…' in t['text']]
+        comment = [t['text'] for t in draws.texts if t['size'] == 34]
+        if index == 4:  # The deliberately over-long comment is cut on its second line only.
+            assert len(comment) == 2 and comment[1].endswith('…') and not comment[0].endswith('…')

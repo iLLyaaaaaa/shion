@@ -4,7 +4,8 @@ import os
 from datetime import date, timedelta
 
 from PySide6.QtCore import QPointF, QRectF, QSize, QStandardPaths, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter, QPen
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetrics, QImage, QPainter, QPainterPath, QPen,
+                           QRadialGradient, QTextLayout, QTextOption)
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -40,17 +41,6 @@ def card_font(lang, size, bold=False):
     return font
 
 
-def bar_center(day):
-    return 85 + day * 153 + 95 / 2
-
-
-def peak_label_bounds(day):
-    # Centered over the bar, shifted inward at the edges to stay in the margins.
-    width = 230
-    left = min(max(bar_center(day) - width / 2, 64), 1136 - width)
-    return QRectF(left, 0, width, 38)
-
-
 def number(value, lang):
     if lang in ('zh', 'ja'):
         big, small = ('億' if lang == 'ja' else '亿'), '万'
@@ -82,17 +72,62 @@ def ensure_fonts():
                 QFontDatabase.addApplicationFont(str(path))
 
 
+LABEL, CARD_FILL, CARD_EDGE, PRIMARY = '#9C8A84', '#231917', '#33241F', '#F2EDEA'
+SPRITE_RECT = QRectF(689, 225, 377, 430)  # Right of the total number, clear of the card grid.
+SPRITE_CENTER = QPointF(SPRITE_RECT.center().x(), SPRITE_RECT.center().y())
+GRID_TOP, GRID_GAP, CARD_W3 = 753, 20, 344
+CHART_BASE, BAR_W, BAR_SLOT = 1372, 118, 1072 / 7
+FOOTER_NAME = '诗音 · Shion'
+
+
+def bar_center(day):
+    return 64 + (day + 0.5) * BAR_SLOT
+
+
+def bar_x(day):
+    return 64 + day * BAR_SLOT + (BAR_SLOT - BAR_W) / 2
+
+
+def range_label(start, end):
+    first, last = date.fromisoformat(start), date.fromisoformat(end)
+    tail = f'{last:%Y.%m.%d}' if first.year != last.year else f'{last:%m.%d}'
+    return f'{first:%Y.%m.%d} — {tail}'
+
+
+def wrap_lines(font, value, width, max_lines):
+    """Break text into at most max_lines lines (CJK-aware); the last one is elided."""
+    layout = QTextLayout(value, font)
+    option = QTextOption()
+    option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+    layout.setTextOption(option)
+    spans = []
+    layout.beginLayout()
+    while True:
+        line = layout.createLine()
+        if not line.isValid():
+            break
+        line.setLineWidth(width)
+        spans.append((line.textStart(), line.textLength()))
+    layout.endLayout()
+    lines = [value[a:a + n].strip() for a, n in spans]
+    if len(lines) > max_lines:
+        rest = value[spans[max_lines - 1][0]:].strip()
+        lines = lines[:max_lines - 1] + [QFontMetrics(font).elidedText(rest, Qt.ElideRight, int(width))]
+    return lines
+
+
 def paint_card(painter, data, branding=True):
     """Draw the card in 1200x1500 card units; the caller sets any scale."""
     ensure_fonts()
-    ui = Lines(data['lang']).ui
+    lang = data['lang']
+    ui = Lines(lang).ui
     painter.fillRect(QRectF(0, 0, CARD_W, CARD_H), QColor(BACKGROUND))
     painter.setRenderHint(QPainter.Antialiasing)
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-    def text(x, y, width, height, value, size=MIN_FONT, color='#F2EDEA', bold=False,
+    def text(x, y, width, height, value, size=MIN_FONT, color=PRIMARY, bold=False,
              align=Qt.AlignLeft, baseline=None):
-        font = card_font(data['lang'], size, bold)
+        font = card_font(lang, size, bold)
         painter.setFont(font)
         painter.setPen(QColor(color))
         # Fit localizations and large counts without clipping or overlap.
@@ -105,80 +140,136 @@ def paint_card(painter, data, branding=True):
         else:
             painter.drawText(QRectF(x, y, width, height), align | Qt.AlignVCenter, value)
 
-    def line(y):
-        painter.fillRect(64, y, 1072, 1, QColor('#33241F'))
+    def wrapped(x, y, width, value, size, color, max_lines, step, bold=False):
+        font = card_font(lang, size, bold)
+        painter.setFont(font)
+        painter.setPen(QColor(color))
+        for i, part in enumerate(wrap_lines(font, value, width, max_lines)):
+            painter.drawText(QRectF(x, y + i * step, width, step), Qt.AlignLeft | Qt.AlignVCenter, part)
 
-    header = '> SHION / WEEKLY' if data['lang'] == 'en' else '> SHION / ' + ui('weekly_report')
-    text(64, 40, 1072, 48, header, 28, ACCENT)
-    text(64, 100, 1072, 44, data['start'] + '  —  ' + data['end'], 28, '#9C8A84')
-    line(164)
+    def box(x, y, width, height, accent=False):
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(x + 1, y + 1, width - 2, height - 2), 20, 20)
+        painter.setPen(QPen(QColor(ACCENT if accent else CARD_EDGE), 2))
+        painter.setBrush(QColor(CARD_FILL))
+        painter.drawPath(path)
+        painter.setBrush(Qt.NoBrush)
+
+    def stat_card(x, y, width, height, label, value, accent=False, note=None):
+        box(x, y, width, height, accent)
+        text(x + 22, y + 14, width - 44, 36, label, 28, LABEL)
+        text(x + 22, y + 50, width - 44, 56, value, 44, ACCENT if accent else PRIMARY, accent)
+        if note:
+            wrapped(x + 22, y + 108, width - 44, note, 28, LABEL, 2, 36)
+
+    # Top bar: title on the left, date centered under the sprite's axis.
+    text(64, 64, 560, 46, '> SHION / WEEKLY' if lang == 'en' else '> SHION / ' + ui('weekly_report'), 28, ACCENT)
+    text(SPRITE_CENTER.x() - 215, 64, 430, 46, range_label(data['start'], data['end']), 30, LABEL,
+         align=Qt.AlignHCenter)
+
+    # Soft glow centered on the sprite.
+    glow = QRadialGradient(SPRITE_CENTER, 300)
+    glow.setColorAt(0, QColor(244, 119, 46, 70))
+    glow.setColorAt(1, QColor(244, 119, 46, 0))
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(glow)
+    painter.drawEllipse(SPRITE_CENTER, 300, 300)
+    painter.setBrush(Qt.NoBrush)
+
     if data.get('ongoing'):
-        text(64, 230, 760, 94, ui('weekly_ongoing', n=data['day_n']), 52, ACCENT, True)
+        text(64, 178, 620, 40, ui('weekly_title_label'), 28, LABEL)
+        text(64, 222, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True)
         sprite_name = 'idle'
     else:
-        text(64, 200, 760, 94, data['title']['name'], 58, ACCENT, True)
-        text(64, 300, 760, 58, data['title']['comment'], 30)
+        text(64, 178, 620, 40, ui('weekly_title_label'), 28, LABEL)
+        text(64, 222, 620, 140, data['title']['name'], 128, ACCENT, True)
+        wrapped(64, 372, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
         sprite_name = data['title']['sprite']
     sprite = QImage(str(ROOT / 'assets/sprites' / (sprite_name + '.png')))
     if sprite.isNull():
         sprite = QImage(str(ROOT / 'assets/sprites/idle.png'))
     if not sprite.isNull():
-        size = sprite.size().scaled(QSize(260, 240), Qt.KeepAspectRatio)
-        painter.drawImage(QRectF(855 + (260 - size.width()) / 2, 184, size.width(), size.height()), sprite)
-    line(438)
+        size = sprite.size().scaled(QSize(int(SPRITE_RECT.width()), int(SPRITE_RECT.height())), Qt.KeepAspectRatio)
+        painter.drawImage(QRectF(SPRITE_RECT.x() + (SPRITE_RECT.width() - size.width()) / 2, SPRITE_RECT.y(),
+                                 size.width(), size.height()), sprite)
+
     totals = data['totals']
     if data['enabled']:
-        text(64, 462, 650, 44, ui('weekly_total'), 28, '#9C8A84')
-        text(64, 512, 660, 110, number(totals['total_tokens'], data['lang']), 88, ACCENT, True, baseline=604)
-        text(760, 462, 376, 44, ui('weekly_output'), 28, '#9C8A84')
-        text(760, 540, 376, 80, number(totals['output_tokens'], data['lang']), 50, baseline=604)
-        text(64, 630, 560, 44, ui('weekly_price', price=f"{data['price']:.2f}"), 28)
-        text(600, 630, 536, 44, ui('weekly_partial' if data['partial'] else 'weekly_estimate'), 28,
-             '#9C8A84', align=Qt.AlignRight)
+        text(64, 484, 620, 40, ui('weekly_total'), 28, LABEL)
+        text(64, 520, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=650)
     else:
-        text(64, 500, 1072, 80, ui('weekly_disabled'), 36, '#9C8A84')
+        text(64, 560, 620, 80, ui('weekly_disabled'), 36, LABEL)
     if 'seven_day_peak' in totals:
-        text(64, 680, 1072, 44, ui('weekly_quota', value=f"{totals['seven_day_peak']:g}"), 28, '#9C8A84')
+        text(64, 676, 1072, 44, ui('weekly_quota', value=f"{totals['seven_day_peak']:g}"), 28, LABEL)
+
+    # 3x2 card grid; the price card carries its own estimate note.
+    peak = data.get('peak_day')
+    peak_value = (date.fromisoformat(data['start']) + timedelta(days=peak)).strftime('%m-%d') if peak is not None else '—'
+    cards = []
+    if data['enabled']:
+        note = ui('weekly_partial' if data['partial'] else 'weekly_estimate')
+        note_lines = len(wrap_lines(card_font(lang, 28), note, CARD_W3 - 44, 2))
+        cards += [dict(label=ui('weekly_output'), value=number(totals['output_tokens'], lang)),
+                  dict(label=ui('weekly_price_label'), value=f"${data['price']:.2f}", note=note,
+                       height=108 + 36 * note_lines + 16),
+                  dict(label=ui('weekly_daily_avg'), value=number(data['daily_avg'], lang)),
+                  dict(label=ui('weekly_active_days'), value=f"{data['active_days']}/{data['days_elapsed']}")]
+    cards += [dict(label=ui('weekly_latest_label'), value=data['latest'] or '—'),
+              dict(label=ui('weekly_peak'), value=peak_value, accent=True)]
+    y = GRID_TOP
+    for first in range(0, len(cards), 3):
+        row = cards[first:first + 3]
+        height = max([c.get('height', 124) for c in row])
+        for i, c in enumerate(row):
+            stat_card(64 + i * (CARD_W3 + GRID_GAP), y, CARD_W3, height, c['label'], c['value'],
+                      c.get('accent', False), c.get('note'))
+        y += height + GRID_GAP
+
+    # Shion's own counters, only when something was recorded.
     if data.get('has_stats', True):
-        metrics = [('weekly_tasks', totals['tasks']), ('weekly_hours', f"{totals['seconds'] / 3600:.1f} h"),
-                   ('weekly_approvals', totals['approvals']), ('weekly_denials', totals['denials']),
-                   ('weekly_pats', totals['pats']), ('weekly_snacks', totals['snacks'])]
-        for i, (key, value) in enumerate(metrics):
-            x, y = 64 + i % 3 * 365, 748 + i // 3 * 124
-            text(x, y, 330, 40, ui(key), 28, '#9C8A84')
-            text(x, y + 42, 330, 62, str(value), 40)
-    else:
-        text(64, 840, 1072, 60, ui('weekly_no_stats'), 32, '#9C8A84')
-    line(1006)
-    text(64, 1026, 1072, 44, ui('weekly_chart' if data['enabled'] else 'weekly_tasks'), 28, '#9C8A84')
+        chips = [('weekly_chip_tasks', str(totals['tasks'])), ('weekly_chip_hours', f"{totals['seconds'] / 3600:.1f} h"),
+                 ('weekly_chip_approvals', str(totals['approvals'])), ('weekly_chip_denials', str(totals['denials'])),
+                 ('weekly_chip_pats', str(totals['pats'])), ('weekly_chip_snacks', str(totals['snacks']))]
+        gap = 14
+        chip_w = (1072 - 5 * gap) / 6
+        for i, (key, value) in enumerate(chips):
+            x = 64 + i * (chip_w + gap)
+            box(x, y, chip_w, 104)
+            text(x + 12, y + 8, chip_w - 24, 36, ui(key), 28, LABEL)
+            text(x + 12, y + 46, chip_w - 24, 50, value, 40)
+        y += 104 + GRID_GAP
+
+    # Bar chart fills the remaining height.
+    text(64, y + 4, 1072, 40, ui('weekly_chart' if data['enabled'] else 'weekly_tasks'), 28, LABEL)
+    max_height = max(40, min(320, CHART_BASE - (y + 4 + 40) - 48))
     future = data.get('future') or [False] * 7
     done = [v for v, f in zip(data['daily'], future) if not f]
-    peak = max(max(done, default=0), 1)
-    peak_day = data.get('peak_day')
+    top = max(max(done, default=0), 1)
     for i, value in enumerate(data['daily']):
-        x, center = 85 + i * 153, bar_center(i)
+        x, center = bar_x(i), bar_center(i)
         label = (date.fromisoformat(data['start']) + timedelta(days=i)).strftime('%m-%d')
         if future[i]:
-            pen = QPen(QColor('#4A3630'), 2, Qt.DashLine)
-            painter.setPen(pen)
+            painter.setPen(QPen(QColor('#4A3630'), 2, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(QRectF(x + 1, 1161, 93, 118))
-            text(center - 70, 1288, 140, 40, label, 28, '#5A4A44', align=Qt.AlignHCenter)
+            painter.drawRect(QRectF(x + 1, CHART_BASE - max_height + 1, BAR_W - 2, max_height - 2))
+            text(center - 70, CHART_BASE + 6, 140, 36, label, 28, '#5A4A44', align=Qt.AlignHCenter)
             continue
-        height = int(120 * value / peak)
-        painter.fillRect(x, 1280 - height, 95, max(height, 2),
-                         QColor(ACCENT if i == peak_day else '#5A3A2C'))
-        if i == peak_day:
-            bounds = peak_label_bounds(i)
-            text(bounds.x(), 1280 - height - 78, bounds.width(), bounds.height(),
-                 ui('weekly_peak'), 28, ACCENT, align=Qt.AlignHCenter)
-        text(center - 70, 1288, 140, 40, label, 28, '#9C8A84', align=Qt.AlignHCenter)
-        text(center - 72, 1280 - height - 40, 144, 38, number(value, data['lang']), 28,
-             align=Qt.AlignHCenter)
-    line(1350)
-    text(64, 1362, 1072, 48, ui('weekly_latest', time=data['latest'] or '—'), 28)
+        height = max(4, int(max_height * value / top))
+        is_peak = i == peak
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(x, CHART_BASE - height, BAR_W, height + 12), 12, 12)
+        painter.save()
+        painter.setClipRect(QRectF(x, CHART_BASE - height, BAR_W, height))
+        painter.fillPath(path, QColor(ACCENT if is_peak else '#5A3A2C'))
+        painter.restore()
+        text(center - 75, CHART_BASE - height - 42, 150, 38, number(value, lang), 28,
+             ACCENT if is_peak else PRIMARY, is_peak, align=Qt.AlignHCenter)
+        text(center - 70, CHART_BASE + 6, 140, 36, label, 28, LABEL, align=Qt.AlignHCenter)
+
+    # Footer.
     if branding:
-        text(64, 1424, 1072, 44, 'github.com/iLLyaaaaaa/shion', 28, '#9C8A84')
+        text(64, 1432, 700, 40, 'github.com/iLLyaaaaaa/shion', 28, LABEL)
+    text(836, 1432, 300, 40, FOOTER_NAME, 28, LABEL, align=Qt.AlignRight)
 
 
 def render_card(data, branding=True):

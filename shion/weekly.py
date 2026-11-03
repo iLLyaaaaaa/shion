@@ -88,6 +88,7 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
     minutes = [m for m in activity.values() if type(m) is int and 0 <= m < 1440]
     latest = max(minutes) if minutes else None
     has_stats = any(totals[k] for k in COUNTERS)
+    days_elapsed = min(7, elapsed + 1) if ongoing else 7
     if enabled:
         totals['usage_days'] = sum(v > 0 for v in daily)
     totals.update(total_tokens=sum(daily), output_tokens=output,
@@ -107,6 +108,9 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
             'daily': shown, 'future': [i > elapsed for i in range(7)] if ongoing else [False] * 7,
             'peak_day': peak_day, 'ongoing': ongoing,
             'day_n': elapsed + 1 if ongoing else None, 'has_stats': has_stats,
+            'days_elapsed': days_elapsed,
+            'active_days': totals.get('usage_days'),
+            'daily_avg': sum(daily) / days_elapsed if enabled else None,
             'latest': f'{(latest + 300) // 60 % 24:02}:{(latest + 300) % 60:02}' if latest is not None else None,
             'title': None if ongoing else title_for(totals, lang), 'price': price, 'partial': partial,
             'enabled': enabled, 'lang': lang}

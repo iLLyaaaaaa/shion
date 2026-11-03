@@ -5,14 +5,14 @@
     "name": {
       "zh": "额度刺客",
       "en": "Quota Assassin",
-      "ja": "上限アサシン"
+      "ja": "枠キラー"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "额度都快被你榨干了……诗音也要倒下了啦",
+      "en": "You nearly drained the whole quota... Shion's about to faint too.",
+      "ja": "枠、ほとんど使い切っちゃったね……詩音も倒れそう～"
     },
-    "sprite": "proud",
+    "sprite": "collapse",
     "all": [
       {
         "field": "quota",
@@ -30,11 +30,11 @@
       "ja": "夜更かしさん"
     },
     "comment": {
-      "zh": "夜深了，也记得休息。",
-      "en": "Late nights deserve some rest.",
-      "ja": "夜更かしの後は、ゆっくり休もう。"
+      "zh": "半夜还在写代码……诗音都困了，快去睡觉！",
+      "en": "Still coding past midnight... Shion's sleepy. Go to bed!",
+      "ja": "夜中までコード書いて……詩音も眠いよ、早く寝て！"
     },
-    "sprite": "sleep",
+    "sprite": "yawn",
     "all": [
       {
         "field": "nights",
@@ -52,11 +52,11 @@
       "ja": "トークン大食い"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "这周的 token 一口一口全吃光啦，好能吃！",
+      "en": "Devoured tokens all week long. What an appetite!",
+      "ja": "今週はトークンをもりもり食べたね。すごい食欲！"
     },
-    "sprite": "proud",
+    "sprite": "cheer",
     "all": [
       {
         "field": "total_tokens",
@@ -74,9 +74,9 @@
       "ja": "承認マスター"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "批准、批准、再批准——手速真快呢",
+      "en": "Approve, approve, approve—such fast hands!",
+      "ja": "許可、許可、また許可——手が早いね！"
     },
     "sprite": "done",
     "all": [
@@ -96,9 +96,9 @@
       "ja": "お任せ上手"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "活全丢给 AI 干，自己去摸鱼了吧？哼，诗音都看见了",
+      "en": "Left all the work to the AI, huh? Shion saw everything.",
+      "ja": "仕事は全部 AI 任せ？詩音、見てたからね"
     },
     "sprite": "idle",
     "all": [
@@ -122,9 +122,9 @@
       "ja": "おやつ名人"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "零食和摸头都收到啦……诗音才、才没有很开心！",
+      "en": "Got all the snacks and head pats... n-not that Shion's happy or anything!",
+      "ja": "おやつもなでなでもいっぱい……べ、別に嬉しくないもん！"
     },
     "sprite": "happy",
     "all": [],
@@ -148,11 +148,11 @@
       "ja": "のんびり週間"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "这周很悠闲嘛……偶尔休息一下也不错",
+      "en": "A slow week... a little rest is nice sometimes.",
+      "ja": "のんびりした一週間……たまには休むのもいいね"
     },
-    "sprite": "desk",
+    "sprite": "slump",
     "all": [
       {
         "field": "usage_days",
@@ -170,9 +170,9 @@
       "ja": "働き者の相棒"
     },
     "comment": {
-      "zh": "这周也一起走过来了。",
-      "en": "Another week, side by side.",
-      "ja": "今週も、一緒に歩んだね。"
+      "zh": "这周也一起走过来了，辛苦啦！",
+      "en": "We made it through another week. Good work!",
+      "ja": "今週も一緒に乗り越えたね。お疲れさま！"
     },
     "sprite": "done",
     "all": [],
