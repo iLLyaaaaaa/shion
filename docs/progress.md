@@ -111,6 +111,25 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-11-04 只读探测：Claude 桌面版普通聊天有没有可用的开始/结束信号**：结论**没有**（只读，未改任何 Claude/系统配置；工具 `tools/probe_chat.py`，未提交；原始数据在被忽略的 `build/probe-chat-run1.jsonl` 和 `build/probe-chat-report-run1.md`）。
+  - 记录范围：只存时间戳和元数据，不存对话、窗口标题原文、通知正文、日志行。
+  - **第一轮**（前台一次 61 秒、最小化一次 84 秒，五种方法同时记录）：
+    - UI Automation：无障碍树只有 37~50 个节点，像是窗口外框，没有聊天内容区；全程没出现过“停止/Stop”按钮。继续做需要给 Claude 加启动参数（如 `--force-renderer-accessibility`）或开系统屏幕阅读器标志，**不适合做成产品，已放弃**。
+    - Shell Hook：没有任何任务栏闪烁（`HSHELL_FLASH`）；看到的“激活”事件是用户自己切窗口造成的，不是信号。
+    - 窗口标题：长度全程不变。
+    - 日志：`%LOCALAPPDATA%\Claude\logs\main.log` 等（不在 `%APPDATA%`）空闲时也持续写入，`start/complete` 等关键词的出现与开始/结束对不上，不可靠。
+    - 通知：两轮都没有新的 Claude 通知。
+  - **第二轮只重测通知**：通知访问授权已是允许；Claude 的“回复完成”开关本来就开着，用户检查过 Windows 勿扰和 Claude 的系统通知权限。通知中心里本来有 19~20 条来源是 Claude 桌面版的旧通知（只读应用 ID 和时间，不读正文），所以 Claude 确实会发通知；但不能确认它们来自聊天还是 Code 标签页。10:23~10:34 监听 11 分钟，用户在聊天里约 10:25 发了一个 3~5 分钟的长任务并最小化（中间切回来看过几次）：**没有任何新的 Claude 通知**。
+  - **局限**：通知只测了一轮长任务，且用户中途切回窗口过几次（窗口在前台时系统通常不弹通知）；没测过“发完就一直最小化不看”的纯净情形。
+  - **结论与影响**：当前没有不改 Claude 配置就能用的聊天开始/结束信号，桌宠不做“普通聊天联动”；桌面版只能继续走 Code 标签页的 hook。若以后重新评估，优先复测“一直最小化不动”的通知，其余四种方法不值得再试。
+  - 工具备注：`tools/probe_chat.py` 有 `--only toast`（只开通知监听）、`--report`（对比表）、`build/probe-chat.stop`（让后台进程干净退出）；依赖 `uiautomation`、`pywin32`、`winrt-*` 只装在 `.venv`，没加进项目依赖。
+
+- **2026-11-04 只读探测：CC 是否本地缓存额度信息（桌面版体力用）**：结论**没有**。
+  - 范围：`~/.claude.json` 与 `~/.claude/`（排除 `projects/`，跳过名含 credential/token/secret/auth 的文件），1745 个文件；只记键路径和值类型，快照只存值哈希，不输出值。
+  - 没有 `five_hour` / `seven_day` / `resets_at` / `utilization` / `rate_limit_status` 一类键。命中的只有静态项：`oauthAccount/organizationRateLimitTier`、`userRateLimitTier`、`hasExtraUsageEnabled`、`cachedExtraUsageDisabledReason`、`cachedGrowthBookFeatures/*usage*`、`pluginUsage`/`skillUsage` 的 `usageCount`、`projects/*/lastModelUsage`。
+  - 在 Code 标签页发消息前后对比：值有变化的只有会话/备份/模型目录缓存的 mtime 和插件 `usage-rows-queued`，**没有任何额度类键更新**。
+  - 结论：体力数据不能从本地缓存读；可选方向是 statusline 的 stdin JSON（CC 提供的 rate_limits 字段，需另行验证）或按 token 自行估算。`lastModelUsage` 未展开看内容，若要用需单独评估。
+
 - **2026-11-03 V2.1 周报第三轮修正**（用户验收真实数据预览通过，本地提交，不 push）：
   - **字体**：称号和总 TOKEN 大数字用真粗体（`card_font(..., hero=True)`：zh Microsoft YaHei Bold；en Segoe UI Bold，其余文字不变；ja 保持）。离屏渲染原先只加载 `msyh.ttc`，粗体没有真字库所以预览里偏细，`ensure_fonts()` 补加载本机已安装的 `msyhbd.ttc`、`segoeui.ttf`、`segoeuib.ttf`（只读系统字体，不复制不打包）。
   - **评语换行**：`wrap_lines` 改为两行均衡断行（`balanced_break`）：偏好两行等宽、上行略长、断在空格/全角标点后；不拆拉丁文本（英文只在空格处断）；末行至少 3 个非空字符；行首不出现 `，。！？…` 等。zh 示例得到“这周的 token 一口一口 / 全吃光啦，好能吃！”。纯宽度均衡会断成“一口一 / 口全…”，所以加了上行偏长的偏好。
