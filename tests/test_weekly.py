@@ -890,3 +890,66 @@ def test_scan_drops_cache_entries_of_deleted_transcripts(tmp_path):
     result = s.scan(TODAY)
     assert len(result['files']) == 1
     assert len(json.loads((tmp_path / 'cache.json').read_text(encoding='utf-8'))['files']) == 1
+
+
+def _out_total(result):
+    return sum(c.get('out', 0) for models in result['days'].values() for tiers in models.values() for c in tiers.values())
+
+
+def test_unreadable_transcript_is_skipped_without_failing_the_scan(tmp_path, monkeypatch):
+    s = scanner(tmp_path)
+    good, locked = tmp_path / 'projects/a/good.jsonl', tmp_path / 'projects/b/locked.jsonl'
+    write(good, [row('g', out=5)])
+    write(locked, [row('l', out=7)])
+    real = Path.open
+    def guarded(self, *args, **kwargs):
+        if self.name == 'locked.jsonl':
+            raise PermissionError('locked by another program')
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'open', guarded)
+    first = s.scan(TODAY)
+    assert _out_total(first) == 5 and s.skipped == 1
+    monkeypatch.setattr(Path, 'open', real)
+    again = s.scan(TODAY)
+    assert _out_total(again) == 12 and s.skipped == 0
+    assert _out_total(s.scan(TODAY)) == 12  # No double counting once it is readable.
+
+
+def test_unreadable_known_transcript_keeps_its_previous_totals(tmp_path, monkeypatch):
+    s = scanner(tmp_path)
+    path = tmp_path / 'projects/a/t.jsonl'
+    write(path, [row('a', out=5)])
+    assert _out_total(s.scan(TODAY)) == 5
+    real = Path.open
+    monkeypatch.setattr(Path, 'open', lambda self, *a, **k: (_ for _ in ()).throw(PermissionError('x'))
+                        if self.name == 't.jsonl' else real(self, *a, **k))
+    assert _out_total(s.scan(TODAY)) == 5 and s.skipped == 1
+
+
+def test_read_error_mid_scan_keeps_the_old_cache(tmp_path, monkeypatch):
+    s = scanner(tmp_path)
+    write(tmp_path / 'projects/a/t.jsonl', [row('a', out=5)])
+    s.scan(TODAY)
+    before = (tmp_path / 'cache.json').read_bytes()
+    write(tmp_path / 'projects/a/t.jsonl', [row('b', out=6)], mode='a')
+    def broken(*args, **kwargs):
+        raise OSError('disk error')
+    monkeypatch.setattr(s, '_read', broken)
+    assert s.scan(TODAY) is None
+    assert (tmp_path / 'cache.json').read_bytes() == before
+
+
+@pytest.mark.parametrize('rules', ['missing', 'broken', [{'priority': 0, 'all': [{'field': 'tasks'}]}], [], 'no-strings'])
+def test_bad_title_table_falls_back_instead_of_crashing(tmp_path, monkeypatch, rules):
+    from shion import weekly
+    if rules in ('missing', 'broken'):
+        monkeypatch.setattr(weekly, 'ROOT', tmp_path)
+        if rules == 'broken':
+            (tmp_path / 'assets').mkdir()
+            (tmp_path / 'assets/weekly_titles.json').write_text('{oops', encoding='utf-8')
+        rules = None
+    elif rules == 'no-strings':
+        rules = [{'priority': 0, 'name': {'en': 1}, 'comment': {'en': 'x'}, 'sprite': 'done'}]
+    for lang, name in (('zh', '勤劳搭档'), ('en', 'Steady Partner'), ('ja', '働き者の相棒')):
+        title = title_for({'tasks': 3}, lang, rules)
+        assert title['name'] == name and title['sprite'] == 'done'

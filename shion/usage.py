@@ -203,21 +203,32 @@ class UsageScanner:
         paths = [p for p in paths if p.is_file() and not p.is_symlink()]
         keyed = [(sha(str(p.absolute()).encode())[:16], p) for p in paths]
         rebuild = False
+        readable = []
         for key, path in keyed:
             old = data['files'].get(key)
-            if old:
+            try:
                 with path.open('rb') as stream:
-                    stat = path.stat()
-                    if (stat.st_size < old['offset'] or anchor(stream, old['offset']) != old['anchor']
-                            or old.get('identity') != stat.st_ino
-                            or (stat.st_size == old.get('size') and stat.st_mtime_ns != old.get('modified'))):
-                        rebuild = True
+                    if old:
+                        stat = path.stat()
+                        if (stat.st_size < old['offset'] or anchor(stream, old['offset']) != old['anchor']
+                                or old.get('identity') != stat.st_ino
+                                or (stat.st_size == old.get('size') and stat.st_mtime_ns != old.get('modified'))):
+                            rebuild = True
+            except OSError:
+                # A locked or unreadable transcript keeps its previous totals; try again next scan.
+                self.skipped += 1
+                continue
+            readable.append((key, path))
+        keyed_all, keyed = keyed, readable
         if rebuild:
             data = empty(self.pricing.signature())
-        result, late = self._read(data, keyed, today, cancelled, full=not bool(data['files']))
-        if late:
-            self.skipped = 0
-            result, _ = self._read(empty(self.pricing.signature()), keyed, today, cancelled, full=True)
+        try:
+            result, late = self._read(data, keyed, today, cancelled, full=not bool(data['files']))
+            if late:
+                self.skipped = len(keyed_all) - len(keyed)
+                result, _ = self._read(empty(self.pricing.signature()), keyed, today, cancelled, full=True)
+        except OSError:
+            return None  # Read error part-way through a file: keep the old cache rather than risk double counting.
         if result is None or cancelled():
             return None
         cutoff = str(today - timedelta(days=55))
@@ -225,7 +236,7 @@ class UsageScanner:
         result['activity'] = {d: v for d, v in result['activity'].items() if cutoff <= d <= str(today)}
         recent = str(today - timedelta(days=7))
         result['seen'] = {k: v for k, v in result['seen'].items() if v['day'] >= recent}
-        live = {key for key, _ in keyed}
+        live = {key for key, _ in keyed_all}
         result['files'] = {k: v for k, v in result['files'].items() if k in live}  # Drop deleted transcripts.
         atomic_json(self.cache, result)
         return result
@@ -237,8 +248,18 @@ class UsageScanner:
             if cancelled():
                 return None, False
             offset = data['files'].get(key, {}).get('offset', 0)
-            with path.open('rb') as stream:
+            try:
+                stream = path.open('rb')
+            except OSError:
+                self.skipped += 1  # Opened fine a moment ago; keep its old totals and offset.
+                continue
+            try:
                 stream.seek(offset)
+            except OSError:
+                stream.close()
+                self.skipped += 1
+                continue
+            with stream:
                 while True:
                     if cancelled():
                         return None, False

@@ -40,6 +40,26 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 - **Observation only**: she can't approve, stop or interrupt Codex for you; when Codex needs you, she just reminds you to go back and check
 - Managed separately from Claude Code: install, temporarily disable or remove it under right-click → **AI connections** → **ChatGPT**
 
+### Shion Weekly
+- Right-click → **Shion Weekly**. It opens last week by default; switch to **This week** in the window. On the first launch each Monday, Shion holds up the report to let you know
+- The card shows a weekly title, Claude Code total and output tokens, a tokens-per-day chart, active days, latest activity, and what Shion counted herself: tasks finished, working time, approvals / denials, head pats and treats
+- **API price estimate**: based on Anthropic's published standard API prices (price table as of 2026-11-02). For reference only; subscriptions are not billed this way
+- If a 7-day quota was received, the card also shows this week's peak 7-day quota (that percentage includes chat and all other usage)
+- **Save image** or **Copy to clipboard**. Under right-click → **Settings** you can turn off **Usage statistics** or **Show project link on weekly card**
+- **Tokens count Claude Code only**: they come from Claude Code's local transcripts; regular chats on claude.ai or in the desktop app are not included
+
+<p align="center"><img src="docs/images/weekly.en.png" alt="Shion Weekly card: weekly title Night Owl, total tokens, API price estimate and a tokens-per-day chart (synthetic data)" width="360"><br>The weekly card (synthetic data).</p>
+
+### Stamina
+- Four tiers based on Claude Code's **5-hour quota**: under 50% fresh, 50–80% yawning, 80–95% slumped, 95% and up collapsed. She says a line when entering each tier, and when the quota resets she bounces back with a jump
+- **The four tiers work in terminal Claude Code only**: the data comes from `rate_limits` in the statusLine input (Pro / Max subscriptions, after the first reply in a session)
+- **Code in the Claude desktop app** doesn't run the statusLine, so there are just two states: she collapses when you hit the limit (`StopFailure` hook) and recovers when the quota auto-resumes
+- Double-click Shion to see the **5-hour quota** (fresh data only) and the **7-day quota** (last known value, marked with its age when older, e.g. "73% (3 h ago)")
+- When the quota is unknown she doesn't guess, and **never estimates it from tokens**: per-model weights and limits aren't published and regular chat usage isn't visible locally, so an estimate would be misleading
+- Stamina only changes her idle look; permission panels, Stop / Continue and other controls always come first
+
+<p align="center"><img src="docs/images/stamina.en.png" alt="Four stamina tiers: fresh, yawning, slumped and collapsed, for 5-hour quota under 50%, 50 to 80%, 80 to 95% and 95% or more" width="720"></p>
+
 ### Everyday interaction
 - Headpats (with hearts), pokes, cheek pinches, tickles, picking her up and shaking her (she gets dizzy)
 - Open **Talk → Give a snack**, or pick a preset conversation (no AI model involved)
@@ -76,7 +96,7 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 
 ## Install
 
-1. Download `Shion-2.0.0-win64.zip` from [Releases](../../releases)
+1. Download `Shion-2.1.0-win64.zip` from [Releases](../../releases)
 2. Extract it to a **permanent location**, e.g. `D:\Apps\Shion` (if you move it later, reconnect via right-click → **AI connections** → **Claude Code** → **Connect / inspect configuration**)
 3. Run `Shion.exe`
 4. On first launch Shion asks whether to connect to Claude Code — click **Connect**
@@ -95,6 +115,7 @@ No Python required.
 - If the file is malformed, Shion refuses to write rather than risk breaking it
 - You can **right-click → AI connections → Claude Code → Disconnect and remove configuration** at any time; to pause for a while, choose **Disable integration temporarily** instead
 - If an older source checkout has project-level Shion hooks, run `tools\uninstall_hooks.py` there before connecting with the exe; the exe cannot migrate those old project hooks
+- Connecting also takes over `statusLine` (for stamina). If you already have a status line command, Shion runs it with the same input and prints its output unchanged; disconnecting puts your original setting back
 
 Only **newly started** Claude Code sessions pick up the change.
 
@@ -115,7 +136,7 @@ The ChatGPT integration is installed separately: right-click → **AI connection
 | Drag a cheek sideways | Pinch her cheek |
 | Click her tummy 3 times / rub back and forth | Tickle |
 | Drag | Pick her up; she stays where you drop her. Shake hard and she gets dizzy |
-| Double click | Status (time together, affection level, connection) |
+| Double click | Status (time together, affection level, connection, quota) |
 | Right click | Menu: Interact, Work remote, Pet (Expression, Actions, Size…), AI connections, Settings (Language, Start with Windows)… |
 
 ## Privacy
@@ -127,6 +148,8 @@ The ChatGPT integration is installed separately: right-click → **AI connection
 - Hooks and Shion authenticate each other with a one-time token (a new one every time Shion starts), and the local port is bound exclusively, to stop other programs on your PC from pretending to be Shion or a hook
 - When several Claude Code sessions run in the same project, Shion keeps the first few characters of each session's first message in memory, only to tell them apart in the menu. They are not logged or saved and are gone when she quits; with **Status only (hide details)** on, hooks don't send them at all
 - ChatGPT (Codex) observation also stays on your machine, and Shion cannot operate Codex
+- **Weekly usage statistics** read only the `usage` field, model name and timestamp from Claude Code's local transcripts (`.jsonl` files under `%USERPROFILE%\.claude\projects`); **conversation content is never read**. Only daily totals are stored, in `%APPDATA%\Shion\usage.json` (kept for 8 weeks). Turn off **Usage statistics** under **Settings** to stop it
+- **statusLine**: Shion takes only the 5-hour / 7-day quota percentages and reset times (plus the session ID) and sends them to the local address; nothing else is forwarded. Connecting takes over `statusLine` and runs your original command in a chain; its last successful output is cached in `%APPDATA%\Shion\statusline-last.bin` (shown if the original command times out). Disconnecting restores the original value and deletes the cache and record files
 - Save data and logs live in `%APPDATA%\Shion`
 
 ## FAQ
@@ -147,13 +170,15 @@ Shion uses local port `47613`. Make sure only one Shion is running.
 Apps packaged with PyInstaller are occasionally misdetected. You can review the source and build it yourself (see below), or whitelist the folder.
 
 **How do I uninstall?**
-1. Right-click → **AI connections** → **Claude Code** → **Disconnect and remove configuration** (removes Shion's hooks from your Claude Code config); if you installed the ChatGPT integration, do the same under **ChatGPT**
+1. Right-click → **AI connections** → **Claude Code** → **Disconnect and remove configuration** (removes Shion's hooks from your Claude Code config and restores your original statusLine); if you installed the ChatGPT integration, do the same under **ChatGPT**
 2. Right-click → turn off "Start with Windows" if enabled
 3. Right-click → **Quit**, then delete the app folder and `%APPDATA%\Shion` (save data and logs)
 
 ## Known limitations
 
-- **V2.1 stamina development preview (unreleased):** four-level stamina uses terminal Claude Code statusLine data, available after the first response. Connecting relays your existing status bar; disconnecting restores its original value and stops on conflicts. Desktop Code does not run statusLine; its two-state hook path uses rate_limit to collapse and quota_auto_resume_fired to revive. Actual Desktop hook delivery still needs manual acceptance testing. Stamina only changes idle appearance; permissions and interactions take priority.
+- The four stamina tiers (5-hour quota) work in terminal Claude Code only. The desktop app gets the two-state hook path (collapse at the limit, recover on auto-resume), and the 7-day quota can only show the last value received from a terminal. Desktop collapse / recovery hasn't been verified against a real limit hit yet
+- Weekly tokens count Claude Code only (regular chats aren't included); the API price is an estimate for reference
+- Your original status line command gets at most 1 second per refresh; if it times out, its previous output is shown
 - ChatGPT (Codex) is observation only: Shion can't approve, stop or interrupt it, and **Work remote** applies to Claude Code only
 - The Codex desktop app sends no "start" event, so "Working" appears only after its first tool call
 - Codex doesn't launch Shion automatically (see the FAQ above; turning on **Start with Windows** helps)

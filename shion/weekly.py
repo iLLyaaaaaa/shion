@@ -55,20 +55,40 @@ def week_start(today):
     return today - timedelta(days=today.weekday())
 
 
+# Used when the editable title table is missing, broken or has no catch-all rule.
+FALLBACK_TITLE = {
+    'name': {'zh': '勤劳搭档', 'en': 'Steady Partner', 'ja': '働き者の相棒'},
+    'comment': {'zh': '这周也一起走过来了，辛苦啦！', 'en': 'We made it through another week. Good work!',
+                'ja': '今週も一緒に乗り越えたね。お疲れさま！'},
+    'sprite': 'done',
+}
+
+
+def _title(item, lang):
+    name, comment = item['name'], item['comment']
+    result = {'name': name.get(lang, name['en']), 'comment': comment.get(lang, comment['en']), 'sprite': item['sprite']}
+    if not all(isinstance(v, str) for v in result.values()):
+        raise ValueError('Invalid weekly title')
+    return result
+
+
 def title_for(metrics, lang, rules=None):
-    rules = rules if rules is not None else json.loads((ROOT / 'assets/weekly_titles.json').read_text(encoding='utf-8'))
-    for item in sorted(rules, key=lambda r: r['priority']):
-        conditions = item.get('all', [])
-        def matches(c):
-            # A missing metric (for example usage when statistics are off) never matches.
-            if c['field'] not in metrics:
-                return False
-            value = metrics[c['field']]
-            return value >= c.get('min', 0) and value <= c.get('max', float('inf'))
-        if all(matches(c) for c in conditions) and (not item.get('any') or any(matches(c) for c in item['any'])):
-            return {'name': item['name'].get(lang, item['name']['en']),
-                    'comment': item['comment'].get(lang, item['comment']['en']), 'sprite': item['sprite']}
-    raise ValueError('No fallback weekly title')
+    try:
+        rules = rules if rules is not None else json.loads(
+            (ROOT / 'assets/weekly_titles.json').read_text(encoding='utf-8'))
+        for item in sorted(rules, key=lambda r: r['priority']):
+            conditions = item.get('all', [])
+            def matches(c):
+                # A missing metric (for example usage when statistics are off) never matches.
+                if c['field'] not in metrics:
+                    return False
+                value = metrics[c['field']]
+                return value >= c.get('min', 0) and value <= c.get('max', float('inf'))
+            if all(matches(c) for c in conditions) and (not item.get('any') or any(matches(c) for c in item['any'])):
+                return _title(item, lang)
+    except Exception:
+        pass  # An edited title table must never break the weekly report.
+    return _title(FALLBACK_TITLE, lang)
 
 
 def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=None):

@@ -27,9 +27,33 @@ FRAME_COUNT = 80
 HERO_SIZE = (480, 360)
 STILL_SIZE = (720, 420)
 FONTS = {"zh": "Microsoft YaHei UI", "en": "Cascadia Mono", "ja": "Yu Gothic UI"}
+WEEKLY_SIZE = (600, 750)
+STAMINA_SIZE = (720, 330)
 NAMES = ("hero.gif", "pat.png", "desk.png", "permission.zh.png", "permission.en.png",
-         "permission.ja.png", "sleep-bed.png")
-GIF_LIMIT, PNG_LIMIT, TOTAL_LIMIT = 2_000_000, 300_000, 5_000_000
+         "permission.ja.png", "sleep-bed.png",
+         "weekly.zh.png", "weekly.en.png", "weekly.ja.png",
+         "stamina.zh.png", "stamina.en.png", "stamina.ja.png")
+GIF_LIMIT, PNG_LIMIT, WEEKLY_LIMIT, TOTAL_LIMIT = 2_000_000, 300_000, 500_000, 6_000_000
+# 体力四档按 5 小时额度；配图只用精灵，不读额度数据。
+STAMINA_TIERS = (("idle", "< 50%"), ("yawn", "50–80%"), ("slump", "80–95%"), ("collapse", "≥ 95%"))
+STAMINA_NAMES = {"zh": ("精神", "打哈欠", "趴下", "倒地"),
+                 "en": ("Fresh", "Yawning", "Slumped", "Collapsed"),
+                 "ja": ("元気", "あくび", "ぐったり", "ダウン")}
+WEEKLY_SEVEN_DAY_PEAK = 68  # 合成的 7 天额度峰值
+
+
+def image_size(name: str) -> tuple[int, int]:
+    if name.endswith(".gif"):
+        return HERO_SIZE
+    if name.startswith("weekly."):
+        return WEEKLY_SIZE
+    if name.startswith("stamina."):
+        return STAMINA_SIZE
+    return STILL_SIZE
+
+
+def size_limit(name: str) -> int:
+    return GIF_LIMIT if name.endswith(".gif") else WEEKLY_LIMIT if name.startswith("weekly.") else PNG_LIMIT
 
 
 def media_application():
@@ -164,6 +188,57 @@ def still_images():
         yield "sleep-bed.png", scene.render()
 
 
+def weekly_images():
+    """周报卡片只用 shion.weekly.preview 的合成数据。"""
+    from shion.weekly import preview, title_for
+    from shion.weekly_ui import render_card
+
+    for lang in FONTS:
+        data = preview(lang)
+        data["totals"]["seven_day_peak"] = WEEKLY_SEVEN_DAY_PEAK
+        data["title"] = title_for(data["totals"], lang)
+        image = pil_image(render_card(data)).convert("RGB")
+        yield f"weekly.{lang}.png", downsample(image, WEEKLY_SIZE)
+
+
+def stamina_image(lang: str):
+    """四档体力横排：同一裁切框保持脚底对齐，下方标注档位。"""
+    from PySide6.QtCore import QRect, QRectF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+    from shion.app import SnapshotScene
+    from shion.weekly_ui import card_font
+
+    sprites = []
+    for state, _ in STAMINA_TIERS:
+        with SnapshotScene(state, height=150, seed=SEED, scale=SCALE) as scene:
+            scene.advance_to(.3)
+            sprites.append(scene.render())
+    boxes = [pil_image(image).getchannel("A").getbbox() for image in sprites]
+    left, top = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    right, bottom = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    column, label = 320, 110
+    column = max(column, right - left + 24)
+    canvas = QImage(column * len(sprites), bottom - top + label, QImage.Format_ARGB32_Premultiplied)
+    canvas.fill(Qt.transparent)
+    painter = QPainter(canvas)
+    try:
+        for index, (image, (_, percent)) in enumerate(zip(sprites, STAMINA_TIERS)):
+            piece = image.copy(QRect(left, top, right - left, bottom - top))
+            piece.setDevicePixelRatio(1)  # 按像素拼接，避免 2x 截图被再缩一半
+            x = index * column + (column - piece.width()) // 2
+            painter.drawImage(x, 0, piece)
+            area = QRectF(index * column, bottom - top + 8, column, 48)
+            painter.setPen(QColor("#4A3B36"))
+            painter.setFont(card_font(lang, 34, True))
+            painter.drawText(area, Qt.AlignCenter, STAMINA_NAMES[lang][index])
+            painter.setPen(QColor("#8A7A72"))
+            painter.setFont(card_font(lang, 28))
+            painter.drawText(area.translated(0, 50), Qt.AlignCenter, percent)
+    finally:
+        painter.end()
+    return canvas
+
+
 def write_gif(path: Path, frames: list[Image.Image]) -> None:
     # 整段动画共同量化，避免逐帧调色板闪烁；无随机抽样、无抖动。
     atlas = Image.new("RGB", (HERO_SIZE[0], HERO_SIZE[1] * len(frames)))
@@ -180,11 +255,11 @@ def validate_files(directory: Path, other_bytes: int = 0) -> list[dict]:
     for name in NAMES:
         path = directory / name
         data = path.read_bytes()
-        limit = GIF_LIMIT if name.endswith(".gif") else PNG_LIMIT
+        limit = size_limit(name)
         if len(data) > limit:
             raise ValueError(f"{name} 超限：{len(data)} > {limit} 字节")
         with Image.open(path) as image:
-            expected = HERO_SIZE if name.endswith(".gif") else STILL_SIZE
+            expected = image_size(name)
             if image.size != expected:
                 raise ValueError(f"{name} 尺寸错误：{image.size}")
             if name.endswith(".gif"):
@@ -213,12 +288,17 @@ def generate_media(output_dir: Path) -> list[dict]:
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     other_bytes = sum(p.stat().st_size for p in output_dir.rglob("*")
                       if p.is_file() and p.relative_to(output_dir).as_posix() not in NAMES)
-    # 先生成、校验全部七个文件；编码或预算失败不改动已有成品。
+    # 先生成、校验全部文件；编码或预算失败不改动已有成品。
     with tempfile.TemporaryDirectory(prefix=".make-media-", dir=output_dir.parent) as temporary:
         staging = Path(temporary)
         write_gif(staging / "hero.gif", hero_frames())
         for name, image in still_images():
             downsample(card(image, STILL_SIZE), STILL_SIZE).save(staging / name, compress_level=9)
+        for name, image in weekly_images():
+            image.save(staging / name, compress_level=9)
+        for lang in FONTS:
+            downsample(card(stamina_image(lang), STAMINA_SIZE), STAMINA_SIZE).save(
+                staging / f"stamina.{lang}.png", compress_level=9)
         report = validate_files(staging, other_bytes)
         output_dir.mkdir(parents=True, exist_ok=True)
         for name in NAMES:
@@ -230,7 +310,7 @@ def generate_media(output_dir: Path) -> list[dict]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "docs" / "images",
-                        help="输出目录（默认仓库 docs/images，仅替换本工具的七个文件）")
+                        help="输出目录（默认仓库 docs/images，仅替换本工具生成的文件）")
     args = parser.parse_args(argv)
     try:
         report = generate_media(args.output_dir)

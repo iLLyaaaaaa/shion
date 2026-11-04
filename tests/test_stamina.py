@@ -251,7 +251,7 @@ def _chain_env(tmp_path, monkeypatch, command):
     record = tmp_path / 'record.json'
     record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({'type': 'command', 'command': command})}),
                       encoding='utf-8')
-    return data / 'statusline-last.bin', record
+    return data / 'statusline-last-default.bin', record
 
 
 def test_statusline_chain_caches_success_and_replays_on_failure(tmp_path, monkeypatch):
@@ -271,3 +271,65 @@ def test_statusline_chain_replays_cache_on_timeout_and_empty_without_cache(tmp_p
     cache.parent.mkdir(parents=True)
     cache.write_bytes(b'cached line')
     assert sl.chain(b'{}', record) == b'cached line'
+
+
+def test_statusline_cache_is_per_project_and_stores_no_path(tmp_path, monkeypatch):
+    _, record = _chain_env(tmp_path, monkeypatch, 'echo first')
+    monkeypatch.setattr('tools.hooks_config.statusline_shell', lambda: ['cmd', '/c'])
+    a = json.dumps({'workspace': {'project_dir': 'C:/work/secret-a'}, 'cwd': 'C:/work/secret-a/sub'}).encode()
+    b = json.dumps({'cwd': 'C:/work/secret-b'}).encode()
+    assert sl.chain(a, record).strip() == b'first'
+    record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({'type': 'command', 'command': 'echo second'})}),
+                      encoding='utf-8')
+    assert sl.chain(b, record).strip() == b'second'
+    record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({'type': 'command', 'command': 'exit 3'})}),
+                      encoding='utf-8')
+    assert sl.chain(a, record).strip() == b'first' and sl.chain(b, record).strip() == b'second'
+    names = sorted(p.name for p in (tmp_path / 'data').iterdir())
+    assert len(names) == 2 and not any('secret' in n for n in names)
+    assert sl.project_key(b'not json') == 'default'
+
+
+def test_statusline_cache_not_written_after_disconnect_or_on_failed_replace(tmp_path, monkeypatch):
+    cache, record = _chain_env(tmp_path, monkeypatch, 'echo hello')
+    sl.write_cache(b'line', record=tmp_path / 'gone.json')
+    assert not cache.exists()
+    def broken(*args):
+        raise OSError('locked')
+    monkeypatch.setattr(sl.os, 'replace', broken)
+    sl.write_cache(b'line', record=record)
+    assert not cache.exists() and not list((tmp_path / 'data').glob('*.tmp'))
+
+
+def test_statusline_oversized_output_replays_cache(tmp_path, monkeypatch):
+    cache, record = _chain_env(tmp_path, monkeypatch, 'unused')
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b'cached line')
+    monkeypatch.setattr(sl, 'MAX_OUTPUT', 4)
+    record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({'type': 'command', 'command': 'echo too long'})}),
+                      encoding='utf-8')
+    monkeypatch.setattr('tools.hooks_config.statusline_shell', lambda: ['cmd', '/c'])
+    assert sl.chain(b'{}', record) == b'cached line'
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows process tree')
+def test_statusline_timeout_ends_the_whole_process_tree(tmp_path, monkeypatch):
+    # cmd cannot parse list2cmdline's \" escapes, so every path here must be free of spaces.
+    if ' ' in sys._base_executable + str(tmp_path):
+        pytest.skip('paths with spaces')
+    marker = tmp_path / 'child.pid'
+    script = tmp_path / 'child.py'
+    script.write_text('import os, pathlib, sys, time\n'
+                      'pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))\n'
+                      'time.sleep(30)\n', encoding='utf-8')
+    _, record = _chain_env(tmp_path, monkeypatch, f'{sys._base_executable} {script} {marker}')
+    monkeypatch.setattr('tools.hooks_config.statusline_shell', lambda: ['cmd', '/c'])
+    assert sl.chain(b'{}', record) == b''
+    assert marker.exists()
+    pid = marker.read_text()
+    for _ in range(30):
+        listed = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'], capture_output=True, text=True).stdout
+        if pid not in listed:
+            break
+        time.sleep(0.1)
+    assert pid not in listed

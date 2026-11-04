@@ -228,8 +228,7 @@ def test_statusline_original_value_bytes_restored_with_foreign_edits(connection,
     assert hc.load(c.user)['foreign']==2
 
 
-@pytest.mark.parametrize('operation', ['connect','disconnect'])
-def test_external_statusline_edit_is_never_overwritten(connection,operation):
+def test_external_statusline_edit_is_never_overwritten(connection):
     c=connection
     c.connect()
     current=hc.load(c.user)
@@ -237,8 +236,38 @@ def test_external_statusline_edit_is_never_overwritten(connection,operation):
     put(c.user,current)
     before={p:p.read_bytes() for p in (c.user,c.record)}
     with pytest.raises(ValueError,match='拒绝覆盖'):
-        getattr(c,operation)()
+        c.connect()
     assert {p:p.read_bytes() for p in before}==before
+
+
+def test_disconnect_after_user_edit_removes_hooks_and_keeps_their_statusline(connection):
+    c=connection
+    put(c.user,{'statusLine':{'type':'command','command':'echo before'}})
+    c.connect()
+    current=hc.load(c.user)
+    current['statusLine']={'type':'command','command':'user-changed-command'}
+    put(c.user,current)
+    result=c.disconnect()
+    after=hc.load(c.user)
+    assert result.kept_statusline and not own(after)
+    assert after['statusLine']=={'type':'command','command':'user-changed-command'}
+    assert not c.record.exists() and c.inspect().state=='disconnected'
+    c.connect()
+    assert c.inspect().state=='connected'
+    c.disconnect()
+    assert hc.load(c.user)['statusLine']=={'type':'command','command':'user-changed-command'}
+
+
+def test_disconnect_after_own_statusline_tweak_restores_original(connection):
+    c=connection
+    put(c.user,{'statusLine':{'type':'command','command':'echo before'}})
+    c.connect()
+    current=hc.load(c.user)
+    current['statusLine']['padding']=9  # Still Shion's command, edited by hand.
+    put(c.user,current)
+    result=c.disconnect()
+    assert not result.kept_statusline
+    assert hc.load(c.user)=={'statusLine':{'type':'command','command':'echo before'}}
 
 
 def test_restore_checks_current_bytes_before_replacement(connection,monkeypatch):
@@ -284,26 +313,58 @@ def test_statusline_padding_is_preserved_and_original_raw_restored(connection):
     assert hc.load(c.user)['statusLine']=={'type':'command','command':'echo before','padding':4}
 
 
-@pytest.mark.parametrize('operation',['connect','disconnect'])
-def test_orphan_statusline_record_stops_before_any_mutation(connection,operation):
+def test_orphan_statusline_record_stops_connect_before_any_mutation(connection):
     c=connection
     c.connect()
     c.record.unlink()
     raw=c.user.read_bytes()
     assert c.inspect().state=='stale'
     with pytest.raises(ValueError,match='记录缺失'):
-        getattr(c,operation)()
+        c.connect()
     assert c.user.read_bytes()==raw
 
 
-def test_invalid_statusline_record_is_a_safe_error(connection):
+def test_disconnect_without_record_removes_own_statusline(connection):
     c=connection
+    c.connect()
+    c.record.unlink()
+    result=c.disconnect()
+    assert not result.kept_statusline and hc.load(c.user)=={}
+
+
+def test_invalid_statusline_record_still_disconnects(connection):
+    c=connection
+    put(c.user,{'statusLine':{'type':'command','command':'echo before'}})
     c.connect()
     record=hc.load(c.record)
     del record['original_raw']
     put(c.record,record)
     with pytest.raises(ValueError,match='拒绝覆盖'):
-        c.disconnect()
+        c.connect()
+    c.disconnect()
+    assert hc.load(c.user)=={} and not c.record.exists()
+
+
+def test_corrupt_statusline_record_is_kept_as_backup(connection):
+    c=connection
+    put(c.user,{'statusLine':{'type':'command','command':'echo before'}})
+    c.connect()
+    c.record.write_bytes(b'{not json')
+    result=c.disconnect()
+    assert hc.load(c.user)=={} and not c.record.exists()
+    kept=[b for b in result.backups if b.name.startswith(c.record.name)]
+    assert len(kept)==1 and kept[0].read_bytes()==b'{not json'
+
+
+def test_foreign_statusline_flag_is_not_mistaken_for_shion(connection):
+    c=connection
+    other={'type':'command','command':'other-tool --statusline --record elsewhere.json'}
+    put(c.user,{'statusLine':other})
+    assert not hc._is_own_statusline(other,c.record)
+    assert c.inspect().state=='disconnected'
+    c.connect()
+    c.disconnect()
+    assert hc.load(c.user)['statusLine']==other
 
 
 def test_shell_detection_handles_git_bash_mingw_path(tmp_path,monkeypatch):
@@ -313,15 +374,29 @@ def test_shell_detection_handles_git_bash_mingw_path(tmp_path,monkeypatch):
     for path in (git,bash):
         path.parent.mkdir(parents=True,exist_ok=True)
         path.write_bytes(b'test')
-    monkeypatch.setattr(hc.shutil,'which',lambda name:str(git) if name=='git' else None)
+    monkeypatch.setenv('PATH',str(git.parent))
     assert hc.statusline_shell()==[str(bash),'-c']
+
+
+def test_shell_lookup_never_uses_the_current_directory(tmp_path,monkeypatch):
+    for name in ('git.exe','bash.exe','powershell.exe','powershell.cmd'):
+        (tmp_path/name).write_bytes(b'planted')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('PATH',os.pathsep.join(['.','',str(tmp_path.parent/'missing')]))
+    for value in ('bash.exe',str(tmp_path/'missing.exe')):
+        monkeypatch.setenv('CLAUDE_CODE_GIT_BASH_PATH',value)
+        for key in ('ProgramFiles','ProgramFiles(x86)','LOCALAPPDATA'):
+            monkeypatch.setenv(key,str(tmp_path/'no-git'))
+        shell=Path(hc.statusline_shell()[0])
+        assert shell.is_absolute() and tmp_path not in shell.parents
+        assert shell.name=='powershell.exe' and shell.parent.name=='v1.0'
 
 
 def test_statusline_powershell_fallback_quotes_paths(connection,tmp_path,monkeypatch):
     monkeypatch.delenv('CLAUDE_CODE_GIT_BASH_PATH',raising=False)
     for key in ('ProgramFiles','ProgramFiles(x86)','LOCALAPPDATA'):
         monkeypatch.setenv(key,str(tmp_path/'no-git'))
-    monkeypatch.setattr(hc.shutil,'which',lambda name:None)
+    monkeypatch.setenv('PATH','')
     command=hc.statusline_command(connection.root,connection.record)['command']
     assert command.startswith("& '") and '--record' in command
     assert Path(hc.statusline_shell()[0]).is_absolute()
@@ -332,11 +407,15 @@ def test_disconnect_removes_statusline_cache_and_empty_record(connection, tmp_pa
     data = tmp_path / "data"
     data.mkdir()
     monkeypatch.setenv("SHION_DATA_DIR", str(data))
-    cache = data / "statusline-last.bin"
-    cache.write_bytes(b"cached")
+    caches = [data / name for name in ("statusline-last.bin", "statusline-last-0123456789abcdef.bin",
+                                        "statusline-last-default.bin.123.tmp")]
+    for cache in caches:
+        cache.write_bytes(b"cached")
+    (data / "usage.json").write_bytes(b"{}")
     c = connection
     put(c.user, {"statusLine": {"type": "command", "command": "custom.exe"}})
     c.connect("zh")
     assert c.record.exists()
     c.disconnect()
-    assert not cache.exists() and not c.record.exists()
+    assert not any(cache.exists() for cache in caches) and not c.record.exists()
+    assert (data / "usage.json").exists()

@@ -46,7 +46,7 @@ def test_application_identity_and_inherited_window_icons(qapp, monkeypatch):
     win = box = None
     try:
         assert app.run() == 0  # 在单实例检查处退出，不启动服务或访问存档。
-        assert qapp.applicationName() == "Shion" and qapp.applicationVersion() == __version__ == "2.0.0"
+        assert qapp.applicationName() == "Shion" and qapp.applicationVersion() == __version__ == "2.1.0"
         icon = application_icon()
         assert sorted(s.width() for s in icon.availableSizes()) == sorted(ICON_SIZES)
         win, box = PetWindow(autostart=False), QMessageBox()
@@ -71,7 +71,7 @@ def test_windows_version_resource_round_trip():
 
     resource = VSVersionInfo()
     resource.fromRaw(windows_version_info().toRaw())
-    assert resource.ffi.fileVersionMS == resource.ffi.productVersionMS == 2 << 16
+    assert resource.ffi.fileVersionMS == resource.ffi.productVersionMS == (2 << 16 | 1)
     assert resource.ffi.fileVersionLS == resource.ffi.productVersionLS == 0
     fields = {item.name: item.val for item in resource.kids[0].kids[0].kids}
     assert fields["ProductName"] == fields["FileDescription"] == "Shion"
@@ -89,7 +89,7 @@ def test_zip_contains_exact_bundle_and_licenses_with_stable_bytes(tmp_path):
     (licenses / "assets/LICENSE").write_bytes(b"CC BY-NC 4.0")
     (licenses / "secret.env").write_bytes(b"must not be included")
     output = tmp_path / release_filename()
-    assert output.name == "Shion-2.0.0-win64.zip"
+    assert output.name == "Shion-2.1.0-win64.zip"
     report = create_release_zip(bundle, output, licenses)
     before = output.read_bytes()
     with zipfile.ZipFile(output) as archive:

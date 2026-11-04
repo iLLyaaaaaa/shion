@@ -182,6 +182,7 @@ def save_with_backup(path: Path, data: dict) -> Path | None:
 class WriteResult(NamedTuple):
     changed: tuple[Path, ...]
     backups: tuple[Path, ...]
+    kept_statusline: bool = False  # Disconnect left a user-edited statusLine untouched.
 
 
 def _stage(path: Path, content: bytes) -> Path:
@@ -298,14 +299,26 @@ def statusline_span(raw: bytes):
             pos += 1
 
 
+def _which_path(name: str) -> str | None:
+    """Find name.exe on absolute PATH entries only; unlike shutil.which on Windows, never the current directory."""
+    for entry in os.environ.get('PATH', '').split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry or not Path(entry).is_absolute():
+            continue
+        path = Path(entry) / f'{name}.exe'
+        if path.is_file():
+            return str(path)
+    return None
+
+
 def statusline_shell() -> list[str]:
     """Use Claude Code's documented Git Bash / PowerShell order on Windows."""
     if os.name != 'nt':
         return [shutil.which('bash') or '/bin/sh', '-c']
     configured = os.environ.get('CLAUDE_CODE_GIT_BASH_PATH')
-    if configured:
+    if configured and Path(configured).is_absolute() and Path(configured).is_file():
         return [configured, '-c']
-    git = shutil.which('git')
+    git = _which_path('git')
     if git:
         base = Path(git).resolve().parent.parent
         # Git Bash puts mingw64/bin before cmd on PATH.
@@ -320,9 +333,13 @@ def statusline_shell() -> list[str]:
                 path = Path(directory) / suffix
                 if path.is_file():
                     return [str(path), '-c']
-    powershell = shutil.which('powershell') or str(
-        Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe')
-    return [powershell, '-NoProfile', '-Command']
+    powershell = system_root() / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    return [str(powershell), '-NoProfile', '-Command']
+
+
+def system_root() -> Path:
+    root = os.environ.get('SystemRoot', '')
+    return Path(root) if root and Path(root).is_absolute() else Path('C:/Windows')
 
 
 def statusline_command(root: Path, record: Path) -> dict:
@@ -347,9 +364,11 @@ def _snapshot(path):
     return data, raw
 
 
-def _looks_statusline(value):
+def _is_own_statusline(value, record: Path):
+    """Shion's relay names this connection's record file; another tool's --statusline flag does not count."""
     command = value.get('command') if isinstance(value, dict) else None
-    return isinstance(command, str) and ('--statusline' in command or 'shion_statusline.py' in command)
+    return (isinstance(command, str) and '--record' in command and record.as_posix() in command
+            and ('--statusline' in command or 'shion_statusline.py' in command))
 
 
 def runtime_command(root: Path = ROOT) -> tuple[str, str]:
@@ -384,7 +403,7 @@ class HookConnection:
                 raise ValueError("statusLine 或安装记录已变化，拒绝覆盖；请先核对差异")
             if record['original_raw'] is not None:
                 json.loads(record['original_raw'])
-        elif _looks_statusline(settings.get('statusLine')):
+        elif _is_own_statusline(settings.get('statusLine'), self.record):
             raise ValueError("statusLine 安装记录缺失，拒绝覆盖")
         return record, raw
 
@@ -394,7 +413,7 @@ class HookConnection:
             own = [(event, group, h) for event, groups in settings.get("hooks", {}).items()
                    for group in groups for h in group["hooks"] if _is_shion(h)]
             record, _ = _snapshot(self.record)
-            if not own and not record and not _looks_statusline(settings.get('statusLine')):
+            if not own and not record and not _is_own_statusline(settings.get('statusLine'), self.record):
                 return ConnectionStatus("disconnected")
             try:
                 self._record(settings)
@@ -462,7 +481,10 @@ class HookConnection:
 
     def disconnect(self) -> WriteResult:
         current, current_raw = _snapshot(self.user)
-        record, record_raw = self._record(current)
+        try:
+            record, record_raw = self._record(current)
+        except ValueError:
+            return self._disconnect_lenient(current, current_raw)
         restored = remove(current)
         raw_after = {}
         if record:
@@ -479,6 +501,38 @@ class HookConnection:
         self._cleanup_statusline_files()
         return result
 
+    def _disconnect_lenient(self, current, current_raw) -> WriteResult:
+        """statusLine or the record changed by hand: still remove hooks; never overwrite someone else's statusLine."""
+        record_raw = self.record.read_bytes() if self.record.exists() else None
+        try:
+            record = json.loads(record_raw.decode('utf-8-sig')) if record_raw is not None else {}
+            original = record.get('original_raw') if isinstance(record, dict) else None
+            original_value = json.loads(original) if isinstance(original, str) else None
+        except (ValueError, UnicodeError, RecursionError):
+            record, original, original_value = None, None, None
+        restored = remove(current)
+        line = current.get('statusLine')
+        kept = 'statusLine' in current and not _is_own_statusline(line, self.record)
+        if not kept and 'statusLine' in current:
+            if original_value is not None:
+                restored['statusLine'] = original_value
+            else:
+                restored.pop('statusLine', None)
+        edits = [(self.user, current, restored)]
+        usable = isinstance(record, dict)
+        if record_raw is not None and usable:
+            edits.append((self.record, record, {}))
+        result = apply_changes(edits, expected_raw={self.user: current_raw, self.record: record_raw})
+        if record_raw is not None and not usable:
+            # Unparseable record: keep it as a backup instead of deleting it.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            backup = self.record.with_name(f"{self.record.name}.shion-backup-{stamp}")
+            if self.record.read_bytes() == record_raw:
+                os.replace(self.record, backup)
+                result = result._replace(backups=result.backups + (backup,))
+        self._cleanup_statusline_files()
+        return result._replace(kept_statusline=kept)
+
     def _cleanup_statusline_files(self):
         """断开后删除内容为 {} 的记录文件和 statusLine 输出缓存（只在本机数据目录）。"""
         try:
@@ -488,10 +542,18 @@ class HookConnection:
             pass
         directory = os.environ.get('SHION_DATA_DIR')
         base = Path(directory) if directory else Path(os.environ.get('APPDATA', '')) / 'Shion'
-        try:
-            (base / 'statusline-last.bin').unlink(missing_ok=True)
-        except OSError:
-            pass
+        # Per-project caches, the pre-2.1 single cache and any interrupted temporary file.
+        for pattern in ('statusline-last*.bin', 'statusline-last*.tmp'):
+            try:
+                paths = list(base.glob(pattern)) if base.is_dir() else []
+            except OSError:
+                paths = []
+            for path in paths:
+                try:
+                    if path.is_file() and not path.is_symlink():
+                        path.unlink()
+                except OSError:
+                    pass
 
 
 def run(action: str, settings_path: str | None, python: str | None = None, script: str | None = None,
@@ -506,6 +568,8 @@ def run(action: str, settings_path: str | None, python: str | None = None, scrip
             result = connection.connect(lang if lang in LANGS else save_language()) if action == "install" else connection.disconnect()
             print(f"已{'安装' if action == 'install' else '卸载'}：{path}" +
                   (f"（备份：{', '.join(map(str, result.backups))}）" if result.backups else ""))
+            if result.kept_statusline:
+                print("statusLine 已被改动过，未修改它。")
             return 0
         connection = HookConnection(user=path)
         result = (connection.connect(lang if lang in LANGS else save_language(),
@@ -517,4 +581,6 @@ def run(action: str, settings_path: str | None, python: str | None = None, scrip
         print(f"失败：{path}（{e}）；{outcome}", file=sys.stderr)
         return 1
     print(f"已{'安装' if action == 'install' else '卸载'}：{path}" + (f"（备份：{backup.name}）" if backup else ""))
+    if result.kept_statusline:
+        print("statusLine 已被改动过，未修改它。")
     return 0

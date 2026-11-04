@@ -22,6 +22,9 @@
 
 - **2026-11-04 V2.1.0 发布准备第 0 步：7 天额度最后已知值**（本地提交、未 push）：存档可选字段 `seven_day_last = {value, resets_at, at}`（无会话标识），收到未过期 seven_day 即更新，数值/重置时间变化或满 10 分钟才写盘；双击状态的 7 天行改用它，超过 5 分钟附“（N 分钟/小时/天前）”，过 resets_at 隐藏；5 小时额度仍只用内存新鲜值，不按 token 推算（spec 已写原因）。原测试“7 天值 73→70 不写盘”改为写盘但不重绘周报。全量 `2214 passed, 8 skipped`，日志 `build/v210-step0-full.log`。下一步：版本号 2.1.0、配图、三语 README、发布说明、审查。
 
+- **2026-11-04 V2.1.0 发布准备：版本号、配图、README、发布说明、审查修复 A–G**（本地提交、未 push）：版本号改为 2.1.0（exe 版本资源 2.1.0.0）；`make_media.py` 新增周报卡片和体力四档两组合成图（三语，隔离目录生成，旧 7 张不变）；三语 README 新增「诗音周报」「体力」两节，并更新 statusLine 接管、隐私、已知限制、卸载；发布说明写在 `build/release-notes-2.1.0.md`。reviewer 和安全审查之后，用户选择修 A–G：A shell 查找不搜 cwd（Windows 的 `shutil.which` 会先查当前目录；PowerShell 固定用 System32 里那个，`CLAUDE_CODE_GIT_BASH_PATH` 必须是绝对路径）；B statusLine 被改过时也能断开（hooks 照删，别人的 statusLine 原样保留并提示，损坏的记录改名成备份）；C 称号表坏了用内置兜底；D 原命令放进 Job Object，超时时整个进程树一起结束，输出上限 64 KB；E 缓存按项目目录哈希分开，失败时删 tmp，断开后不再写回，断开时全部清掉；F 单个 jsonl 读不了就跳过（保留旧统计），读到一半出错整次放弃、不写缓存；G 精确识别诗音自己的 statusLine。H–K（备份累积、扫描整份复制、probe_chat 本地日志、每次刷新新进程）留到以后。
+- 踩坑：`taskkill /T` 每次约 1.2 秒，状态栏等不起，改用 Job Object；`cmd /c` 遇到 `list2cmdline` 产生的 `\"` 会解析错，进程树测试只用不带空格的路径。
+
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
 
 | 提交 | 当前作用与状态 |

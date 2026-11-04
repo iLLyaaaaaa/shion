@@ -433,6 +433,7 @@
     "connection_backups": "Original file backups:\n{paths}",
     "connection_failed": "Could not update connection settings: {error}",
     "connection_removed": "Shion's connection settings were removed. Other settings were preserved.",
+    "connection_statusline_kept": "Your statusLine had been changed, so Shion left it as it is.",
     "menu_language": "Language",
     "menu_pet": "Pet",
     "menu_ai": "AI connections",

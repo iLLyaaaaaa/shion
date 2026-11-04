@@ -1460,8 +1460,11 @@ class PetController(QObject):
 
     def disconnect(self) -> None:
         try:
-            self.connection.disconnect()
-            self.say(self.lines.ui("connection_removed"), priority=Priority.HIGH, category="connection")
+            result = self.connection.disconnect()
+            message = self.lines.ui("connection_removed")
+            if getattr(result, "kept_statusline", False):
+                message += "\n" + self.lines.ui("connection_statusline_kept")
+            self.say(message, priority=Priority.HIGH, category="connection")
         except (ValueError, OSError) as exc:
             self.say(self.lines.ui("connection_failed", error=str(exc)), priority=Priority.HIGH, category="connection")
 

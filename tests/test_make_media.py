@@ -88,7 +88,7 @@ def test_hero_uses_one_scene_blinks_jumps_and_returns_to_identical_idle(qapp, mo
 def small_batch(directory):
     directory.mkdir()
     for name in media.NAMES:
-        image = Image.new("RGB", media.HERO_SIZE if name.endswith(".gif") else media.STILL_SIZE, "white")
+        image = Image.new("RGB", media.image_size(name), "white")
         if name.endswith(".gif"):
             image.save(directory / name, duration=4000, loop=0)
         else:
@@ -160,7 +160,7 @@ print(json.dumps(first))
                             capture_output=True, timeout=180)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     report = json.loads(result.stdout)
-    assert len(report) == 7
+    assert len(report) == len(media.NAMES) == 13
     other = tmp_path / "second"
     result = subprocess.run([sys.executable, "tools/make_media.py", "--output-dir", str(other)],
                             cwd=root, capture_output=True, timeout=120)

@@ -1,5 +1,6 @@
 """Fail-open statusLine relay. Standard library only; never opens transcripts."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,7 +8,8 @@ import subprocess
 import sys
 import threading
 
-CACHE_NAME = 'statusline-last.bin'
+CACHE_PREFIX = 'statusline-last'
+MAX_OUTPUT = 64 * 1024
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -41,28 +43,94 @@ def forward(raw):
         pass
 
 
-def cache_path():
-    directory = os.environ.get('SHION_DATA_DIR')
-    return (Path(directory) if directory else Path(os.environ['APPDATA']) / 'Shion') / CACHE_NAME
-
-
-def read_cache():
+def project_key(raw):
+    """Hash of the project directory so each project replays its own line; the path itself is never stored."""
     try:
-        return cache_path().read_bytes()
+        data = json.loads(raw)
+        workspace = data.get('workspace') if isinstance(data, dict) else None
+        folder = workspace.get('project_dir') if isinstance(workspace, dict) else None
+        folder = folder if isinstance(folder, str) and folder else data.get('cwd')
+        if isinstance(folder, str) and folder:
+            return hashlib.sha256(folder.encode('utf-8', 'surrogatepass')).hexdigest()[:16]
+    except Exception:
+        pass
+    return 'default'
+
+
+def cache_path(key='default'):
+    directory = os.environ.get('SHION_DATA_DIR')
+    return (Path(directory) if directory else Path(os.environ['APPDATA']) / 'Shion') / f'{CACHE_PREFIX}-{key}.bin'
+
+
+def read_cache(key='default'):
+    try:
+        return cache_path(key).read_bytes()
     except Exception:
         return b''
 
 
-def write_cache(output):
+def write_cache(output, key='default', record=None):
     # Local only; atomic so a concurrent reader never sees a partial line.
+    tmp = None
     try:
-        path = cache_path()
+        if record is not None and not Path(record).is_file():
+            return  # Disconnected meanwhile: do not recreate the cache.
+        path = cache_path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f'{path.name}.{os.getpid()}.tmp')
         tmp.write_bytes(output)
         os.replace(tmp, path)
     except Exception:
-        pass
+        try:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+class ProcessTree:
+    """Windows job holding the shell and everything it starts, so a timeout ends all of them at once."""
+
+    def __init__(self, proc):
+        self.proc, self.job = proc, None
+        if os.name != 'nt':
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.CreateJobObjectW.restype = wintypes.HANDLE
+            kernel.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+            kernel.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+            kernel.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            job = kernel.CreateJobObjectW(None, None)
+            if job and kernel.AssignProcessToJobObject(job, int(proc._handle)):
+                self.kernel, self.job = kernel, job
+            elif job:
+                kernel.CloseHandle(job)
+        except Exception:
+            self.job = None
+
+    def kill(self):
+        try:
+            if self.job:
+                self.kernel.TerminateJobObject(self.job, 1)
+        except Exception:
+            pass
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+
+    def close(self):
+        # No kill-on-close: a command that finished in time keeps any background helper it started.
+        try:
+            if self.job:
+                self.kernel.CloseHandle(self.job)
+        except Exception:
+            pass
+        self.job = None
 
 
 def run_original(record):
@@ -80,6 +148,7 @@ def run_original(record):
 
 def chain(raw, record):
     """Run the user's original command; on success cache its output, on timeout/failure replay the cache."""
+    key = project_key(raw)
     try:
         command = run_original(record)
         if command is None:
@@ -89,19 +158,22 @@ def chain(raw, record):
         proc = subprocess.Popen([*statusline_shell(), command], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL,
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        tree = ProcessTree(proc)
         try:
             output = proc.communicate(raw, timeout=1)[0]
         except subprocess.TimeoutExpired:
-            proc.kill()
+            tree.kill()
             # Descendants can retain pipe handles. Never wait for EOF here.
             threading.Thread(target=proc.communicate, daemon=True).start()
-            return read_cache()
-        if proc.returncode == 0 and output:
-            write_cache(output)
+            return read_cache(key)
+        finally:
+            tree.close()
+        if proc.returncode == 0 and output and len(output) <= MAX_OUTPUT:
+            write_cache(output, key, record)
             return output
-        return read_cache()
+        return read_cache(key)
     except Exception:
-        return read_cache()
+        return read_cache(key)
 
 
 def main(argv=None):

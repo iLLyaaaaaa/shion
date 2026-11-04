@@ -75,7 +75,7 @@ sleep 在 alpha 清理后仅保留面积最大的连通块；bed 先分帧，每
 - Windows 原生平台关闭「置于最上层」时，分别用 `SetWinEventHook` 监听 `EVENT_SYSTEM_FOREGROUND` 和 `EVENT_SYSTEM_MINIMIZEEND`（`WINEVENT_OUTOFCONTEXT`）跟随前台：当前前台窗口所属可执行文件名为 `Claude.exe`（大小写无关、多窗口/多 PID 均可）时，仅把本体及可见气泡、摸头/升级爱心、碎屑、睡眠 Z、暂停标签、FPS 按既有层级紧邻排到该窗口之上。查询其上方非本组的 Z 序邻居作为插入点；无普通邻居时使用 `HWND_TOP`，不借 topmost 邻居意外开启置顶。每次 `SetWindowPos` 带 `SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER`，不激活、不改变前台、不关联 Claude owner，Claude 最小化不连带隐藏诗音。回调只投递合并请求，延后查询 PID/程序名及重新确认当前前台；前台是 Claude 时即使仍最小化，也在约 150ms、500ms 各补查一次，同一轮重复事件合并、不延长已有补查，不轮询。每次操作前重新核对前台，非 Claude 时取消补查；无效/不可见/最小化的目标只跳过本次调整。诗音窗口若仍被 Qt 视为可见、却被 Win+D 等系统操作隐藏或最小化，则在跟随时用 `ShowWindow(SW_SHOWNOACTIVATE)` 恢复，再排 Z 序；显式隐藏/关闭的气泡及特效不恢复。启动/关闭置顶时检查一次，附属窗口显示或 HWND 重建时重查。开启置顶、退出、应用关闭及 dispose 取消补查并注销两个 hook；保留 ctypes 回调至全部注销成功。非 Windows/offscreen 跳过，API 失败记日志且不阻止运行。
 - 授权请求切换到新的队首、计划提醒、有效完成提醒，以及「停下」后首次真正到达检查点时，整个提示前移一次；静音不影响前移，被诗音结束的一轮随后发来的 Stop 不触发。Windows 使用 `SetWindowPos(HWND_TOP, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`，不激活、不改变前台窗口、不重开置顶开关；授权/反馈/对话/关于面板排在本体和特效前面。
 - 所有对话框（关于、反馈输入、对话选择、授权）始终独立置顶。按身体中心选择当前显示器，在可用区域内优先放右侧，放不下换左侧；两侧都不足时尝试上/下，并避免身体重叠。授权展开/折叠、对话换页后重新定位。用户主动打开的反馈输入与关于可以接收键盘；自动授权和对话选择原有不抢焦点规则不变。
-- 程序版本唯一声明为 `shion.__version__ = "2.0.0"`，关于内容、QApplication 版本、exe 版本资源和 ZIP 文件名均从此读取；存档 schema 和内容 JSON schema 仍为各自协议版本。
+- 程序版本唯一声明为 `shion.__version__ = "2.1.0"`，关于内容、QApplication 版本、exe 版本资源和 ZIP 文件名均从此读取；存档 schema 和内容 JSON schema 仍为各自协议版本。
 - 默认显示高度 **200px**（图片按比例缩放，用平滑缩放）。右键菜单可以调成 160 / 200 / 260 / 320。
 - 默认位置：主屏幕可用区域（`availableGeometry`，不含任务栏）的右下角，脚底贴着底边。
 - 动作画布按原比例缩放至指定高度，宽度随动作变化，脚底中心保持不动；贴边时优先把本体夹进屏内。交叉淡化按各图自己的宽度、脚底中心对齐，不拉伸；过渡结束才收窄画布。绘制、遮罩、气泡/面板跟随共用当前本体尺寸。
@@ -656,7 +656,11 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 - CC 把 statusLine 的 JSON 通过 stdin 传给 statusLine 命令。Pro/Max 订阅从会话的第一条回复之后开始带 `rate_limits.five_hour` / `rate_limits.seven_day`，各含 `used_percentage`（0～100，可能超过 100）和 `resets_at`（Unix 秒）。每个窗口都可能单独缺失，API 账号则完全没有。
 - 新增入口 `Shion.exe --statusline`（源码运行时为 `hooks/shion_statusline.py`，只用标准库）。它读完 stdin，只取上述 4 个数加上 `session_id`，带令牌 POST 到 `/usage/limits`，超时 0.3 秒；失败时静默。其他字段一律不转发。
 - **与用户已有的 statusLine 串联**：连接时如果 `settings.json` 里已有第三方的 `statusLine`，把它的原值原样保存到诗音的安装记录中。之后运行时用同一份 stdin 调用原命令（超时 1 秒），把它的 stdout 原样输出。没有原命令时什么都不输出。断开时按字节恢复原值。保留原 statusLine 的 padding 等布局选项。Windows 与 CC 一样优先 Git Bash（支持 CLAUDE_CODE_GIT_BASH_PATH），没有时使用 PowerShell；路径使用正斜线并按对应 shell 引用，不通过 cmd 改变原命令语义。官方依据：[statusLine Windows 配置](https://code.claude.com/docs/en/statusline#windows-configuration)。
-- 安装记录位于目标配置旁的 `settings.json.shion-statusline.json`，保存原 JSON 值的原始字符/转义/内部空白和当前接管值；不存在原字段与原值为 null 分开处理。记录与配置一起走备份/原子替换事务，失败时只回滚仍等于本次写入内容的文件。断开清空活动记录。接管项或记录缺失、损坏、被外部改变时拒绝覆盖；配置其他字段的正常修改保留。准备前及每次替换前核对读取时的文件字节，并检查全部事务依赖，冲突即停止。
+- 安装记录位于目标配置旁的 `settings.json.shion-statusline.json`，保存原 JSON 值的原始字符/转义/内部空白和当前接管值；不存在原字段与原值为 null 分开处理。记录与配置一起走备份/原子替换事务，失败时只回滚仍等于本次写入内容的文件。断开清空活动记录。接管项或记录缺失、损坏、被外部改变时，**连接**拒绝覆盖；配置其他字段的正常修改保留。准备前及每次替换前核对读取时的文件字节，并检查全部事务依赖，冲突即停止。
+- **断开的宽松路径（V2.1.0 审查修复）**：接管项或记录被改过时，断开仍要照常移除诗音的 hooks，不能因为 statusLine 而卡住。statusLine 仍是诗音自己的命令（命令里有 `--record` 和本连接的记录路径，并且有 `--statusline` 或 `shion_statusline.py`；别人带 `--statusline` 的命令不算）时，记录里有可解析的原值就恢复原值，否则删掉这个键；statusLine 已经是别的命令时原样保留，并提示「statusLine 已被改动过，诗音没有动它」。记录文件损坏时改名成备份保留，不删除。
+- 断开时只有 statusLine 的值按字节恢复，settings.json 的其他部分会按 2 空格缩进重新排版（键和值不变，同 2.0）。
+- **执行原命令的安全约束**：查找 shell 时不搜索当前目录（Windows 上 `shutil.which` 会先查 cwd，项目里放一个 `bash.exe` 就会被执行），只看 `PATH` 中的绝对路径目录；`CLAUDE_CODE_GIT_BASH_PATH` 必须是存在的绝对路径；PowerShell 固定用 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`。原命令放进一个 Windows Job Object，超时时整个进程树一起结束；按时完成时不结束它留下的后台进程。输出超过 64 KB 视为失败。
+- **输出缓存**：`%APPDATA%\Shion\statusline-last-<项目目录 SHA-256 前 16 位>.bin`（项目目录取 stdin 的 `workspace.project_dir`，没有就用 `cwd`），各项目只回放自己的上一行，文件名里不出现路径。原子写失败时删除临时文件；安装记录已不在时不写。断开时删除全部 `statusline-last*.bin` / `*.tmp`。
 - 写入、断开和备份全部走 `tools/hooks_config.py` 现有的事务、备份和并发检测逻辑，“已连接”的判定加上 statusLine 这一项。修改 spec「一键连接」中“statusLine 保留”那条规则时要同步更新：诗音只接管自己写入的那一项，并负责恢复原值。
 - 数据超过 `resets_at` 后视为过期，过期或从未收到时显示为“未知”。
 

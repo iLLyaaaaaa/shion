@@ -59,6 +59,21 @@ def test_menu_confirm_connect_status_disconnect_in_each_language(connected_env, 
     assert ui("connection_disconnected") in ctl.status_text()
 
 
+@pytest.mark.parametrize("lang", ["zh", "en", "ja"])
+def test_disconnect_reports_a_user_edited_statusline_was_kept(connected_env, monkeypatch, lang):
+    ctl = connected_env.ctl
+    ctl.set_language(lang)
+    ctl.connection.connect(lang)
+    settings = json.loads(ctl.connection.user.read_text(encoding="utf-8"))
+    settings["statusLine"] = {"type": "command", "command": "my-own-line"}
+    ctl.connection.user.write_text(json.dumps(settings), encoding="utf-8")
+    said = []
+    monkeypatch.setattr(ctl, "say", lambda text, **kw: said.append(text))
+    ctl.disconnect()
+    assert said == [ctl.lines.ui("connection_removed") + "\n" + ctl.lines.ui("connection_statusline_kept")]
+    assert ctl.connection.inspect().state == "disconnected"
+
+
 def test_first_intro_finishes_before_prompt_and_later_is_flushed(connected_env):
     e = connected_env
     e.ctl.greet_startup(True)

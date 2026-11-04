@@ -434,6 +434,7 @@
     "connection_backups": "原文件备份：\n{paths}",
     "connection_failed": "连接设置失败：{error}",
     "connection_removed": "已移除诗音的连接配置，其他设置已保留。",
+    "connection_statusline_kept": "statusLine 已被改动过，诗音没有动它。",
     "menu_language": "语言",
     "menu_pet": "桌宠",
     "menu_ai": "AI 连接",

@@ -435,6 +435,7 @@
     "connection_backups": "元のファイルのバックアップ：\n{paths}",
     "connection_failed": "接続設定の変更に失敗しました：{error}",
     "connection_removed": "詩音の接続設定を削除しました。他の設定は保持されています。",
+    "connection_statusline_kept": "statusLine が変更されていたので、詩音はそのままにしました。",
     "menu_language": "言語",
     "menu_pet": "ペット",
     "menu_ai": "AI 連携",
