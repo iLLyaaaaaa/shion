@@ -731,3 +731,28 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 3. 新图：打哈欠、趴下、倒地、举报告卡（GPT 画图后通过 `tools/process_sprites.py` 处理），替换掉替代图。
 
 测试仍在隔离的 HOME / APPDATA 下运行，使用合成 jsonl（包含重复行、坏行、截断文件、跨时区日期和未知模型）。只有第 0 步获准读取真实数据。
+
+## V2.2 Claude 桌面版聊天联动（2026-11-04 规划，尚未开发）
+
+目标：在 Claude 桌面版普通聊天里让 Claude 做耗时任务（如做 PPT）时，诗音也能显示“在干活”并在完成时提醒。Claude 的聊天和 Claude Code 共用额度，聊天本身也会干活，这是诗音区别于只看编程工具的卖点。
+
+**外部信号探测结论（2026-11-04，`tools/probe_chat.py`，报告 `build/probe-chat-report.md`）**：UI Automation（Chromium 默认不暴露网页区无障碍树，读不到“停止”按钮）、Shell Hook 任务栏闪烁、窗口标题、`%APPDATA%\Claude\logs` 均无可靠的开始/结束信号。强制开启无障碍（启动参数或系统屏幕阅读器标志）会改用户配置、拖慢长对话，并让完整对话进入无障碍树，**不采用**。Windows 通知（桌面版“回复完成”开关已开）的长任务重测结果见 progress；若可靠，可作为“完成”信号的补充，但不作为主路径。
+
+**采用方案：诗音提供本地 MCP 服务，由 Claude 主动通知**
+- 新入口 `Shion.exe --chat-mcp`（stdio，只用标准库，不加载 Qt），复用 `codex_mcp.py` 的协议骨架和令牌通道。只提供三个工具：
+  - `shion_working(task)`：开始一个需要用工具或预计超过 30 秒的任务前调用；`task` 为几个字的任务名（清理控制字符，最长 20 字），隐私模式下不显示
+  - `shion_done()`：上述任务完成时调用
+  - `shion_need_input()`：需要用户回来确认或回答时调用
+- **调用规矩写在工具说明和 MCP 服务的 instructions 里**（三语），用户无需修改个人偏好。短问答不调用。
+- 诗音侧显示为独立的“Claude 聊天”来源：只观察和提醒，不提供授权/暂停/中断控制；不读取、不接收对话内容。
+- 兜底：`shion_working` 之后 15 分钟未收到 `shion_done`，自动回到空闲（不播放“做完了”）；同一时间只跟踪一个聊天任务，新的 `shion_working` 覆盖旧的。
+- 限制：只支持 Claude 桌面版（网页版、手机 App 连不到本机）；由 Claude 主动调用，可能偶尔漏调。README 三语写明。
+- **安装方式（第 0 步实测后二选一）**：
+  - A. 菜单“AI 连接 → Claude 桌面版 ›”一键连接：合并写入 `%APPDATA%\Claude\claude_desktop_config.json` 的 `mcpServers.shion`，沿用 `hooks_config` 的备份、合并、并发检测、断开只删自己条目的事务规则；完成后提示重启 Claude 桌面版
+  - B. 生成 Desktop Extension 安装包（`.mcpb`，`server.type = binary`），用户双击安装；需确认能否指向已安装的 `Shion.exe`，或须在包内附带独立的小程序
+- 周报与本功能无关：聊天的 token 无法在本地统计；卡片 token 标签改为 “Claude Code token”，额度格注明“含聊天等全部用量”（随 V2.1 收尾一起改）。
+
+**开发步骤**
+0. 实测：Claude 桌面版读取工具说明后是否按规矩调用（做 3 个长任务、3 个短问答，记录漏调/误调）；方案 A 与 B 的安装可行性。
+1. `--chat-mcp` 入口、服务端事件与“Claude 聊天”来源、兜底超时、三语台词。
+2. 安装方式与菜单、README、测试（隔离 APPDATA，不碰真实 Claude 配置）。
