@@ -519,6 +519,10 @@
     "stamina_revive": "完全復活！また一緒にがんばろう～",
     "quota_five_hour": "5時間の使用率 {value}%",
     "quota_seven_day": "7日間の使用率 {value}%",
+    "quota_seven_day_aged": "7日間の使用率 {value}%（{age}）",
+    "age_minutes": "{n} 分前",
+    "age_hours": "{n} 時間前",
+    "age_days": "{n} 日前",
     "weekly_quota": "今週の7日間使用率ピーク {value}%",
     "weekly_quota_note": "チャットなど全ての使用量を含む",
     "stamina_ready": "元気いっぱい！今日も一緒にがんばろう～"

@@ -20,6 +20,8 @@
 - 公开稳定版为 **v2.0.0**（2026-11-02 发布，标签指向 `0034dbb`）；上一版 v1.0.0；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 - **2026-11-04 V2.1 发布前收尾**（`master`，本地提交、未 push）：①周报 token 标签三语改为 Claude Code 口径（en 输出格缩成 `CC OUTPUT`，否则被截断），有 7 天额度时额度行旁加小字“含聊天等全部用量”（`weekly_quota_note`）；`test_lines` 把 `weekly_total/weekly_output` 列为允许出现 Claude Code 的文案。②statusLine 串联：原命令成功（返回码 0 且有输出）后把输出原子写入 `%APPDATA%\Shion\statusline-last.bin`，超时/失败/异常时输出这份缓存；断开连接时删除缓存和内容为 `{}` 的记录文件。这也缓解了“没有 Git Bash 的机器首次刷新丢状态栏”的边界。③`UsageScanner.scan` 扫描后移除缓存里已不存在的 jsonl 条目。④`tools/make_media.py` 输出路径 relpath 跨盘抛 ValueError 时退回绝对路径。⑤周报统计格默认高度 124→118，柱状图高度上限 320→520，多出的空白归柱状图（预览数据里没有富余，版面不变）。全量 pytest：首轮 `3 failed, 2207 passed`（失败均为上述文案规则测试，已改），改后 `test_lines` 全过。下一步：从新提交打包到暂存目录并挂等待替换（见下方记录）。
 
+- **2026-11-04 V2.1.0 发布准备第 0 步：7 天额度最后已知值**（本地提交、未 push）：存档可选字段 `seven_day_last = {value, resets_at, at}`（无会话标识），收到未过期 seven_day 即更新，数值/重置时间变化或满 10 分钟才写盘；双击状态的 7 天行改用它，超过 5 分钟附“（N 分钟/小时/天前）”，过 resets_at 隐藏；5 小时额度仍只用内存新鲜值，不按 token 推算（spec 已写原因）。原测试“7 天值 73→70 不写盘”改为写盘但不重绘周报。全量 `2214 passed, 8 skipped`，日志 `build/v210-step0-full.log`。下一步：版本号 2.1.0、配图、三语 README、发布说明、审查。
+
 ### 本分支提交现状（相对本地 master，按拓扑日期顺序）
 
 | 提交 | 当前作用与状态 |
@@ -133,7 +135,7 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
   - 范围：`~/.claude.json` 与 `~/.claude/`（排除 `projects/`，跳过名含 credential/token/secret/auth 的文件），1745 个文件；只记键路径和值类型，快照只存值哈希，不输出值。
   - 没有 `five_hour` / `seven_day` / `resets_at` / `utilization` / `rate_limit_status` 一类键。命中的只有静态项：`oauthAccount/organizationRateLimitTier`、`userRateLimitTier`、`hasExtraUsageEnabled`、`cachedExtraUsageDisabledReason`、`cachedGrowthBookFeatures/*usage*`、`pluginUsage`/`skillUsage` 的 `usageCount`、`projects/*/lastModelUsage`。
   - 在 Code 标签页发消息前后对比：值有变化的只有会话/备份/模型目录缓存的 mtime 和插件 `usage-rows-queued`，**没有任何额度类键更新**。
-  - 结论：体力数据不能从本地缓存读；可选方向是 statusline 的 stdin JSON（CC 提供的 rate_limits 字段，需另行验证）或按 token 自行估算。`lastModelUsage` 未展开看内容，若要用需单独评估。
+  - 结论：体力数据不能从本地缓存读；桌面版只能用 hook 两档 + 7 天额度最后已知值（终端 statusLine 的 rate_limits 已在第 0 步验证）；不按 token 推算额度。`lastModelUsage` 未展开看内容，若要用需单独评估。
 
 - **2026-11-03 V2.1 周报第三轮修正**（用户验收真实数据预览通过，本地提交，不 push）：
   - **字体**：称号和总 TOKEN 大数字用真粗体（`card_font(..., hero=True)`：zh Microsoft YaHei Bold；en Segoe UI Bold，其余文字不变；ja 保持）。离屏渲染原先只加载 `msyh.ttc`，粗体没有真字库所以预览里偏细，`ensure_fonts()` 补加载本机已安装的 `msyhbd.ttc`、`segoeui.ttf`、`segoeuib.ttf`（只读系统字体，不复制不打包）。

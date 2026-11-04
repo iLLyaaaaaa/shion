@@ -518,6 +518,10 @@
     "stamina_revive": "满血复活！又能陪你啦～",
     "quota_five_hour": "5 小时额度 {value}%",
     "quota_seven_day": "7 天额度 {value}%",
+    "quota_seven_day_aged": "7 天额度 {value}%（{age}）",
+    "age_minutes": "{n} 分钟前",
+    "age_hours": "{n} 小时前",
+    "age_days": "{n} 天前",
     "weekly_quota": "本周 7 天额度峰值 {value}%",
     "weekly_quota_note": "含聊天等全部用量",
     "stamina_ready": "精神满满！今天也一起加油～"

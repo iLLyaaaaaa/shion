@@ -40,7 +40,7 @@ from shion.scheduler_gui import SchedulerGUI
 from shion.usage_service import UsageService
 from shion.weekly import WorkTimer, count as weekly_count, report as weekly_report, week_start
 from shion.weekly_ui import WeeklyWindow
-from shion.limits import Limits
+from shion.limits import Limits, clean_last
 
 log = logging.getLogger("shion.controller")
 
@@ -118,6 +118,7 @@ class PetController(QObject):
         self._weekly_started = False
         self._work_timer = WorkTimer()
         self.limits = Limits(state.save.stamina_announced)
+        self._seven_saved_at = 0.0  # 上次因 7 天额度最后已知值写盘的时间
         self.usage = UsageService(scheduler.path.parent)
         self._input_panel: Optional[InputPanel] = None
         self._perm_panel: Optional[PermissionPanel] = None
@@ -619,16 +620,25 @@ class PetController(QObject):
         session, tool_id = meta.get("session"), meta.get("tool_id")
         if etype == 'usage_limits':
             self.limits.update(meta, self._now().timestamp())
-            peak_changed = False
+            peak_changed = dirty = False
             seven = meta.get('seven_day')
-            if seven is not None and seven['resets_at'] > self._now().timestamp():
+            stamp = self._now().timestamp()
+            if seven is not None and seven['resets_at'] > stamp:
                 value = seven['used_percentage']
                 day = str(self._now().date())
                 row = self.state.save.weekly_stats.setdefault(day, {})
                 if 'seven_day_peak' not in row or value > row['seven_day_peak']:
                     row['seven_day_peak'] = value
-                    peak_changed = True
-                    self.scheduler.mark_dirty(self._now())
+                    peak_changed = dirty = True
+                # 最后已知值：时间每次都更新，只在数值变化或距上次落盘满 10 分钟时写盘
+                last = self.state.save.seven_day_last
+                if (last.get('value') != value or last.get('resets_at') != seven['resets_at']
+                        or stamp - self._seven_saved_at >= 600):
+                    dirty = True
+                self.state.save.seven_day_last = {'value': value, 'resets_at': seven['resets_at'], 'at': stamp}
+            if dirty:
+                self._seven_saved_at = stamp
+                self.scheduler.mark_dirty(self._now())
             if peak_changed and self._weekly_window is not None and self._weekly_window.isVisible():
                 self._weekly_window.update_report(self._weekly_data())
             self.sync()
@@ -1351,8 +1361,14 @@ class PetController(QObject):
         if save.fixed_expression:
             text += "\n" + ui("expression_fixed")
         text += "\n" + self.connection_status_text()
-        quotas = self.limits.values(now.timestamp()) if self.hub.link_enabled else {}
-        parts = [ui('quota_' + key, value=f'{value:g}') for key, value in quotas.items() if value is not None]
+        parts = []
+        if self.hub.link_enabled:
+            five = self.limits.values(now.timestamp())['five_hour']
+            if five is not None:
+                parts.append(ui('quota_five_hour', value=f'{five:g}'))
+            seven = self.seven_day_text(now)
+            if seven:
+                parts.append(seven)
         if parts:
             text += '\n' + ' · '.join(parts)
         if self.chatgpt is not None:
@@ -1360,6 +1376,24 @@ class PetController(QObject):
         if self.v2.core.enabled:
             text += "\n" + self.v2.text(ui)
         return text
+
+    def seven_day_text(self, now: datetime) -> str:
+        """7 天额度最后已知值；未过 resets_at 才显示，超过 5 分钟附上是多久前收到的。"""
+        last = clean_last(self.state.save.seven_day_last)
+        stamp = now.timestamp()
+        if not last or last['resets_at'] <= stamp:
+            return ""
+        ui, value = self.lines.ui, f"{last['value']:g}"
+        age = max(0, int(stamp - last['at']) // 60)
+        if age < 5:
+            return ui('quota_seven_day', value=value)
+        if age < 60:
+            text = ui('age_minutes', n=age)
+        elif age < 48 * 60:
+            text = ui('age_hours', n=age // 60)
+        else:
+            text = ui('age_days', n=age // 1440)
+        return ui('quota_seven_day_aged', value=value, age=text)
 
     def _show_status(self) -> None:
         text = self.status_text()

@@ -47,6 +47,17 @@ def clean_announced(raw):
     return dict(sorted(result.items(), key=lambda item: float(item[0]))[-128:])
 
 
+def clean_last(raw):
+    """Last received seven_day value: {value, resets_at, at}; no session or content."""
+    if not isinstance(raw, dict) or set(raw) != {'value', 'resets_at', 'at'}:
+        return {}
+    if not all(number(raw[k]) for k in raw):
+        return {}
+    if not 0 < raw['resets_at'] <= 253402300799 or not 0 < raw['at'] <= 253402300799:
+        return {}
+    return {k: raw[k] for k in ('value', 'resets_at', 'at')}
+
+
 class Limits:
     def __init__(self, announced=None):
         self.sessions = {}

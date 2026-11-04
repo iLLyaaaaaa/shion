@@ -517,6 +517,10 @@
     "stamina_revive": "Back on my feet! Ready to go!",
     "quota_five_hour": "5-hour quota {value}%",
     "quota_seven_day": "7-day quota {value}%",
+    "quota_seven_day_aged": "7-day quota {value}% ({age})",
+    "age_minutes": "{n} min ago",
+    "age_hours": "{n} h ago",
+    "age_days": "{n} d ago",
     "weekly_quota": "Weekly 7-day quota peak {value}%",
     "weekly_quota_note": "Includes chat and all other usage",
     "stamina_ready": "Feeling fresh! Let’s get going!"

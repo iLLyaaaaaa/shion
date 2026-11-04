@@ -17,7 +17,7 @@ from typing import Callable, Optional
 
 from shion.affection import AffectionRules
 from shion.weekly import clean_stats, count as weekly_count
-from shion.limits import clean_announced
+from shion.limits import clean_announced, clean_last
 
 log = logging.getLogger("shion.state")
 
@@ -238,9 +238,11 @@ class SaveData:
     weekly_branding: bool = True
     weekly_announced: str = ""
     stamina_announced: dict = field(default_factory=dict)
+    seven_day_last: dict = field(default_factory=dict)  # 最后收到的 7 天额度 {value, resets_at, at}
 
     def to_dict(self) -> dict:
         return {
+            "seven_day_last": clean_last(self.seven_day_last),
             "weekly_stats": clean_stats(self.weekly_stats),
             "usage_enabled": self.usage_enabled,
             "weekly_branding": self.weekly_branding,
@@ -282,6 +284,7 @@ class SaveData:
         d.weekly_branding = _bool(raw.get("weekly_branding"), True)
         announced = raw.get("weekly_announced")
         d.stamina_announced = clean_announced(raw.get('stamina_announced'))
+        d.seven_day_last = clean_last(raw.get('seven_day_last'))
         try:
             d.weekly_announced = str(datetime.strptime(announced, "%Y-%m-%d").date())
         except (ValueError, TypeError):

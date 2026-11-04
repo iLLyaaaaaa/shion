@@ -134,10 +134,11 @@ def test_repeated_quota_updates_do_not_defer_save_or_redraw_weekly(env,monkeypat
     try:
         update(e,42,seven=73)
         update(e,42,seven=73)
-        update(e,42,seven=70)
         assert len(dirty)==len(draws)==1
+        update(e,42,seven=70)  # 峰值不变，只有最后已知值变化：写盘但不重绘周报
+        assert len(dirty)==2 and len(draws)==1
         update(e,42,seven=74)
-        assert len(dirty)==len(draws)==2
+        assert len(dirty)==3 and len(draws)==2
     finally:
         e.ctl._weekly_window=None
 
@@ -159,3 +160,50 @@ def test_new_stamina_sprites_exist_with_canvas_size():
     for name in ('yawn','slump','collapse','cheer'):
         with Image.open(SPRITE_DIR/f'{name}.png') as img:
             assert img.size==(448,512)
+
+
+def test_seven_day_last_known_shows_age_until_reset(env):
+    e=env
+    week=e.now.timestamp()+7*86400
+    e.ctl.handle_event('usage_limits',None,{'session':'a','five_hour':{'used_percentage':42,'resets_at':e.now.timestamp()+3600},
+                                            'seven_day':{'used_percentage':73,'resets_at':week}})
+    assert e.data.seven_day_last['value']==73 and 'session' not in e.data.seven_day_last
+    assert '7 天额度 73%' in e.ctl.status_text() and '前）' not in e.ctl.status_text()
+    e.ctl.limits.clear()  # 重启 / 会话消失：内存里没有任何窗口
+    e.now+=timedelta(hours=3)
+    text=e.ctl.status_text()
+    assert '7 天额度 73%（3 小时前）' in text and '5 小时额度' not in text
+    e.now+=timedelta(days=3)
+    assert '7 天额度 73%（3 天前）' in e.ctl.status_text()
+    e.now+=timedelta(days=4)  # 过了 resets_at
+    assert '7 天额度' not in e.ctl.status_text()
+
+
+def test_seven_day_last_known_hidden_while_link_disabled_and_not_from_hook(env):
+    e=env
+    e.ctl.handle_event('quota_down',None,{'session':'desktop'})
+    assert e.data.seven_day_last=={} and '额度' not in e.ctl.status_text()
+    update(e,42)
+    e.ctl.hub.set_link_enabled(False)
+    assert '7 天额度' not in e.ctl.status_text()
+
+
+def test_seven_day_last_known_minutes_and_languages(env):
+    from shion.lines import Lines
+    e=env
+    update(e,42)
+    e.ctl.limits.clear()
+    e.now+=timedelta(minutes=20)
+    assert e.ctl.seven_day_text(e.now)=='7 天额度 73%（20 分钟前）'
+    for lang,expected in (('en','7-day quota 73% (20 min ago)'),('ja','7日間の使用率 73%（20 分前）')):
+        e.ctl.lines=Lines(lang)
+        assert e.ctl.seven_day_text(e.now)==expected
+
+
+def test_seven_day_last_known_save_round_trip_and_rejects_garbage():
+    from shion.state import SaveData
+    good={'value':73,'resets_at':2_000_000_000,'at':1_999_000_000}
+    assert SaveData.from_dict({'seven_day_last':good}).seven_day_last==good
+    assert SaveData.from_dict({'seven_day_last':good}).to_dict()['seven_day_last']==good
+    for bad in ({**good,'session':'x'},{**good,'value':True},{**good,'resets_at':-1},{**good,'at':float('nan')},'73',None):
+        assert SaveData.from_dict({'seven_day_last':bad}).seven_day_last=={}
