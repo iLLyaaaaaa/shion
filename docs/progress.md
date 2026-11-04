@@ -118,6 +118,13 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 
 ## 最近几天的记录（摘要，完整原文见月度归档及专项报告）
 
+- **2026-11-04 用发布提交 `ca9df3f` 重新打包并替换 Shion-dev**（证据在忽略目录 `build/v210-replacement-20261104/`，沿用 `v21-final-replacement-20261104` 的脚本，只改目录名、对比基准，并新增前置检查）：
+  - **打包**：工作区干净，相对 `ca9df3f` 只差不进包的 `docs/progress.md`（打包不读 git、不含 docs），依赖版本一致，不生成 ZIP。新包 230 文件，exe `66a1bc8c…dfd78d890`。
+  - **验证**：bundle_smoke **110 项通过**；观察端 stdio 烟测通过，响应与早上那次替换完全一致。
+  - **替换**：替换器等用户退出诗音后原地替换，两次改名均一次成功。旧包（`1869f53` 版，exe `446ef22d…a17650a3`）230 文件逐个核对后保留为 `D:\desktop\tools\Shion-dev-before-2.1.0-20261104`，新目录 230 文件逐个核对一致。
+  - **未变**：Codex / CC 配置哈希与任务开始时一致；存档 `v2_scheduler_enabled=false`、`claude_link_enabled=true`；`Shion-2.0.0` / `Shion-2.1.0` 两个 ZIP 未变。
+  - 没有强制结束进程，未 push。
+
 - **2026-11-04 只读探测：Claude 桌面版普通聊天有没有可用的开始/结束信号**：结论**没有**（只读，未改任何 Claude/系统配置；工具 `tools/probe_chat.py`，未提交；原始数据在被忽略的 `build/probe-chat-run1.jsonl` 和 `build/probe-chat-report-run1.md`）。
   - 记录范围：只存时间戳和元数据，不存对话、窗口标题原文、通知正文、日志行。
   - **第一轮**（前台一次 61 秒、最小化一次 84 秒，五种方法同时记录）：
