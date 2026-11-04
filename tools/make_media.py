@@ -241,7 +241,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Python {platform.python_version()} | Qt {qVersion()} | Pillow {PILLOW_VERSION}")
     print("seed=42 clock=100.0 scale=2 fonts=" + ", ".join(FONTS.values()))
     for item in report:
-        path = os.path.relpath(args.output_dir / item["file"], ROOT).replace("\\", "/")
+        target = args.output_dir / item["file"]
+        try:
+            path = os.path.relpath(target, ROOT).replace("\\", "/")
+        except ValueError:  # Different drive: no relative path exists.
+            path = str(target).replace("\\", "/")
         print(f"{path}: {item['width']}x{item['height']}, {item['bytes']} bytes, SHA-256 {item['sha256']}")
     print(f"generated total: {sum(item['bytes'] for item in report)} bytes")
     return 0

@@ -86,7 +86,9 @@ def test_ready_reminders_are_native_and_brand_only_describes_connection(code):
     # 状态行改为“{name}：…”模板、连接项改为两边共用的文案后，原来的 menu_connect/menu_reconnect/menu_connection_status 已删除。
     compatibility = {"connection_explain", "menu_claude"}
     assert all("Claude Code" in raw["ui"][key] for key in compatibility)
-    visible = [text for key, text in raw["ui"].items() if key not in compatibility] + [s if isinstance(s, str) else s["text"]
+    # 周报的 token 标签按产品要求写明 Claude Code（统计的就是 Claude Code 的用量）。
+    weekly_labels = {"weekly_total", "weekly_output"}
+    visible = [text for key, text in raw["ui"].items() if key not in compatibility | weekly_labels] + [s if isinstance(s, str) else s["text"]
                                           for pool in raw["lines"].values() for s in pool]
     assert all("claude" not in text.casefold() for text in visible)
     assert "done_summary" not in raw["ui"]

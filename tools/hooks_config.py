@@ -474,8 +474,24 @@ class HookConnection:
                 raw = (json.dumps(restored, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
                 text, span = statusline_span(raw)
                 raw_after[self.user] = (text[:span[0]] + original + text[span[1]:]).encode("utf-8")
-        return apply_changes([(self.user, current, restored), (self.record, record, {})], raw_after=raw_after,
-                             expected_raw={self.user: current_raw, self.record: record_raw})
+        result = apply_changes([(self.user, current, restored), (self.record, record, {})], raw_after=raw_after,
+                               expected_raw={self.user: current_raw, self.record: record_raw})
+        self._cleanup_statusline_files()
+        return result
+
+    def _cleanup_statusline_files(self):
+        """断开后删除内容为 {} 的记录文件和 statusLine 输出缓存（只在本机数据目录）。"""
+        try:
+            if self.record.is_file() and json.loads(self.record.read_text(encoding='utf-8')) == {}:
+                self.record.unlink()
+        except (OSError, ValueError):
+            pass
+        directory = os.environ.get('SHION_DATA_DIR')
+        base = Path(directory) if directory else Path(os.environ.get('APPDATA', '')) / 'Shion'
+        try:
+            (base / 'statusline-last.bin').unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def run(action: str, settings_path: str | None, python: str | None = None, script: str | None = None,

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 
+CACHE_NAME = 'statusline-last.bin'
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -40,16 +41,48 @@ def forward(raw):
         pass
 
 
-def chain(raw, record):
+def cache_path():
+    directory = os.environ.get('SHION_DATA_DIR')
+    return (Path(directory) if directory else Path(os.environ['APPDATA']) / 'Shion') / CACHE_NAME
+
+
+def read_cache():
     try:
-        saved = json.loads(Path(record).read_text(encoding='utf-8'))
-        if saved.get('version') != 1 or saved.get('original_raw') is None:
-            return b''
-        original = json.loads(saved['original_raw'])
-        if not isinstance(original, dict) or original.get('type') != 'command':
-            return b''
-        command = original.get('command')
-        if not isinstance(command, str) or not command:
+        return cache_path().read_bytes()
+    except Exception:
+        return b''
+
+
+def write_cache(output):
+    # Local only; atomic so a concurrent reader never sees a partial line.
+    try:
+        path = cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f'{path.name}.{os.getpid()}.tmp')
+        tmp.write_bytes(output)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def run_original(record):
+    saved = json.loads(Path(record).read_text(encoding='utf-8'))
+    if saved.get('version') != 1 or saved.get('original_raw') is None:
+        return None
+    original = json.loads(saved['original_raw'])
+    if not isinstance(original, dict) or original.get('type') != 'command':
+        return None
+    command = original.get('command')
+    if not isinstance(command, str) or not command:
+        return None
+    return command
+
+
+def chain(raw, record):
+    """Run the user's original command; on success cache its output, on timeout/failure replay the cache."""
+    try:
+        command = run_original(record)
+        if command is None:
             return b''
         # It is the user's original shell command, not text derived from stdin.
         from tools.hooks_config import statusline_shell
@@ -57,14 +90,18 @@ def chain(raw, record):
                                 stderr=subprocess.DEVNULL,
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         try:
-            return proc.communicate(raw, timeout=1)[0]
-        except subprocess.TimeoutExpired as exc:
+            output = proc.communicate(raw, timeout=1)[0]
+        except subprocess.TimeoutExpired:
             proc.kill()
             # Descendants can retain pipe handles. Never wait for EOF here.
             threading.Thread(target=proc.communicate, daemon=True).start()
-            return exc.output or b''
+            return read_cache()
+        if proc.returncode == 0 and output:
+            write_cache(output)
+            return output
+        return read_cache()
     except Exception:
-        return b''
+        return read_cache()
 
 
 def main(argv=None):

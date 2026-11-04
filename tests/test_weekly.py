@@ -877,3 +877,16 @@ def test_first_row_cards_have_equal_height(qapp, lang, partial):
         x = 64 + column * 364 + 330
         bottoms.append(next(y for y in range(800, 1000) if image.pixelColor(x, y).name().upper() == '#33241F'))
     assert len(set(bottoms)) == 1, bottoms
+
+
+def test_scan_drops_cache_entries_of_deleted_transcripts(tmp_path):
+    first, second = tmp_path / 'projects' / 'p' / 'a.jsonl', tmp_path / 'projects' / 'p' / 'b.jsonl'
+    write(first, [row('a')])
+    write(second, [row('b', stamp='2026-11-02T07:00:00Z')])
+    s = scanner(tmp_path)
+    s.scan(TODAY)
+    assert len(json.loads((tmp_path / 'cache.json').read_text(encoding='utf-8'))['files']) == 2
+    second.unlink()
+    result = s.scan(TODAY)
+    assert len(result['files']) == 1
+    assert len(json.loads((tmp_path / 'cache.json').read_text(encoding='utf-8'))['files']) == 1

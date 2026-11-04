@@ -243,3 +243,31 @@ def test_restart_preserves_terminal_speech_dedup_and_recovers_new_window():
     again.update(sample(95,reset=3000),2001)
     assert again.pending[0]==3
     assert Limits({'nan':[1],'2000':[True,1,5],'invalid':'bad'}).records(0)=={'2000.0':[1]}
+
+
+def _chain_env(tmp_path, monkeypatch, command):
+    data = tmp_path / 'data'
+    monkeypatch.setenv('SHION_DATA_DIR', str(data))
+    record = tmp_path / 'record.json'
+    record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({'type': 'command', 'command': command})}),
+                      encoding='utf-8')
+    return data / 'statusline-last.bin', record
+
+
+def test_statusline_chain_caches_success_and_replays_on_failure(tmp_path, monkeypatch):
+    cache, record = _chain_env(tmp_path, monkeypatch, 'echo hello')
+    monkeypatch.setattr('tools.hooks_config.statusline_shell', lambda: ['cmd', '/c'])
+    out = sl.chain(b'{}', record)
+    assert out.strip() == b'hello' and cache.read_bytes() == out
+    record.write_text(json.dumps({'version': 1, 'original_raw': json.dumps({'type': 'command', 'command': 'exit 3'})}),
+                      encoding='utf-8')
+    assert sl.chain(b'{}', record) == out  # failure replays the last good output
+
+
+def test_statusline_chain_replays_cache_on_timeout_and_empty_without_cache(tmp_path, monkeypatch):
+    cache, record = _chain_env(tmp_path, monkeypatch, 'ping -n 6 127.0.0.1 >nul')
+    monkeypatch.setattr('tools.hooks_config.statusline_shell', lambda: ['cmd', '/c'])
+    assert sl.chain(b'{}', record) == b''
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b'cached line')
+    assert sl.chain(b'{}', record) == b'cached line'

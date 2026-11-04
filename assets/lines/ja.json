@@ -301,8 +301,8 @@
     "weekly_report": "詩音の週報",
     "weekly_this": "今週ここまで",
     "weekly_previous": "先週",
-    "weekly_total": "合計 TOKEN",
-    "weekly_output": "出力 TOKEN",
+    "weekly_total": "Claude Code 合計 TOKEN",
+    "weekly_output": "Claude Code 出力",
     "weekly_price_label": "API 概算",
     "weekly_estimate": "推定額・参考値です",
     "weekly_partial": "推定額・一部モデルは未計算",
@@ -520,6 +520,7 @@
     "quota_five_hour": "5時間の使用率 {value}%",
     "quota_seven_day": "7日間の使用率 {value}%",
     "weekly_quota": "今週の7日間使用率ピーク {value}%",
+    "weekly_quota_note": "チャットなど全ての使用量を含む",
     "stamina_ready": "元気いっぱい！今日も一緒にがんばろう～"
   }
 }

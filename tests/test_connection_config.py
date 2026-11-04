@@ -326,3 +326,17 @@ def test_statusline_powershell_fallback_quotes_paths(connection,tmp_path,monkeyp
     assert command.startswith("& '") and '--record' in command
     assert Path(hc.statusline_shell()[0]).is_absolute()
     assert '\\' not in command
+
+
+def test_disconnect_removes_statusline_cache_and_empty_record(connection, tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("SHION_DATA_DIR", str(data))
+    cache = data / "statusline-last.bin"
+    cache.write_bytes(b"cached")
+    c = connection
+    put(c.user, {"statusLine": {"type": "command", "command": "custom.exe"}})
+    c.connect("zh")
+    assert c.record.exists()
+    c.disconnect()
+    assert not cache.exists() and not c.record.exists()

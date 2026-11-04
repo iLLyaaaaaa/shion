@@ -79,7 +79,7 @@ def ensure_fonts():
 LABEL, CARD_FILL, CARD_EDGE, PRIMARY = '#9C8A84', '#231917', '#33241F', '#F2EDEA'
 SPRITE_RECT = QRectF(689, 225, 377, 430)  # Right of the total number, clear of the card grid.
 SPRITE_CENTER = QPointF(SPRITE_RECT.center().x(), SPRITE_RECT.center().y())
-GRID_TOP, GRID_GAP, CARD_W3 = 753, 20, 344
+GRID_TOP, GRID_GAP, CARD_W3, CARD_H3 = 753, 20, 344, 118
 CHART_BASE, BAR_W, BAR_SLOT = 1372, 118, 1072 / 7
 FOOTER_NAME = '诗音 · Shion'
 
@@ -239,7 +239,12 @@ def paint_card(painter, data, branding=True):
     else:
         text(64, 560, 620, 80, ui('weekly_disabled'), 36, LABEL)
     if 'seven_day_peak' in totals:
-        text(64, 676, 1072, 44, ui('weekly_quota', value=f"{totals['seven_day_peak']:g}"), 28, LABEL)
+        quota = ui('weekly_quota', value=f"{totals['seven_day_peak']:g}")
+        text(64, 676, 1072, 44, quota, 28, LABEL)
+        # Quota counts all usage, not just Claude Code; say so in smaller muted text beside it.
+        quota_w = QFontMetrics(card_font(lang, 28)).horizontalAdvance(quota)
+        if quota_w + 40 < 1072 - 200:
+            text(64 + quota_w + 28, 676, 1072 - quota_w - 28, 44, ui('weekly_quota_note'), 28, '#6F5F59')
 
     # 3x2 card grid; the price card carries its own estimate note.
     peak = data.get('peak_day')
@@ -258,7 +263,7 @@ def paint_card(painter, data, branding=True):
     y = GRID_TOP
     for first in range(0, len(cards), 3):
         row = cards[first:first + 3]
-        height = max([c.get('height', 124) for c in row])
+        height = max([c.get('height', CARD_H3) for c in row])
         for i, c in enumerate(row):
             stat_card(64 + i * (CARD_W3 + GRID_GAP), y, CARD_W3, height, c['label'], c['value'],
                       c.get('accent', False), c.get('note'))
@@ -280,7 +285,7 @@ def paint_card(painter, data, branding=True):
 
     # Bar chart fills the remaining height.
     text(64, y + 4, 1072, 40, ui('weekly_chart' if data['enabled'] else 'weekly_tasks'), 28, LABEL)
-    max_height = max(40, min(320, CHART_BASE - (y + 4 + 40) - 48))
+    max_height = max(40, min(520, CHART_BASE - (y + 4 + 40) - 48))  # Spare height goes to the bars.
     future = data.get('future') or [False] * 7
     done = [v for v, f in zip(data['daily'], future) if not f]
     top = max(max(done, default=0), 1)

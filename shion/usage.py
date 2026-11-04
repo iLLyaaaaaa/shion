@@ -225,6 +225,8 @@ class UsageScanner:
         result['activity'] = {d: v for d, v in result['activity'].items() if cutoff <= d <= str(today)}
         recent = str(today - timedelta(days=7))
         result['seen'] = {k: v for k, v in result['seen'].items() if v['day'] >= recent}
+        live = {key for key, _ in keyed}
+        result['files'] = {k: v for k, v in result['files'].items() if k in live}  # Drop deleted transcripts.
         atomic_json(self.cache, result)
         return result
 

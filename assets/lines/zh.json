@@ -300,8 +300,8 @@
     "weekly_report": "诗音周报",
     "weekly_this": "本周到目前为止",
     "weekly_previous": "上一周",
-    "weekly_total": "总 TOKEN",
-    "weekly_output": "输出 TOKEN",
+    "weekly_total": "Claude Code 总 token",
+    "weekly_output": "Claude Code 输出",
     "weekly_price_label": "API 估价",
     "weekly_estimate": "估算，仅供参考",
     "weekly_partial": "估算，仅供参考 · 部分模型未计价",
@@ -519,6 +519,7 @@
     "quota_five_hour": "5 小时额度 {value}%",
     "quota_seven_day": "7 天额度 {value}%",
     "weekly_quota": "本周 7 天额度峰值 {value}%",
+    "weekly_quota_note": "含聊天等全部用量",
     "stamina_ready": "精神满满！今天也一起加油～"
   }
 }
