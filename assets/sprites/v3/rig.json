@@ -1,0 +1,518 @@
+{
+ "version": 2,
+ "canvas": [
+  1086,
+  1448
+ ],
+ "source": "assets/sprites/raw/v3/ref.png",
+ "coords": "ref 像素坐标。所有零件都是左上角 (x, y)、不缩放",
+ "layers": [
+  "back_hair_under",
+  "back_hair",
+  "leg_l",
+  "leg_r",
+  "body_under",
+  "body",
+  "arm_l",
+  "arm_r",
+  "head_under",
+  "side_hair_l",
+  "head_skin",
+  "face",
+  "side_hair_r",
+  "hair_top",
+  "bangs",
+  "ribbon",
+  "flower",
+  "ahoge"
+ ],
+ "parts": {
+  "back_hair": {
+   "file": "slices/back_hair.png",
+   "source": "ref_slice",
+   "layer": "back_hair",
+   "z": 1,
+   "x": 689,
+   "y": 176,
+   "size": [
+    293,
+    350
+   ],
+   "parent": "head_skin",
+   "pivot": "neck"
+  },
+  "leg_l": {
+   "file": "slices/leg_l.png",
+   "source": "ref_slice",
+   "layer": "leg_l",
+   "z": 2,
+   "x": 340,
+   "y": 1049,
+   "size": [
+    231,
+    366
+   ],
+   "parent": "body",
+   "pivot": "hip_l"
+  },
+  "leg_r": {
+   "file": "slices/leg_r.png",
+   "source": "ref_slice",
+   "layer": "leg_r",
+   "z": 3,
+   "x": 530,
+   "y": 1048,
+   "size": [
+    190,
+    368
+   ],
+   "parent": "body",
+   "pivot": "hip_r"
+  },
+  "body": {
+   "file": "slices/body.png",
+   "source": "ref_slice",
+   "layer": "body",
+   "z": 5,
+   "x": 259,
+   "y": 633,
+   "size": [
+    521,
+    481
+   ],
+   "parent": null
+  },
+  "arm_l": {
+   "file": "slices/arm_l.png",
+   "source": "ref_slice",
+   "layer": "arm_l",
+   "z": 6,
+   "x": 191,
+   "y": 720,
+   "size": [
+    293,
+    252
+   ],
+   "parent": "body",
+   "pivot": "shoulder_l"
+  },
+  "arm_r": {
+   "file": "slices/arm_r.png",
+   "source": "ref_slice",
+   "layer": "arm_r",
+   "z": 7,
+   "x": 657,
+   "y": 746,
+   "size": [
+    232,
+    247
+   ],
+   "parent": "body",
+   "pivot": "shoulder_r"
+  },
+  "side_hair_l": {
+   "file": "slices/side_hair_l.png",
+   "source": "ref_slice",
+   "layer": "side_hair_l",
+   "z": 9,
+   "x": 105,
+   "y": 396,
+   "size": [
+    350,
+    362
+   ],
+   "parent": "head_skin",
+   "pivot": "side_hair_l_root"
+  },
+  "head_skin": {
+   "file": "slices/head_skin.png",
+   "source": "ref_slice",
+   "layer": "head_skin",
+   "z": 10,
+   "x": 285,
+   "y": 350,
+   "size": [
+    509,
+    318
+   ],
+   "parent": "body",
+   "pivot": "neck"
+  },
+  "eye_ref_l": {
+   "file": "slices/eye_ref_l.png",
+   "source": "ref_slice",
+   "layer": "face",
+   "z": 11,
+   "x": 340,
+   "y": 426,
+   "size": [
+    187,
+    120
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "smug"
+  },
+  "eye_ref_r": {
+   "file": "slices/eye_ref_r.png",
+   "source": "ref_slice",
+   "layer": "face",
+   "z": 11,
+   "x": 557,
+   "y": 428,
+   "size": [
+    142,
+    89
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "smug"
+  },
+  "mouth_ref": {
+   "file": "slices/mouth_ref.png",
+   "source": "ref_slice",
+   "layer": "face",
+   "z": 11,
+   "x": 502,
+   "y": 532,
+   "size": [
+    76,
+    56
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "smug"
+  },
+  "side_hair_r": {
+   "file": "slices/side_hair_r.png",
+   "source": "ref_slice",
+   "layer": "side_hair_r",
+   "z": 12,
+   "x": 653,
+   "y": 466,
+   "size": [
+    336,
+    284
+   ],
+   "parent": "head_skin",
+   "pivot": "side_hair_r_root"
+  },
+  "hair_top": {
+   "file": "slices/hair_top.png",
+   "source": "ref_slice",
+   "layer": "hair_top",
+   "z": 13,
+   "x": 187,
+   "y": 81,
+   "size": [
+    567,
+    288
+   ],
+   "parent": "head_skin",
+   "pivot": "neck"
+  },
+  "bangs": {
+   "file": "slices/bangs.png",
+   "source": "ref_slice",
+   "layer": "bangs",
+   "z": 14,
+   "x": 178,
+   "y": 305,
+   "size": [
+    641,
+    368
+   ],
+   "parent": "hair_top",
+   "pivot": "bangs_root"
+  },
+  "ribbon": {
+   "file": "slices/ribbon.png",
+   "source": "ref_slice",
+   "layer": "ribbon",
+   "z": 15,
+   "x": 697,
+   "y": 473,
+   "size": [
+    254,
+    330
+   ],
+   "parent": "flower",
+   "pivot": "ribbon_root"
+  },
+  "flower": {
+   "file": "slices/flower.png",
+   "source": "ref_slice",
+   "layer": "flower",
+   "z": 16,
+   "x": 654,
+   "y": 183,
+   "size": [
+    330,
+    315
+   ],
+   "parent": "head_skin",
+   "pivot": "flower_root"
+  },
+  "ahoge": {
+   "file": "slices/ahoge.png",
+   "source": "ref_slice",
+   "layer": "ahoge",
+   "z": 17,
+   "x": 355,
+   "y": 13,
+   "size": [
+    330,
+    201
+   ],
+   "parent": "hair_top",
+   "pivot": "ahoge_root"
+  },
+  "back_hair_under": {
+   "file": "underlays/back_hair_under.png",
+   "source": "gpt_underlay",
+   "layer": "back_hair_under",
+   "z": 0,
+   "x": 237,
+   "y": 121,
+   "size": [
+    600,
+    537
+   ],
+   "parent": "head_skin"
+  },
+  "head_under": {
+   "file": "underlays/head_under.png",
+   "source": "gpt_underlay",
+   "layer": "head_under",
+   "z": 8,
+   "x": 268,
+   "y": 220,
+   "size": [
+    538,
+    459
+   ],
+   "parent": "head_skin"
+  },
+  "body_under": {
+   "file": "underlays/body_under.png",
+   "source": "gpt_underlay",
+   "layer": "body_under",
+   "z": 4,
+   "x": 306,
+   "y": 649,
+   "size": [
+    502,
+    429
+   ],
+   "parent": "body"
+  },
+  "expr_neutral": {
+   "file": "expressions/expr_neutral.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 325,
+   "y": 377,
+   "size": [
+    403,
+    237
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "neutral"
+  },
+  "expr_happy": {
+   "file": "expressions/expr_happy.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 325,
+   "y": 412,
+   "size": [
+    401,
+    209
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "happy"
+  },
+  "expr_surprised": {
+   "file": "expressions/expr_surprised.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 317,
+   "y": 400,
+   "size": [
+    411,
+    217
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "surprised"
+  },
+  "expr_teary": {
+   "file": "expressions/expr_teary.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 325,
+   "y": 382,
+   "size": [
+    438,
+    213
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "teary"
+  },
+  "expr_angry": {
+   "file": "expressions/expr_angry.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 319,
+   "y": 382,
+   "size": [
+    409,
+    236
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "angry"
+  },
+  "expr_sleep": {
+   "file": "expressions/expr_sleep.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 319,
+   "y": 401,
+   "size": [
+    439,
+    191
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "sleep"
+  },
+  "expr_dizzy": {
+   "file": "expressions/expr_dizzy.png",
+   "source": "gpt_expression_diff",
+   "layer": "face",
+   "z": 11,
+   "x": 325,
+   "y": 394,
+   "size": [
+    403,
+    198
+   ],
+   "parent": "head_skin",
+   "slot": "face",
+   "variant": "dizzy"
+  }
+ },
+ "slots": {
+  "face": [
+   "smug",
+   "neutral",
+   "happy",
+   "surprised",
+   "teary",
+   "angry",
+   "sleep",
+   "dizzy"
+  ]
+ },
+ "faces": {
+  "smug": {
+   "face": "smug"
+  },
+  "neutral": {
+   "face": "neutral"
+  },
+  "happy": {
+   "face": "happy"
+  },
+  "surprised": {
+   "face": "surprised"
+  },
+  "teary": {
+   "face": "teary"
+  },
+  "angry": {
+   "face": "angry"
+  },
+  "sleep": {
+   "face": "sleep"
+  },
+  "dizzy": {
+   "face": "dizzy"
+  }
+ },
+ "pivots": {
+  "neck": [
+   546.5,
+   664.0
+  ],
+  "shoulder_l": [
+   431.1,
+   770.1
+  ],
+  "shoulder_r": [
+   695.4,
+   795.7
+  ],
+  "hip_l": [
+   463.5,
+   1063.3
+  ],
+  "hip_r": [
+   624.7,
+   1063.5
+  ],
+  "ahoge_root": [
+   499.6,
+   202.8
+  ],
+  "flower_root": [
+   820.8,
+   339.3
+  ],
+  "ribbon_root": [
+   860.1,
+   491.0
+  ],
+  "bangs_root": [
+   498.5,
+   330.5
+  ],
+  "side_hair_l_root": [
+   183.9,
+   415.3
+  ],
+  "side_hair_r_root": [
+   895.9,
+   479.3
+  ]
+ },
+ "mirror": {
+  "note": "屏幕另一侧时整体水平镜像。镜像头部皮肤（含左侧鼓脸颊）时，左右鬓发的上下顺序一起对调：镜像后应为 side_hair_r < head_skin < side_hair_l，鼓脸颊仍盖在它那一侧的鬓发上",
+  "swap_layers": [
+   [
+    "side_hair_l",
+    "side_hair_r"
+   ]
+  ]
+ },
+ "notes": {
+  "face": "表情层 face 一次只显示一款：smug = ref 原来的眼睛和嘴（eye_ref_*、mouth_ref）；其余 expr_* 是 GPT 在 ref 上只改眼和嘴的整图，与 ref 逐像素比较后，只取脸上五官附近改过的部分。face 在 head_skin 之上、右鬓发/hair_top/bangs 之下，刘海盖在眼睛前面",
+  "head_skin": "head_skin 切片里原来的眼睛和嘴已经擦掉、用周围皮肤补上",
+  "blink": "眨眼另做：以后用闭眼款或把当前表情层的眼睛纵向压缩",
+  "dizzy_stars": "dizzy 头顶的星星没有提取，以后做成特效",
+  "head_base_alt": "B02 为备用头部底色，不参与拼图",
+  "left_right": "左右一律指画面左/右",
+  "underlay": "*_under 是 GPT 零件垫底，只保留被上面切片完全盖住的部分，静止时看不见",
+  "hair_top": "头顶头发随头部刚性运动，不做摆动；bangs 挂在 hair_top 上做摆动"
+ }
+}

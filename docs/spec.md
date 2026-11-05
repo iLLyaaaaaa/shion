@@ -761,3 +761,28 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 0. 实测：Claude 桌面版读取工具说明后是否按规矩调用（做 3 个长任务、3 个短问答，记录漏调/误调）；方案 A 与 B 的安装可行性。
 1. `--chat-mcp` 入口、服务端事件与“Claude 聊天”来源、兜底超时、三语台词。
 2. 安装方式与菜单、README、测试（隔离 APPDATA，不碰真实 Claude 配置）。
+
+## V3 立绘：ref 切片 + 差分表情（2026-11-05 第 0 步）
+
+V3 立绘改成“零件 + 转轴”，为以后的呼吸、眨眼、头发摆动、捏脸做准备。
+
+### 素材与工具
+- 原始素材 `assets/sprites/raw/v3/`（只读，不入库）：`ref.png` 定稿总图（1086×1448 白底 RGB，得意脸）；`face_sheet / body_sheet / hair_head_sheet.png` GPT 零件图（透明，零件四周有 alpha<16 的淡白光晕）；`expr_*.png` 7 张 GPT 在 ref 上只改眼和嘴的整图（与 ref 同尺寸、白底）。
+- `tools/v3_extract.py`：切 GPT 零件图（`extract` 出编号总览、`name` 按 `parts_map.json` 输出 `parts/`），`rig` 用带遮罩的归一化互相关把零件对到 ref 上，结果缓存在 `build/v3/places.json`。GPT 零件只作垫底和分区种子。
+- `tools/v3_slice.py`：`regions` 自动分区并出编号总览（用户确认归属，写进 `slice_map.json`）；`slice` 切片、擦除原五官、提取差分表情、生成垫底、写 `rig.json`，并在 `build/v3/` 出对比图（`expressions.png`、`compare_*.png`、`recompose_diff.png`、`underlays.png`、`pivots.png`、`hairline_cut.png`）。
+
+### rig.json（version 2）
+- 坐标都是 ref 像素坐标；每个零件是左上角 `(x, y)`、不缩放的 RGBA 图，`source` 为 `ref_slice`（`slices/`）、`gpt_underlay`（`underlays/`）或 `gpt_expression_diff`（`expressions/`）。
+- `layers` 从下到上：back_hair_under、back_hair、leg_l、leg_r、body_under、body、arm_l、arm_r、head_under、side_hair_l、head_skin、face、side_hair_r、hair_top、bangs、ribbon、flower、ahoge。
+- 表情槽 `face`：smug（= ref 原来的 eye_ref_l/eye_ref_r/mouth_ref）、neutral、happy、surprised、teary、angry、sleep、dizzy，一次只显示一款；`faces` 给出每款的组合。
+- `parent`：body 为根；腿、臂、head_skin 挂 body；鬓发、hair_top、花饰、后发、表情挂 head_skin；bangs、呆毛挂 hair_top；飘带挂花饰。
+- `pivots`：neck、shoulder_l/r、hip_l/r、ahoge_root、flower_root、ribbon_root、bangs_root（在发际线切口上）、side_hair_l_root、side_hair_r_root；零件的 `pivot` 字段指向其中之一。
+- `mirror`：屏幕另一侧时整体水平镜像；镜像头部皮肤（含左侧鼓脸颊）时左右鬓发上下顺序对调（`swap_layers`）。
+- hair_top 随头部刚性运动不摆动；bangs、鬓发、飘带、呆毛、花饰做摆动；眨眼以后用闭眼款或把当前表情层的眼睛纵向压缩。
+- 左右一律指画面左/右。
+
+### 切片规则
+- 线稿：max(RGB)<110 且 R−B≥8，或 max<45 且不偏蓝；制服深蓝不算线。
+- 交界线归图层高的一边；下层在交界处往上层下延伸 3 px（渐淡）；人工切口（发际线）上层边缘 1 px 半透明；外轮廓半透明像素去白边。
+- 静止时切片拼回应与 ref 几乎逐像素一致（得意脸平均差 0.02/255），垫底和表情层不得改变得意脸。
+

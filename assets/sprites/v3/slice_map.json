@@ -1,0 +1,152 @@
+{
+ "_note": "V3 ref 切片的区域归属修正。overrides 按代表点 point 改归属（note 里是当时的编号，编号会变，以 point 为准）；cuts 手工切线 [x0,y0,x1,y1]；seeds 追加种子点 {零件: [[x,y]]}。 splits: 按折线把一个零件切成两个（折线以上改归 above）。",
+ "overrides": [
+  {
+   "point": [
+    308,
+    502
+   ],
+   "part": "bangs",
+   "note": "R029 自动=cheek_puff_l"
+  },
+  {
+   "point": [
+    918,
+    525
+   ],
+   "part": "side_hair_r",
+   "note": "R044 自动=side_hair_l"
+  },
+  {
+   "point": [
+    776,
+    568
+   ],
+   "part": "side_hair_r",
+   "note": "R050 自动=head_skin"
+  },
+  {
+   "point": [
+    697,
+    617
+   ],
+   "part": "side_hair_r",
+   "note": "R052 自动=back_hair"
+  },
+  {
+   "point": [
+    922,
+    632
+   ],
+   "part": "side_hair_r",
+   "note": "R053 自动=side_hair_l"
+  },
+  {
+   "point": [
+    925,
+    605
+   ],
+   "part": "side_hair_r",
+   "note": "R054 自动=side_hair_l"
+  },
+  {
+   "point": [
+    783,
+    666
+   ],
+   "part": "side_hair_r",
+   "note": "R061 自动=ribbon"
+  },
+  {
+   "point": [
+    524,
+    672
+   ],
+   "part": "body",
+   "note": "领口 V 字里的脖子跟身体走（R053 自动=head_skin）"
+  },
+  {
+   "point": [
+    705,
+    515
+   ],
+   "part": "head_skin",
+   "note": "R039 自动=bangs：右眼外侧的眼白 + 右脸颊和腮红（之间没有线），实际是脸；旁边那条弯线仍按交界规则归鬓发"
+  },
+  {
+   "point": [
+    676,
+    477
+   ],
+   "part": "eye_ref_r",
+   "note": "R021 虹膜色 (210,87,41)，是右眼的一部分（自动=side_hair_r）"
+  },
+  {
+   "point": [
+    678,
+    461
+   ],
+   "part": "eye_ref_r",
+   "note": "R022 虹膜色，是右眼的一部分（自动=bangs）"
+  },
+  {
+   "point": [
+    695,
+    472
+   ],
+   "part": "eye_ref_r",
+   "note": "R023 眼白阴影的淡紫，是右眼的一部分（自动=side_hair_r）"
+  },
+  {
+   "point": [
+    672,
+    498
+   ],
+   "part": "eye_ref_r",
+   "note": "R031 虹膜色，是右眼的一部分（自动=head_skin）"
+  }
+ ],
+ "cuts": [],
+ "seeds": {},
+ "splits": [
+  {
+   "part": "bangs",
+   "above": "hair_top",
+   "polyline": [
+    [
+     170,
+     370
+    ],
+    [
+     260,
+     345
+    ],
+    [
+     340,
+     338
+    ],
+    [
+     430,
+     332
+    ],
+    [
+     520,
+     330
+    ],
+    [
+     600,
+     322
+    ],
+    [
+     680,
+     305
+    ],
+    [
+     720,
+     290
+    ]
+   ],
+   "note": "沿眉毛上方的发际线把刘海切开：线以上是头顶（hair_top，随头部刚性运动），以下是垂在额头和眼前的几缕（bangs，做摆动）"
+  }
+ ]
+}

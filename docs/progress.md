@@ -4,6 +4,32 @@
 
 ## 当前状态总览
 
+### 2026-11-05 V3 立绘改版 第 0 步：零件提取与对位（分支 `feature/v3-rig`，从 `master` 派生，本地提交，不 push）
+
+- **结论：可见部分直接从定稿图 ref.png 切，表情用 GPT 差分图。** 得意脸（ref 本身）拼回后，人物范围内平均差 0.02/255，99% 像素差 ≤1，差 >16 的只有 104 px（发际线切口两端、外轮廓）；加上垫底后完全相同（垫底静止时不透出）。
+- **走过的弯路**：第一版用 GPT 零件图（face/body/hair_head 三张 sheet）按 ref 模板匹配对位再拼装（`tools/v3_extract.py`，带遮罩 NCC）。位置能对上，但 GPT 零件是重画的，线条和比例都和 ref 不同，加了眼睛放大、头部下移等五项微调也补不回来，用户否决。GPT 零件现在只用作垫底和分区种子。
+- **流程**（`python -m tools.v3_slice regions` → 用户确认 → `python -m tools.v3_slice slice`）：
+  1. 深棕/近黑线稿当墙，用 GPT 零件的对位结果当种子做分水岭（`scipy.ndimage.watershed_ift`），把连成一块的头部沿线切开；分区 ∩ 线稿封闭区域 = 102 块，编号给用户确认归属（`assets/sprites/v3/slice_map.json`：按代表点坐标记录改归属、手工切线、种子、发际线拆分）。
+  2. 17 个切片：后发、两腿、身体、两臂、左鬓发、头部皮肤（含鼓脸颊）、原左右眼和嘴、右鬓发、头顶 hair_top、前刘海 bangs、飘带、花饰、呆毛。交界线归图层高的一边；下层在交界处往上层下面延伸 3 px 渐淡；外轮廓半透明像素去白边；远处零星碎块和外轮廓细条改归旁边零件。
+  3. 头部皮肤里原眼睛、嘴按颜色圈出来擦掉、用周围皮肤补；原眼睛和嘴另存为得意脸。
+  4. 7 张 GPT 差分图（expr_neutral/happy/surprised/teary/angry/sleep/dizzy，只改眼和嘴的整图，与 ref 位移 ≤2 px）：只在脸上、五官附近取和 ref 差异 >40 的像素，去噪、只补和原五官重叠的洞、外扩 3 px、羽化，变化的像素完全不透明；按周围皮肤校正 GPT 的整体色差。GPT 顺手改的刘海、dizzy 头顶星星都不取。
+  5. 3 个 GPT 垫底（后发、头部底色、身体），只保留被上面切片完全盖住的部分。
+  6. 写 `assets/sprites/v3/rig.json`（v2）：27 个零件、图层表、表情槽 face（8 款，一次一款）、11 个转轴、镜像规则（镜像头部皮肤时左右鬓发上下顺序对调）。
+- **图层（下→上）**：back_hair_under < back_hair < 腿 < body_under < body < 手臂 < head_under < side_hair_l < head_skin < face（表情）< side_hair_r < hair_top < bangs < ribbon < flower < ahoge。左鬓发整片在脸后、右鬓发有几缕盖在脸上，所以鼓脸颊自然盖住左鬓发；刘海和头顶盖在眼睛前面。
+- **用户确认的归属/决定**：039、025 归刘海（后来 R039 因含右眼白和腮红改归 head_skin，用户同意）；花饰下的紫色归后发；额头露出的皮肤归 head_skin；头顶沿发际线折线拆出 hair_top（随头刚性运动），bangs 挂在它上面摆动；鼓脸颊并在 head_skin（和脸之间没有线，切不开）。
+- **测试**：`tests/test_v3_slice.py`、`tests/test_v3_extract.py`（合成图，不依赖 raw 素材），27 passed、1 skipped（旧 v1 rig 检查遇到 v2 时跳过）。全量（worktree 内，日志 `build/v3-full-tests.log`）：`2 failed, 2258 passed, 9 skipped, 2 warnings`。两项失败都不在本次改动范围：`test_permission::test_no_http_route_can_set_a_decision` 偶发（失败的参数每次不同，单独重跑 9 项全过）；`test_stamina::test_chain_preserves_exact_stdin_and_stdout` 在 worktree 里稳定失败、在主目录同一测试通过，判断为 worktree 环境（`.venv` 是 junction）问题，未深究。
+- **踩坑**：
+  - 线稿不全是棕色，有的轮廓接近纯黑；刘海的细发丝线是暗红色、不够黑，不算线稿，会被分进脸，差分表情会盖掉它们（teary 左眼上方白斜线）——改为“和刘海连着、离五官远的暗红细线，及五官附近 7 张差分图里最多 3 张变了的暗线”归刘海，发丝之间 16 px 内的窄缝也归刘海。
+  - 擦除五官必须在线稿归属之后、只动最终归五官的像素，否则会把刘海轮廓线一起擦掉（右眼上方白缺口）。
+  - 紧挨头发的眼角、眼睑线常被分给头发，擦不掉也提取不到：7 张差分图里至少 6 张都变了的像素改归五官；右眼外角另外按坐标手工改了 R021/R022/R023/R031 归右眼。
+  - 外轮廓最外圈 alpha<128 的抗锯齿像素一开始被丢掉、白边被算两遍，靠“就近归零件 + 去白边”解决。
+  - 表情层羽化边半透明时，head_skin 里原眼睑线残留会透出来——不能在 head_skin 里清（得意脸里它们是看得见的），改为表情层里“确实变了”的像素一律完全不透明。
+  - 模板匹配粗搜缩到 1/8 会把花饰配到鞋上；被上层盖住的区域只剩小块参与比较时分数会虚高，要给最小重叠面积和搜索范围。
+- **已知小问题**：右眼上方有一条要放大两倍才看得到的极淡细线；teary 左眼上方发丝旁留一条很窄的白边；后发/身体里有几个到几十个像素的半透明碎片（被盖住）。眨眼还没做（以后用闭眼款或纵向压缩）。
+- **下一步**：V3 第 1 步“动起来的原型”（独立预览窗口，不接入现有程序），方案待用户确认。
+- 原始素材在 `assets/sprites/raw/v3/`（不入库）；切片、垫底、表情层、GPT 零件、归属表和 rig.json 入库。worktree `D:\desktop\work\shion-v3rig` 里的 `.venv`、`assets/sprites/raw` 是指向主目录的 junction。
+
+
 - 当前分支 `master`（本地 V2.1 开发）；v1.0.1 hook 延迟热修、调度 GUI 审查修复、菜单 Claude Code 标名和 v2.0.0 发布前安全修复均已合并。2026-11-01 已替换本机 Shion-dev 开发预览包（安全修复版）；未 push、未发布，默认关闭的调度能力不等于已启用或完成人工验收。
 - 阶段 1 v3 全局安装已完成，MCP 与七项无 matcher Hook 保留；已安装 Shion-dev 更新为菜单标名开发包（替换记录核验 228 文件）。替换记录确认配置哈希未变，旧包保留为 `Shion-dev-before-menu-label-20261030`；阶段 1 仅部分通过人工验收。旧会话 Observer 异常退出后自动恢复未证明，新开 CLI 会话恢复已有证据。
 - 阶段 2 P1～P5 核心、2 秒心跳/10 秒租约及 GUI 适配已完成隔离开发。`v2_scheduler_enabled` 默认 false，没有普通用户菜单开关；ChatGPT 仅观察，无控制入口；Claude 原授权/暂停/继续/中断保留。真实 Claude 缺可靠 turn_id，真实前台缺完整任务绑定，生产端缺可信 coverage；完整身份与仲裁能力仍主要是合成证据。Work 未开发。
