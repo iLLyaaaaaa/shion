@@ -737,7 +737,7 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 
 测试仍在隔离的 HOME / APPDATA 下运行，使用合成 jsonl（包含重复行、坏行、截断文件、跨时区日期和未知模型）。只有第 0 步获准读取真实数据。
 
-## V2.2 Claude 桌面版聊天联动（2026-11-04 规划，尚未开发）
+## V2.2 Claude 桌面版聊天联动（2026-11-05 步骤 0 探针实测，正式联动尚未开发）
 
 目标：在 Claude 桌面版普通聊天里让 Claude 做耗时任务（如做 PPT）时，诗音也能显示“在干活”并在完成时提醒。Claude 的聊天和 Claude Code 共用额度，聊天本身也会干活，这是诗音区别于只看编程工具的卖点。
 
@@ -753,11 +753,12 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 - 兜底：`shion_working` 之后 15 分钟未收到 `shion_done`，自动回到空闲（不播放“做完了”）；同一时间只跟踪一个聊天任务，新的 `shion_working` 覆盖旧的。
 - 限制：只支持 Claude 桌面版（网页版、手机 App 连不到本机）；由 Claude 主动调用，可能偶尔漏调。README 三语写明。
 - **安装方式（第 0 步实测后二选一）**：
-  - A. 菜单“AI 连接 → Claude 桌面版 ›”一键连接：合并写入 `%APPDATA%\Claude\claude_desktop_config.json` 的 `mcpServers.shion`，沿用 `hooks_config` 的备份、合并、并发检测、断开只删自己条目的事务规则；完成后提示重启 Claude 桌面版
+  - A. 菜单“AI 连接 → Claude 桌面版 ›”一键连接：**必须先探测实际使用的配置文件**，不能固定假设为 `%APPDATA%\Claude\claude_desktop_config.json`。2026-11-05 本机桌面版的配置位于 `%LOCALAPPDATA%\Claude-Data\claude_<后缀>\claude_desktop_config.json`；不同安装版本须核实，不能仅凭文件存在就认定正在使用。向实际配置合并 `mcpServers.shion`，只插入自身条目、保留其余字节，沿用备份、并发检测、断开只删自己条目的事务规则；完成后提示从托盘完全退出并重启 Claude 桌面版，并验证 MCP 进程及客户端工具列表。
   - B. 生成 Desktop Extension 安装包（`.mcpb`，`server.type = binary`），用户双击安装；需确认能否指向已安装的 `Shion.exe`，或须在包内附带独立的小程序
 - 周报与本功能无关：聊天的 token 无法在本地统计；卡片 token 标签改为 “Claude Code token”，额度格注明“含聊天等全部用量”（随 V2.1 收尾一起改）。
 
 **开发步骤**
 0. 实测：Claude 桌面版读取工具说明后是否按规矩调用（做 3 个长任务、3 个短问答，记录漏调/误调）；方案 A 与 B 的安装可行性。
+   - 2026-11-05 步骤 0 探针实测（Sonnet 5.5，用户报告模型名）：两次真实长任务均未自动调用（漏 working 2 次、漏 done 2 次）；单独显式要求调用后出现确认弹窗，working/done 均成功写入日志。连续两例失败后缩短测试，余下一个长任务和三个短问答未测，误调率与 need_input 未评估；授权后的自然调用行为也未复测。当前说明原文的自动触发可靠性尚未通过验证，不自动进入后续开发。安装优先考虑 A；B 的外部 EXE 直引仅有配置表达层证据，Claude Desktop 的实际支持未证实，资料结论见 progress。
 1. `--chat-mcp` 入口、服务端事件与“Claude 聊天”来源、兜底超时、三语台词。
 2. 安装方式与菜单、README、测试（隔离 APPDATA，不碰真实 Claude 配置）。
