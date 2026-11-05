@@ -19,6 +19,7 @@ from shion import __version__
 from shion.windowing import position_dialog, raise_without_activation, set_topmost
 from shion.foreground import ForegroundFollower
 
+from shion.chat_activity import ChatActivity
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
 from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior, NEGLECT_DESK_CHANCE
@@ -126,6 +127,7 @@ class PetController(QObject):
         self._crumbs: Optional[CrumbOverlay] = None
         self._about: Optional[QMessageBox] = None
         self.connection = HookConnection()
+        self.chat_activity = ChatActivity()
         self.chatgpt = None  # Started by app; isolated from Claude RemoteHub.
         self.v2 = SchedulerGUI(window.monotonic_time, state.save.v2_scheduler_enabled)
         self._observation_hint = None
@@ -230,9 +232,10 @@ class PetController(QObject):
             if self.v2.core.enabled:
                 self.v2.attach(self.chatgpt)
             notice = self.chatgpt.poll()
-            self.state.observed_working = bool(self.chatgpt.enabled and self.chatgpt.working)
             if notice and not self.v2.core.enabled:
                 self.say(self.lines.ui(notice), category="chatgpt_observation")
+        self.chat_activity.expire(self.window.monotonic_time())
+        self._sync_observed_working()
         self._sync_pause()
         self._sync_permission()
         self.react(self.state.tick(now))
@@ -346,7 +349,8 @@ class PetController(QObject):
             category: str = "status", sticky: bool = False) -> bool:
         if not self._speech.start(self.window.monotonic_time(), text, priority, category, sticky):
             return False
-        log.info("说：%s", text)
+        if category != "desktop_chat":
+            log.info("说：%s", text)
         if sticky:
             self._say_fn(text, sticky=True)
         else:
@@ -607,11 +611,26 @@ class PetController(QObject):
                 raise_without_activation(window)
 
     # ------------------------------------------------------------ 来自 Claude 的事件
+    def _sync_observed_working(self):
+        self.state.observed_working = self.chat_activity.phase == "working" or bool(
+            self.chatgpt and self.chatgpt.enabled and self.chatgpt.working)
+
     def handle_event(self, etype: str, detail: Optional[str] = None, meta: Optional[dict] = None) -> None:
         """处理本地 HTTP 服务转来的事件（必须在 GUI 线程调用，见 bridge.py）。
 
         meta：hook 附带的会话信息 {"session", "tool_id", "proc"}（server.parse_meta 已校验）。
         """
+        if etype == "chat_event" and meta:
+            notice = self.chat_activity.receive(meta["event"], meta["client"], self.window.monotonic_time())
+            self._sync_observed_working()
+            if notice:
+                text = self.lines.ui("desktop_chat_" + notice)
+                if notice == "working" and detail and not self.state.save.privacy_mode:
+                    text += " · " + detail
+                priority = Priority.MEDIUM if notice == "working" else Priority.HIGH
+                self.say_text(text, priority=priority, category="desktop_chat")
+            self.sync()
+            return
         if not self.hub.link_enabled:
             return  # 临时关闭联动：服务线程刚放进来的事件也丢掉，不补播
         if etype in ("stop", "plan_ready"):
@@ -1815,7 +1834,7 @@ class PetController(QObject):
         if self.chatgpt is not None:
             try:
                 self.chatgpt.toggle()
-                self.state.observed_working = False
+                self._sync_observed_working()
                 self.sync()
             except (OSError, ValueError) as exc:
                 self.say(self.lines.ui("chatgpt_config_error", error=str(exc)))

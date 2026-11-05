@@ -748,11 +748,12 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
   - `shion_working(task)`：开始一个需要用工具或预计超过 30 秒的任务前调用；`task` 为几个字的任务名（清理控制字符，最长 20 字），隐私模式下不显示
   - `shion_done()`：上述任务完成时调用
   - `shion_need_input()`：需要用户回来确认或回答时调用
-- **调用规矩写在工具说明和 MCP 服务的 instructions 里**（三语），用户无需修改个人偏好。短问答不调用。
+- 工具说明与 MCP instructions 逐字沿用步骤 0 探针。连接后由用户复制一句个人偏好，中文沿用实测原句，英日采用同义译文，均只提 working/done。need_input 单独显式验收。英日自然调用各一长一短，留到步骤 2 真机验收。
+- initialize 回复后通知上线，stdio 关闭时通知下线。诗音内按 MCP 进程实例区分连接；工具通知最多等待 0.4 秒，通道失败即放弃并正常回复，无重试或探针日志。
 - 诗音侧显示为独立的“Claude 聊天”来源：只观察和提醒，不提供授权/暂停/中断控制；不读取、不接收对话内容。
 - 兜底：`shion_working` 之后 15 分钟未收到 `shion_done`，自动回到空闲（不播放“做完了”）；同一时间只跟踪一个聊天任务，新的 `shion_working` 覆盖旧的。
 - 限制：只支持 Claude 桌面版（网页版、手机 App 连不到本机）；由 Claude 主动调用，可能偶尔漏调。README 三语写明。
-- **安装方式（第 0 步实测后二选一）**：
+- **安装方式（已选 A，步骤 2 实施）**：
   - A. 菜单“AI 连接 → Claude 桌面版 ›”一键连接：**必须先探测实际使用的配置文件**，不能固定假设为 `%APPDATA%\Claude\claude_desktop_config.json`。2026-11-05 本机桌面版的配置位于 `%LOCALAPPDATA%\Claude-Data\claude_<后缀>\claude_desktop_config.json`；不同安装版本须核实，不能仅凭文件存在就认定正在使用。向实际配置合并 `mcpServers.shion`，只插入自身条目、保留其余字节，沿用备份、并发检测、断开只删自己条目的事务规则；完成后提示从托盘完全退出并重启 Claude 桌面版，并验证 MCP 进程及客户端工具列表。
   - B. 生成 Desktop Extension 安装包（`.mcpb`，`server.type = binary`），用户双击安装；需确认能否指向已安装的 `Shion.exe`，或须在包内附带独立的小程序
 - 周报与本功能无关：聊天的 token 无法在本地统计；卡片 token 标签改为 “Claude Code token”，额度格注明“含聊天等全部用量”（随 V2.1 收尾一起改）。

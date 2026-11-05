@@ -187,6 +187,24 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/event":
             self._post_event()
+        elif self.path == "/chat/event":
+            data = self._read_json()
+            if data is None:
+                return
+            if not isinstance(data, dict) or set(data) != {"event", "client", "task"}:
+                self._send(400, {"error": "invalid chat event"})
+                return
+            event, client, task = data["event"], data["client"], data["task"]
+            if (event not in ("online", "offline", "working", "need_input", "done")
+                    or not isinstance(client, str) or len(client) != 32
+                    or any(c not in "0123456789abcdef" for c in client)
+                    or (event == "working" and (not isinstance(task, str) or len(task) > 20
+                                                or any(not c.isprintable() for c in task)))
+                    or (event != "working" and task is not None)):
+                self._send(400, {"error": "invalid chat event"})
+                return
+            self.server.emit_event("chat_event", task, {"event": event, "client": client})
+            self._send(200, {"ok": True})
         elif self.path == "/usage/limits":
             self._post_limits()
         elif self.path == "/feedback/take":
@@ -237,7 +255,7 @@ class _Handler(BaseHTTPRequestHandler):
         if detail is not None and not isinstance(detail, str):
             self._send(400, {"error": "detail 必须是字符串或 null"})
             return
-        if etype in (INTERNAL_STOPPED, 'usage_limits'):
+        if etype in (INTERNAL_STOPPED, 'usage_limits', 'chat_event'):
             self._send(400, {"error": "内部事件，不能从外部发送"})
             return
         if etype in ('quota_down', 'quota_revive') and (set(data) != {'type', 'session'}

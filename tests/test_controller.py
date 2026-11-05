@@ -764,3 +764,21 @@ def test_privacy_toggle_clears_recent_activity(env):
     env.said.clear()
     env.ctl._show_status()
     assert "secret" not in env.said[0]
+
+
+@pytest.mark.parametrize("private", [True, False])
+def test_desktop_chat_observes_without_control(env, private):
+    env.data.privacy_mode = private
+    def event(name, task=None):
+        env.ctl.handle_event("chat_event", task, {"event": name, "client": "desktop"})
+    event("online")
+    event("working", "sample task")
+    assert env.state.observed_working and not env.state.is_working(env.now)
+    assert ("sample task" in env.said[-1]) == (not private)
+    event("need_input")
+    assert env.ctl.chat_activity.phase == "need_input"
+    assert not env.ctl.hub.permissions.pending()
+    event("done")
+    assert env.said[-1] == env.ctl.lines.ui("desktop_chat_done")
+    event("offline")
+    assert not env.ctl.chat_activity.clients and not env.state.observed_working

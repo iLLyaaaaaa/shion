@@ -88,7 +88,9 @@ def test_ready_reminders_are_native_and_brand_only_describes_connection(code):
     assert all("Claude Code" in raw["ui"][key] for key in compatibility)
     # 周报的 token 标签按产品要求写明 Claude Code（统计的就是 Claude Code 的用量）。
     weekly_labels = {"weekly_total", "weekly_output"}
-    visible = [text for key, text in raw["ui"].items() if key not in compatibility | weekly_labels] + [s if isinstance(s, str) else s["text"]
+    chat_source_labels = {"desktop_chat_working", "desktop_chat_done", "desktop_chat_need_input"}
+    assert all("Claude" in raw["ui"][key] for key in chat_source_labels)
+    visible = [text for key, text in raw["ui"].items() if key not in compatibility | weekly_labels | chat_source_labels] + [s if isinstance(s, str) else s["text"]
                                           for pool in raw["lines"].values() for s in pool]
     assert all("claude" not in text.casefold() for text in visible)
     assert "done_summary" not in raw["ui"]
