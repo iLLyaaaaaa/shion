@@ -45,6 +45,7 @@ class ReactionState:
     body: Spring = field(default_factory=Spring)
     head: Spring = field(default_factory=Spring)
     fade: float = 0.
+    drop: Spring = field(default_factory=Spring)
 
     @property
     def active(self):
@@ -58,7 +59,7 @@ def press_reaction(state, now, expression, params):
                          face="teary" if easter else ("surprised" if params.surprise else "dizzy"), pressed_at=now,
                          history=history, count=len(history), easter=easter, escalated=easter,
                          params=params, phase=state.phase, arm=state.arm,
-                         body=state.body, head=state.head)
+                         body=state.body, head=state.head, drop=state.drop)
 
 
 def release_reaction(state, now):
@@ -106,5 +107,6 @@ def step_reaction(state, now, dt, outward_fraction=0., settled=False, cheek_velo
     body = spring_step(state.body, dt, pulse, frequency=10, damping=.6)
     head_target = 1.2 * math.tanh(cheek_velocity / 650.) if stage == "rebound" else 0.
     head = spring_step(state.head, dt, head_target, frequency=3, damping=.7)
+    drop = spring_step(state.drop, dt, 0., frequency=14, damping=.75)
     return replace(state, stage=stage, face=face, escalated=escalated, settled_at=settled_at,
-                   phase=phase, arm=arm, body=body, head=head, fade=fade)
+                   phase=phase, arm=arm, body=body, head=head, drop=drop, fade=fade)

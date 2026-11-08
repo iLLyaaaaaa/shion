@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, Q
 
 from .animation import Animator, Settings
 from .render import Renderer, Rig
+from .head_touch import HeadGesture
 
 
 FACE_LABELS = ("得意", "平静", "开心", "惊讶", "委屈", "生气", "困倦", "晕乎")
@@ -35,6 +36,9 @@ class Canvas(QWidget):
         self.measurements = []
         self.measure = False
         self.benchmark_pinch = False
+        self.benchmark_head = None
+        self.next_benchmark_knock = 0.
+        self.head_gesture = HeadGesture()
         self.reaction_changed = lambda: None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -50,9 +54,16 @@ class Canvas(QWidget):
         if self.benchmark_pinch:
             if not self.animator.dragging:self.animator.press((325,610), now=now)
             self.animator.delta = np.array([-self.settings.pinch_maximum * (.5+.5*math.sin(self.animator.time * 2)), 0.])
+        elif self.benchmark_head == 'knock' and now >= self.next_benchmark_knock:
+            self.animator.knock_head(now=now)
+            self.next_benchmark_knock = now+.45
+        elif self.benchmark_head == 'pat':
+            self.animator.stroke_head(math.cos(now*5), now=now)
+        if self.head_gesture.active and (self.settings.underlays_only or not (self.settings.knock or self.settings.pat)):
+            self.head_gesture.clear()
         self.animator.advance(dt, now=now)
         self.reaction_changed()
-        if not self.animator.dragging and QWidget.mouseGrabber()==self:
+        if not self.animator.dragging and not self.head_gesture.active and QWidget.mouseGrabber()==self:
             self.releaseMouse()
             self.unsetCursor()
         self.update()
@@ -82,7 +93,7 @@ class Canvas(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         point = self.point(event)
-        hit, local = self.renderer.hit_test(point, self.settings, self.animator.pose)
+        hit, local = self.renderer.hit_test(point, self.settings, self.animator.pose, crown=True)
         if hit == "cheek":
             self.animator.press(local, now=time.perf_counter())
             self.animator.advance(0)
@@ -90,26 +101,61 @@ class Canvas(QWidget):
             self.update()
             self.grabMouse()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif hit == "crown" and (self.settings.knock or self.settings.pat):
+            self.head_gesture.press((event.position().x(), event.position().y()))
+            self.grabMouse()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif hit == "head":
             self.animator.impulse(1 if point[0] >= 543 else -1)
+        elif hit == 'crown':
+            self.animator.impulse(1 if point[0] >= 543 else -1)
+
+    def mouseDoubleClickEvent(self, event):
+        self.mousePressEvent(event)
+
+    def _move_head(self, event):
+        delta = self.head_gesture.move((event.position().x(), event.position().y()), self.settings.pat)
+        if delta:
+            self.animator.stroke_head(delta, now=time.perf_counter())
+            self.animator.advance(0)
+            self.reaction_changed()
+            self.update()
 
     def mouseMoveEvent(self, event):
         point=self.point(event)
-        if self.animator.dragging:
+        if self.head_gesture.active:
+            self._move_head(event)
+        elif self.animator.dragging:
             local=self.renderer.head_surface.source_point(point,self.animator.pose,allow_outside=True)
             if local is not None:self.animator.drag(local)
         else:
-            hit,_=self.renderer.hit_test(point,self.settings,self.animator.pose)
-            if hit=='cheek':self.setCursor(Qt.CursorShape.OpenHandCursor)
+            hit,_=self.renderer.hit_test(point,self.settings,self.animator.pose,crown=True)
+            if hit=='cheek' or (hit=='crown' and (self.settings.knock or self.settings.pat)):
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
             else:self.unsetCursor()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.animator.release(now=time.perf_counter())
+            if self.head_gesture.active:
+                self._move_head(event)
+                if self.head_gesture.release():
+                    direction = 1 if self.point(event)[0] >= self.rig.pivots['neck'][0] else -1
+                    if self.settings.knock:self.animator.knock_head(direction, now=time.perf_counter(),
+                                                                    point=tuple(self.point(event)))
+                    else:self.animator.impulse(direction)
+                else:
+                    self.animator.release_head(now=time.perf_counter())
+                self.animator.advance(0)
+                self.reaction_changed()
+                self.update()
+            else:
+                self.animator.release(now=time.perf_counter())
             if QWidget.mouseGrabber()==self:self.releaseMouse()
             self.unsetCursor()
 
     def focusOutEvent(self, event):
+        self.head_gesture.clear()
+        self.animator.release_head(now=time.perf_counter())
         self.animator.release(now=time.perf_counter())
         if QWidget.mouseGrabber()==self:self.releaseMouse()
         self.unsetCursor()
@@ -121,7 +167,7 @@ class Preview(QWidget):
         super().__init__()
         source=rig.data.get('manual_source_set',{}).get('name','去粉线版')
         suffix=" · 被捏反应" if rig.cheek_config else ""
-        self.setWindowTitle(f"诗音 V3 · 动起来的原型 · {source}{suffix}")
+        self.setWindowTitle(f"诗音 V3 · 敲头 / 摸头 · {source}{suffix}")
         if "Microsoft YaHei" not in QFontDatabase.families():
             font = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyh.ttc"
             if font.exists():
@@ -144,7 +190,8 @@ class Preview(QWidget):
         panel.addWidget(self.combo)
         self.form = QFormLayout()
         panel.addLayout(self.form)
-        for key, label in (("breath", "呼吸"), ("blink", "眨眼"), ("sway", "头发摆动"), ("pinch", "麻薯捏脸")):
+        for key, label in (("breath", "呼吸"), ("blink", "眨眼"), ("sway", "头发摆动"),
+                           ("pinch", "麻薯捏脸"), ("knock", "敲头"), ("pat", "摸头")):
             check = QCheckBox(label)
             check.setChecked(getattr(settings, key))
             check.toggled.connect(lambda value, k=key: self.change(k, value))
@@ -156,7 +203,7 @@ class Preview(QWidget):
                 self.slider("blink_amount", "闭眼深度 %", 0, 100, 100)
             elif key == "sway":
                 self.slider("sway_degrees", "摆幅 °", 0, 30, 10)
-            else:
+            elif key == "pinch":
                 self.slider("pinch_maximum", "拖伸上限 px", 20, 200, 1)
                 self.slider("pinch_radius", "高斯半径 px", 60, 160, 1)
         under = QCheckBox("只看垫底")
@@ -193,6 +240,36 @@ class Preview(QWidget):
         reaction_box.setVisible(False)
         toggle.toggled.connect(reaction_box.setVisible)
         panel.addWidget(reaction_box)
+        head_toggle = QToolButton()
+        head_toggle.setText("敲头 / 摸头参数（展开）")
+        head_toggle.setCheckable(True)
+        head_box = QWidget()
+        head_form = QFormLayout(head_box)
+        for key, label, low, high, step in (
+            ('head_drop','整头下沉 px',0,60,2),
+            ('knock_hold','敲后委屈保持 s',.1,3,.1),
+            ('knock_gap','连敲间隔 s',.2,3,.1),
+            ('knock_count','连敲加长次数',2,8,1),
+            ('protest','连敲委屈保持 s',0,5,.1),
+            ('tilt','摸头倾角 °',0,5,.25),
+            ('return_time','回正时间 s',.1,1,.05),
+            ('after_hold','开心余韵 s',0,5,.1),
+            ('fade','恢复淡入 s',0,2,.05)):
+            spin = QDoubleSpinBox()
+            spin.setDecimals(0 if key=='knock_count' else 3)
+            spin.setRange(low, high)
+            spin.setSingleStep(step)
+            spin.setValue(getattr(settings.head_touch, key))
+            spin.valueChanged.connect(lambda v,k=key:self.change_head(k,v))
+            head_form.addRow(label, spin)
+            self.controls.append((spin,'head_touch.'+key,1))
+        head_box.setVisible(False)
+        head_toggle.toggled.connect(head_box.setVisible)
+        panel.addWidget(head_toggle)
+        panel.addWidget(head_box)
+        self.head_label = QLabel("敲摸反应：等待触碰头顶")
+        self.head_label.setWordWrap(True)
+        panel.addWidget(self.head_label)
         self.reaction_label = QLabel("被捏反应：等待抓取")
         self.reaction_label.setWordWrap(True)
         panel.addWidget(self.reaction_label)
@@ -200,7 +277,7 @@ class Preview(QWidget):
         reset = QPushButton("恢复默认")
         reset.clicked.connect(self.reset)
         panel.addWidget(reset)
-        hint = QLabel("按住左侧鼓脸颊向外拉，松手回弹。\n惊讶 → 挣扎 → 委屈；松手后恢复原表情。\n点击头发可轻轻拨动。\n滑条 px 均为原图像素。")
+        hint = QLabel("点头顶：整头下沉回弹、冒金星、委屈。\n连敲三下会延长委屈。\n按住头顶水平拖动 12 个屏幕逻辑像素开始摸头。\n左侧鼓脸颊仍可抓取，松手后可摸头安抚。\n其他头发保留拨动；几何滑条 px 为原图像素。")
         hint.setWordWrap(True)
         panel.addWidget(hint)
         self.fps_label = QLabel("FPS —")
@@ -235,6 +312,9 @@ class Preview(QWidget):
 
     def change(self, key, value):
         setattr(self.settings, key, value)
+        if key in ('knock','pat','underlays_only'):
+            self.canvas.head_gesture.clear()
+            self.canvas.animator.release_head(now=time.perf_counter())
         self.canvas.animator.advance(0)
         self.update_reaction()
         self.canvas.update()
@@ -242,23 +322,32 @@ class Preview(QWidget):
     def change_reaction(self,key,value):
         self.settings.reaction = replace(self.settings.reaction,**{key:value})
 
+    def change_head(self, key, value):
+        if key == 'knock_count':value = int(value)
+        self.settings.head_touch = replace(self.settings.head_touch, **{key:value})
+
     def update_reaction(self):
         r=self.canvas.animator.reaction
-        self.combo.setEnabled(not r.active)
+        self.combo.setEnabled(not self.canvas.animator.interaction_active)
         labels={'idle':'等待抓取','surprise':'惊讶','struggle':'挣扎','cry':'委屈',
                 'rebound':'回弹','hold':'余韵','fade':'恢复原表情'}
         suffix=f" · 本次窗口内第 {r.count} 次" if r.active else ''
         if r.easter:suffix+=' · 连捏彩蛋'
         self.reaction_label.setText('被捏反应：'+labels[r.stage]+suffix)
+        h = self.canvas.animator.head_touch
+        head_labels = {'idle':'等待触碰头顶','knock':'轻敲 · 委屈冒金星','protest':'连敲 · 委屈',
+                       'pat':'摸头 · 开心','fade':'恢复原表情'}
+        self.head_label.setText('敲摸反应：'+head_labels[h.stage]+(f' · 连敲 {h.count} 次' if h.count else ''))
 
     def expression_changed(self):
         self.change("expression", self.combo.currentData())
 
     def reset(self):
-        original=self.canvas.animator.reaction.base
+        original=self.canvas.animator.original_expression if self.canvas.animator.interaction_active else None
         defaults = Settings()
         for widget, key, factor in self.controls:
-            value = getattr(defaults.reaction,key.split(".")[1]) if key.startswith("reaction.") else getattr(defaults, key)
+            value = (getattr(getattr(defaults,key.split('.')[0]),key.split('.')[1])
+                     if '.' in key else getattr(defaults, key))
             if isinstance(widget, QCheckBox):
                 widget.setChecked(value)
             elif isinstance(widget,QDoubleSpinBox):
@@ -267,6 +356,7 @@ class Preview(QWidget):
                 widget.setValue(round(value * factor))
         self.combo.setCurrentIndex(self.combo.findData(original) if original is not None else 0)
         self.canvas.animator = Animator(self.settings, self.seed, now=time.perf_counter())
+        self.canvas.head_gesture.clear()
         self.update_reaction()
         self.canvas.update()
 
@@ -283,9 +373,10 @@ class Preview(QWidget):
         super().closeEvent(event)
 
 
-def benchmark(window, seconds, output, app, pinch=False):
+def benchmark(window, seconds, output, app, pinch=False, head=None):
     """Count paintEvent completions, not timer callbacks; exclude warm-up."""
     window.canvas.benchmark_pinch = pinch
+    window.canvas.benchmark_head = head
     def start():
         window.canvas.measure = True
         QTimer.singleShot(round(seconds * 1000), finish)
@@ -295,7 +386,7 @@ def benchmark(window, seconds, output, app, pinch=False):
         times = np.array([r[0] for r in rows])
         ms = np.array([r[1] for r in rows])
         result = {"platform": app.platformName(), "scale": window.canvas.display_scale,
-                  "device_pixel_ratio": window.canvas.devicePixelRatioF(), "pinch": pinch,
+                  "device_pixel_ratio": window.canvas.devicePixelRatioF(), "pinch": pinch, "head":head,
                   "frames": len(rows), "fps": float((len(rows) - 1) / (times[-1] - times[0])),
                   "render_ms_p50": float(np.median(ms)), "render_ms_p95": float(np.percentile(ms, 95)),
                   "frame_interval_ms_p95": float(np.percentile(np.diff(times) * 1000, 95))}

@@ -306,7 +306,14 @@ class Renderer:
                 qimage(background.resize(target,Image.Resampling.LANCZOS)),eyes)
 
     def render(self, settings: Settings, pose: Pose) -> QImage:
-        if pose.is_rest:
+        image = self._render_rig(settings,pose)
+        if pose.star_age is not None and not settings.underlays_only:
+            from .stars import paint_stars
+            image = paint_stars(image,self.rig,self.scale,pose)
+        return image
+
+    def _render_rig(self, settings: Settings, pose: Pose) -> QImage:
+        if pose.rig_is_rest:
             key = (settings.expression, settings.underlays_only)
             if key not in self.rest_cache:
                 im = self.rig.rest(*key)
@@ -315,7 +322,7 @@ class Renderer:
                     im = im.resize(size, Image.Resampling.LANCZOS)
                 self.rest_cache[key] = qimage(im)
             return self.rest_cache[key]
-        if (not settings.underlays_only and settings.pinch and (any(pose.pinch_delta) or pose.reaction_face is not None)
+        if (not settings.underlays_only and (any(pose.pinch_delta) or pose.reaction_face is not None)
                 and not settings.breath and not settings.blink and not settings.sway
                 and self.rig.cheek_config):
             if not hasattr(self,'static_cheek'):
@@ -366,7 +373,7 @@ class Renderer:
         painter.end()
         return im
 
-    def hit_test(self, point, settings, pose):
+    def hit_test(self, point, settings, pose, *, crown=False):
         """Visible face wins over its own eyes; overlying hair wins over face."""
         if not settings.underlays_only:
             local=self.head_surface.source_point(point,pose)
@@ -384,7 +391,7 @@ class Renderer:
                         image=self.rig.face_hair_images.get(n,self.rig.images[n])
                         x,y=round(local[0]-p['x']),round(local[1]-p['y'])
                         if 0<=x<image.width and 0<=y<image.height and image.getpixel((x,y))[3]>64:
-                            return 'head',local
+                            return ('crown' if crown and n in {'hair_top','bangs','ahoge'} else 'head'),local
         matrices = self.matrices(pose)
         for n in reversed(self.rig.active(settings.expression, settings.underlays_only)):
             if not settings.underlays_only and n not in BODY|LEGS:continue
