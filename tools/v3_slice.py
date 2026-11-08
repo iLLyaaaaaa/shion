@@ -668,6 +668,101 @@ UNDER_Z = {"back_hair_under": "back_hair", "body_under": "body", "head_under": "
 
 EXPRESSIONS = ["neutral", "happy", "surprised", "teary", "angry", "sleep", "dizzy"]
 EXPR_DIR = OUT / "expressions"
+# Ref-space eye windows; pixels outside belong to mouth (including eyebrows).
+# Keeping a disjoint partition preserves even the original feathered pixels.
+EYE_WINDOWS = {
+    "neutral": ((310, 462, 505, 565), (550, 445, 755, 555)),
+    "happy": ((310, 496, 490, 574), (565, 459, 775, 535)),
+    "surprised": ((310, 450, 495, 590), (565, 426, 775, 580)),
+    "teary": ((310, 452, 495, 600), (565, 440, 775, 580)),
+    "angry": ((310, 480, 495, 590), (565, 440, 775, 580)),
+    "sleep": ((310, 501, 495, 570), (565, 483, 775, 540)),
+    "dizzy": ((310, 487, 495, 570), (565, 456, 775, 545)),
+}
+EYE_TOP_LINES = {
+    "teary": ((310, 502, 495, 450), (565, 440, 775, 485)),
+    "angry": ((310, 480, 495, 490), (565, 482, 775, 443)),
+}
+
+
+def split_expression(image: Image.Image, origin, windows, top_lines=None, regions=None):
+    """Partition RGBA pixels without feathering twice or changing their colors."""
+    rgba = np.asarray(image)
+    yy, xx = np.indices(rgba.shape[:2])
+    xx, yy = xx + origin[0], yy + origin[1]
+    assigned = np.zeros(xx.shape, bool)
+    out = {}
+    for index, (role, box) in enumerate(zip(("eye_l", "eye_r"), windows)):
+        x0, y0, x1, y1 = box
+        mask = (xx >= x0) & (xx < x1) & (yy >= y0) & (yy < y1) & ~assigned
+        if regions:
+            region = Image.new('1',image.size)
+            ImageDraw.Draw(region).polygon([(px-origin[0],py-origin[1]) for px,py in regions[role]],fill=1)
+            for points,width in regions.get('brow_paths',[]):
+                ImageDraw.Draw(region).line([(px-origin[0],py-origin[1]) for px,py in points],fill=0,width=width,joint='curve')
+            mask = np.asarray(region,dtype=bool)&~assigned
+        if top_lines and not regions:
+            ax, ay, bx, by = top_lines[index]
+            mask &= yy >= ay + (xx - ax) * (by - ay) / (bx - ax)
+        assigned |= mask
+        a = rgba.copy()
+        a[~mask] = 0
+        im = Image.fromarray(a)
+        bb = im.getbbox()
+        if bb is None:
+            raise ValueError(f"empty {role}")
+        out[role] = (im.crop(bb), (origin[0] + bb[0], origin[1] + bb[1]))
+    a = rgba.copy()
+    a[assigned] = 0
+    im = Image.fromarray(a)
+    bb = im.getbbox()
+    if bb is None:
+        raise ValueError("empty mouth/brow layer")
+    out["mouth"] = (im.crop(bb), (origin[0] + bb[0], origin[1] + bb[1]))
+    return out
+
+
+def split_rig_expressions(rig: dict, folder: Path = OUT) -> dict:
+    """Also callable on step-0 assets: no raw access or reslicing required."""
+    for variant in rig["slots"]["face"]:
+        if variant == "smug":
+            for name, role in (("eye_ref_l", "eye_l"), ("eye_ref_r", "eye_r"),
+                               ("mouth_ref", "mouth")):
+                p = rig["parts"][name]
+                p["role"] = role
+                if role.startswith("eye"):
+                    p["blink_pivot"] = [p["x"] + p["size"][0] / 2, p["y"] + p["size"][1] - 1]
+            continue
+        name = f"expr_{variant}"
+        old = rig["parts"].get(name)
+        # Original composite is retained as deterministic splitting input.
+        if old is None:
+            old = rig.get("expression_sources", {}).get(variant)
+            if old is None:
+                continue
+        rig.setdefault("expression_sources", {})[variant] = old
+        with Image.open(folder / old["file"]) as im:
+            children = split_expression(im.convert("RGBA"), (old["x"], old["y"]), EYE_WINDOWS[variant],
+                                        EYE_TOP_LINES.get(variant), old.get('regions'))
+        rig["parts"].pop(name, None)
+        for role, (im, (x, y)) in children.items():
+            child = f"{name}_{role}"
+            file = f"expressions/{child}.png"
+            vx.save_png(im, folder / file)
+            p = {**old, "file": file, "x": x, "y": y, "size": list(im.size), "role": role}
+            if role.startswith("eye"):
+                p["blink_pivot"] = [x + im.width / 2, y + im.height - 1]
+            rig["parts"][child] = p
+    rig["notes"]["blink"] = "eye_l/r 绕 blink_pivot 压缩；mouth 含眉，不参与眨眼。原 expr_*.png 保留作拆分输入。"
+    return rig
+
+
+def cmd_split_expressions():
+    rig = json.loads(vx.RIG_FILE.read_text(encoding="utf-8"))
+    split_rig_expressions(rig)
+    vx.RIG_FILE.write_text(json.dumps(rig, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("split expression sublayers; original slices and underlays unchanged")
+
 EXPR_T = 40          # 和 ref 的逐像素差（RGB 三通道取最大）超过这个算“改过”
 EXPR_ZONE = 70       # 只在原眼睛、嘴外扩这么多的范围里找（含眉毛；脸边缘的重画细线不算）
 EXPR_MIN = 40        # 小于这个面积的改动碎块不要
@@ -980,6 +1075,7 @@ def write_rig_v2(res: dict) -> dict:
         add(name, img, x, y, "gpt_underlay", UNDERLAYS)
     for name, (img, (x, y)) in exprs.items():
         add(name, img, x, y, "gpt_expression_diff", EXPR_DIR)
+    split_rig_expressions(rig)
     vx.RIG_FILE.write_text(json.dumps(rig, indent=1, ensure_ascii=False), encoding="utf-8")
     return rig
 
@@ -1115,9 +1211,9 @@ def cmd_slice() -> None:
 def main(argv=None):
     import argparse
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("cmd", choices=["regions", "slice"])
+    p.add_argument("cmd", choices=["regions", "slice", "split-expressions"])
     a = p.parse_args(argv)
-    {"regions": cmd_regions, "slice": cmd_slice}[a.cmd]()
+    {"regions": cmd_regions, "slice": cmd_slice, "split-expressions": cmd_split_expressions}[a.cmd]()
 
 
 if __name__ == "__main__":

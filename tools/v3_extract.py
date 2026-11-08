@@ -39,8 +39,8 @@ OUT = ROOT / "assets" / "sprites" / "v3"
 PARTS = OUT / "parts"
 MAP_FILE = OUT / "parts_map.json"
 RIG_FILE = OUT / "rig.json"        # V3 正式 rig（v2，ref 切片），由 tools/v3_slice.py 写
-RIG_V1_FILE = BUILD / "rig_v1.json"  # 第一版：GPT 零件对位拼装的 rig（已弃用，只作垫底/种子的对位参考）
 BUILD = ROOT / "build" / "v3"
+RIG_V1_FILE = BUILD / "rig_v1.json"  # 第一版，仅作垫底和种子的对位参考
 
 HALO_ALPHA = 16      # 低于这个 alpha 的像素算光晕，直接去掉
 SOLID_ALPHA = 235    # 高于这个 alpha 的算完全不透明
