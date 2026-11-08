@@ -128,6 +128,7 @@ def test_permission_only_raises_for_new_head(env, monkeypatch):
 
 
 def test_checkpoint_raises_once_after_badge_is_shown(env, monkeypatch):
+    env.state.claude_event("prompt", None, env.now)
     env.win.show()
     env.ctl.set_muted(True)
     calls = []

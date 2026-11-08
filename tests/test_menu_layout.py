@@ -108,7 +108,7 @@ def test_ai_menu_claude_items_follow_connection_state(env, state, expected, lang
     ui = env.ctl.lines.ui
     menu = env.ctl.build_menu()
     status = claude_status(ui, state)
-    assert titles(sub(menu, "menu_ai", env.ctl)) == [ui("menu_claude")]  # 没启用 ChatGPT：只有 Claude Code
+    assert titles(sub(menu, "menu_ai", env.ctl)) == [ui("menu_claude"), ui("desktop_menu")]  # 没启用 ChatGPT：只有 Claude Code
     claude = ai_sub(menu, "menu_claude", env.ctl)
     rows = [ui("menu_link_connection", state=ui("connection_" + state)), ui("menu_link_activity", state=ui("activity_link_idle"))]
     assert shape(claude) == [el(claude, r, 360) for r in rows] + ["-"] + [ui(k) for k in expected]
@@ -214,6 +214,7 @@ def test_disabled_link_greys_remote_submenu_and_flips_label(env):
     assert ui("link_enable") in titles(claude) and ui("link_disable") not in titles(claude)
     assert titles(claude)[1] == el(claude, ui("menu_link_activity", state=ui("activity_link_off")), 360)
     ctl.toggle_claude_link()
+    ctl.handle_event("prompt", meta={"session": "cc"})
     menu = ctl.build_menu()
     assert menu.actions()[1].isEnabled()
     assert ui("link_disable") in titles(ai_sub(menu, "menu_claude", ctl))
@@ -226,7 +227,7 @@ def test_chatgpt_status_line_and_submenu_only_when_present(env, tmp_path, lang):
     ui = ctl.lines.ui
     plain = ctl.build_menu()
     before = titles(plain)
-    assert not any("ChatGPT" in t for t in before) and titles(sub(plain, "menu_ai", ctl)) == [ui("menu_claude")]
+    assert not any("ChatGPT" in t for t in before) and titles(sub(plain, "menu_ai", ctl)) == [ui("menu_claude"), ui("desktop_menu")]
     ctl.chatgpt = ChatGPTConnection(tmp_path / "data", tmp_path / "codex")
     menu = ctl.build_menu()
     top = [a for a in menu.actions() if not a.isSeparator()]
@@ -240,7 +241,7 @@ def test_chatgpt_status_line_and_submenu_only_when_present(env, tmp_path, lang):
     assert chatgpt_line.text() in (expected, menu.fontMetrics().elidedText(expected, Qt.ElideRight, 240))
     assert ui("activity_link_rounds", count=0) not in chatgpt_line.text()
     assert "\n" not in chatgpt_line.text() and menu.fontMetrics().horizontalAdvance(chatgpt_line.text()) <= 240
-    assert titles(sub(menu, "menu_ai", ctl)) == [ui("menu_claude"), ui("menu_chatgpt")]  # Claude Code 在前，ChatGPT 在后
+    assert titles(sub(menu, "menu_ai", ctl)) == [ui("menu_claude"), ui("menu_chatgpt"), ui("desktop_menu")]  # Claude Code 在前，ChatGPT 在后
     chat = ai_sub(menu, "menu_chatgpt", ctl)
     assert [a.isEnabled() for a in chat.actions() if not a.isSeparator()] == [False, False, True, True, True]
     assert titles(chat)[1] == el(chat, ui("menu_link_activity", state=ui("activity_link_none")), 360)  # 活动：—
@@ -294,6 +295,7 @@ def test_submenu_status_rows_elide_to_360_with_full_tooltip(env, tmp_path, monke
 
 def test_chatgpt_submenu_disabled_shows_off_and_enable(env, tmp_path):
     ctl = env.ctl
+    ctl.handle_event("prompt", meta={"session": "cc"})
     ui = ctl.lines.ui
     ctl.chatgpt = ChatGPTConnection(tmp_path / "data", tmp_path / "codex")
     ctl.chatgpt.enabled = False
@@ -341,3 +343,28 @@ def test_remote_submenu_unchanged_and_second(env):
     assert titles(menu.actions()[1].menu()) == ["停下", "立即中断", "做得好", "有问题……"]
     tree = menu_tree(menu)
     assert tree[0] == "互动" and tree[1][0] == "工作遥控"
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_desktop_chat_menu_actions_and_preference(env, lang, monkeypatch):
+    from PySide6.QtGui import QGuiApplication
+    ctl = env.ctl
+    ctl.set_language(lang)
+    calls = []
+    monkeypatch.setattr(ctl, "manage_desktop_chat", lambda remove=False: calls.append(remove))
+    menu = ctl.build_menu()
+    desktop = ai_sub(menu, "desktop_menu", ctl)
+    assert titles(desktop) == [ctl.lines.ui("desktop_connect"), ctl.lines.ui("desktop_copy")]
+    desktop.actions()[0].trigger()
+    assert calls == [False]
+    desktop.actions()[1].trigger()
+    text = QGuiApplication.clipboard().text()
+    assert text == ctl.lines.ui("desktop_preference")
+    assert "shion_working" in text and "shion_done" in text and "shion_need_input" not in text
+    ctl.desktop_connection.receipt.parent.mkdir(parents=True, exist_ok=True)
+    ctl.desktop_connection.receipt.write_bytes(b'{}')
+    menu = ctl.build_menu()
+    desktop = ai_sub(menu, "desktop_menu", ctl)
+    assert desktop.actions()[0].text() == ctl.lines.ui("desktop_remove")
+    desktop.actions()[0].trigger()
+    assert calls == [False, True]

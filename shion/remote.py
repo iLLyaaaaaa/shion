@@ -78,7 +78,8 @@ class RemoteHub:
         if not self._paused:
             return
         now = time.monotonic()
-        others = any(k != session and self._recently_held(k, now) for k in self._held)
+        others = any(k != session and self._paused_for(k) and self._recently_held(k, now)
+                     for k in self._held)
         if not self._paused_sessions and not others:
             self._clear_pauses()
         else:

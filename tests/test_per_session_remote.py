@@ -77,9 +77,10 @@ def test_global_pause_then_resume_one_session_keeps_the_other():
     join([ta])
     assert ra == [(False, False)]
     assert hub.is_session_paused("B") and hub.is_global_paused
-    hub.resume()
+    hub.resume("B")
     join([tb])
     assert rb == [(False, False)] and not hub.is_paused
+    assert hub.wait_gate(0, "later") == (False, False)  # 已放行 A 的宽限期不能留下全局暂停。
 
 
 def test_single_session_resume_clears_the_global_pause_like_before():
@@ -325,10 +326,10 @@ def tree(menu):
     return out
 
 
-SINGLE_IDLE = [("停下", True, None), ("立即中断", False, None), ("做得好", True, None), ("有问题……", True, None)]
+SINGLE_IDLE = [("停下", False, None), ("立即中断", False, None), ("做得好", False, None), ("有问题……", False, None)]
 
 
-def test_menu_with_no_or_one_session_is_unchanged(env):  # noqa: F811
+def test_menu_requires_active_cc_and_preserves_single_session_controls(env):  # noqa: F811
     _, rem = remote(env)
     assert tree(rem) == SINGLE_IDLE
     env.ctl.process_view = world2().view()

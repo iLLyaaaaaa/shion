@@ -129,6 +129,10 @@ def test_menu_unchanged_before_anything_ended(pet):
 
 def test_terminal_interrupt_offers_send_continue(pet):
     interrupt_and_stop(pet, TERMINAL)
+    menu, remote, _ = remote_texts(pet)
+    assert not find_action(menu, "工作遥控").isEnabled()
+    assert not find_action(remote, "继续（发送“继续”）").isEnabled()
+    work(pet, TERMINAL, "s2")
     menu, remote, texts = remote_texts(pet)
     assert texts == ["继续（发送“继续”）", "停下", "立即中断", "做得好", "有问题……"]
     find_action(remote, "继续（发送“继续”）").trigger()
@@ -167,6 +171,10 @@ def test_only_one_send_at_a_time(pet):
 
 def test_desktop_interrupt_copies_continue(pet):
     interrupt_and_stop(pet, DESKTOP)
+    menu, remote, _ = remote_texts(pet)
+    assert not find_action(menu, "工作遥控").isEnabled()
+    assert not find_action(remote, "继续").isEnabled()
+    work(pet, DESKTOP, "s2")
     menu, remote, texts = remote_texts(pet)
     assert texts == ["继续", "停下", "立即中断", "做得好", "有问题……"]
     QGuiApplication.clipboard().setText("")

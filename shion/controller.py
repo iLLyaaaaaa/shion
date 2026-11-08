@@ -13,12 +13,13 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QProcess, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QGuiApplication
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox
 
 from shion import __version__
 from shion.windowing import position_dialog, raise_without_activation, set_topmost
 from shion.foreground import ForegroundFollower
 
+from shion.chat_config import ChatConnection, CONFIG_NAME, candidates
 from shion.chat_activity import ChatActivity
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
@@ -127,6 +128,7 @@ class PetController(QObject):
         self._crumbs: Optional[CrumbOverlay] = None
         self._about: Optional[QMessageBox] = None
         self.connection = HookConnection()
+        self.desktop_connection = ChatConnection(scheduler.path.parent)
         self.chat_activity = ChatActivity()
         self.chatgpt = None  # Started by app; isolated from Claude RemoteHub.
         self.v2 = SchedulerGUI(window.monotonic_time, state.save.v2_scheduler_enabled)
@@ -624,7 +626,10 @@ class PetController(QObject):
             notice = self.chat_activity.receive(meta["event"], meta["client"], self.window.monotonic_time())
             self._sync_observed_working()
             if notice:
-                text = self.lines.ui("desktop_chat_" + notice)
+                text = self.lines.pick("desktop_chat_" + notice)
+                if not text:
+                    self.sync()
+                    return
                 if notice == "working" and detail and not self.state.save.privacy_mode:
                     text += " · " + detail
                 priority = Priority.MEDIUM if notice == "working" else Priority.HIGH
@@ -786,9 +791,21 @@ class PetController(QObject):
 
     # ------------------------------------------------------------ 遥控：停下
     def remote_sessions(self) -> list[str]:
-        """工作遥控能选的 Claude 会话：此刻工作中或已停在检查点等待的，按首次出现顺序（ChatGPT 不参与）。"""
+        """工作遥控能选的 CC 会话：工作中、检查点等待或待授权；只读来源不参与。"""
         now = self._now()
-        return self.session_names.ordered([*self.state.working_sessions(now), *self.hub.holding_sessions()])
+        return self.session_names.ordered([*self.state.working_sessions(now), *self.hub.holding_sessions(),
+                                           *(p.session for p in self.hub.permissions.pending())])
+
+    def _has_active_cc(self) -> bool:
+        # 没带 session 的旧 hook 也有效；聊天的 observed_working 永远不算遥控对象。
+        return bool(self.state.is_working(self._now()) or self.hub.is_holding
+                    or self.hub.permissions.pending())
+
+    def _pause_text(self, key: str) -> str:
+        text = self.lines.ui(key)
+        if self.chat_activity.phase == "working":
+            text += "\n" + self.lines.ui("pause_cc_only")
+        return text
 
     def session_labels(self, sessions) -> dict[str, str]:
         return self.session_names.labels(sessions, self.state.save.privacy_mode, self.lines.ui)
@@ -796,7 +813,8 @@ class PetController(QObject):
     def stop_work(self, session: Optional[str] = None) -> None:
         """“停下”：下一个检查点（工具调用前或做完后）hook 原地等待，直到点“继续”或在 CC 里说话。
         session=None：全局（原行为）；给了会话：只停这个会话。"""
-        if not self.hub.link_enabled:
+        if (not self.hub.link_enabled or not self._has_active_cc()
+                or (session is not None and session not in self.remote_sessions())):
             return
         if session is None:
             if self.state.paused:
@@ -808,7 +826,9 @@ class PetController(QObject):
     def stop_all(self, sessions) -> None:
         """多会话菜单里的“全部”：全局停下（之后才开始工作的会话也停），并给此刻每个会话单独打上停下，
         这样某个会话在 CC 里说话只放行它自己。"""
-        if not self.hub.link_enabled or self.hub.is_global_paused:
+        active = set(self.remote_sessions())
+        sessions = [s for s in sessions if s in active]
+        if not self.hub.link_enabled or self.hub.is_global_paused or not sessions:
             return
 
         def apply():
@@ -825,7 +845,7 @@ class PetController(QObject):
         self.state.paused = True
         if not self.state.save.bubble_muted:
             self._speech.dismiss()
-            self.say(self.lines.ui("stop_requested"), priority=Priority.MEDIUM, category="stop_requested")
+            self.say(self._pause_text("stop_requested"), priority=Priority.MEDIUM, category="stop_requested")
         self.sync()
 
     def resume_work(self, session: Optional[str] = None, *, quiet: bool = False) -> None:
@@ -872,6 +892,8 @@ class PetController(QObject):
     def _sync_pause(self) -> None:
         """hub 在服务线程里被解除停下（用户在 CC 里说话，或这一轮没碰到检查点就结束了）后，把界面状态同步过来；
         hook 第一次真的在检查点等着时说一次“已经停下啦～”。"""
+        if self.hub.is_paused and not self._has_active_cc():
+            self.hub.resume()  # 无 CC 活动的遗留标记不能卡住后来的检查点。
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
         first_hold = self.state.paused and not self._held_seen and self.hub.is_holding
@@ -881,7 +903,7 @@ class PetController(QObject):
             self._held_said = True
             if not self.state.save.bubble_muted:
                 self._speech.dismiss()  # 换掉“好，马上停～”
-                self.say(self.lines.ui("work_held"), priority=Priority.MEDIUM, category="stop_requested")
+                self.say(self._pause_text("work_held"), priority=Priority.MEDIUM, category="stop_requested")
         if first_hold:
             self.sync()  # 先创建/显示暂停标签，再将整个提示前移一次
             self._bring_forward()
@@ -897,6 +919,8 @@ class PetController(QObject):
         text = ui("pause_label")
         if len(holding) == 1 and not self.state.save.privacy_mode and self.session_names.project(holding[0]):
             text = ui("pause_label_named", name=labels[holding[0]])  # 隐私模式 / 不知道名字：仍是原来的“暂停中”
+        if self.chat_activity.phase == "working":
+            text = ui("pause_label_cc", label=text)
         self.window.set_paused_badge(shown and not multi, text=text, tooltip=ui("pause_label_hint"),
                                      fallback=self.lines.font_fallback)
         if multi:
@@ -906,7 +930,9 @@ class PetController(QObject):
                 self._checkpoint.resume_clicked.connect(lambda s: self.resume_work(s))
                 self._checkpoint.end_clicked.connect(self.end_turn)
             self._checkpoint.present([(s, labels[s]) for s in holding], {
-                "title": ui("checkpoint_title"), "resume": ui("checkpoint_resume"), "end": ui("checkpoint_end")})
+                "title": (ui("pause_label_cc", label=ui("checkpoint_title"))
+                          if self.chat_activity.phase == "working" else ui("checkpoint_title")),
+                "resume": ui("checkpoint_resume"), "end": ui("checkpoint_end")})
         elif self._checkpoint is not None and self._checkpoint.wanted:
             self._checkpoint.withdraw()
 
@@ -977,7 +1003,7 @@ class PetController(QObject):
             log.info("立即中断：没有找到对应的进程，或进程和别的会话共用（会话 %s，共用 %s）", sessions, shared)
             self._speech.dismiss()
             # 有进程、只是和别的会话共用时说清楚原因；真的找不到进程时照旧
-            self.say(ui("interrupt_shared_process" if shared else "interrupt_no_process"),
+            self.say(self._pause_text("interrupt_shared_process" if shared else "interrupt_no_process"),
                      priority=Priority.MEDIUM, category="stop_requested")
             if scoped:
                 if not self.state.paused:
@@ -1438,6 +1464,32 @@ class PetController(QObject):
                 "connect": ui("connection_accept"),
                 "later": ui("connection_later" if self._connection_onboarding else "panel_cancel")}
 
+    def manage_desktop_chat(self, remove=False):
+        ui = self.lines.ui
+        title = ui("connection_title")
+        try:
+            if remove:
+                if QMessageBox.question(self.window, title, ui("desktop_confirm_remove"),
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                    return
+                self.desktop_connection.disconnect()
+            else:
+                paths = candidates()
+                QMessageBox.information(self.window, title, ui("desktop_choose"))
+                initial = str(paths[0]) if len(paths) == 1 else ""
+                selected, _ = QFileDialog.getOpenFileName(self.window, title, initial, CONFIG_NAME)
+                if not selected:
+                    return
+                self.desktop_connection.connect(Path(selected))
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+            QMessageBox.warning(self.window, title, ui("desktop_error"))
+            return
+        QMessageBox.information(self.window, title, ui("desktop_restart"))
+
+    def copy_desktop_preference(self):
+        QGuiApplication.clipboard().setText(self.lines.ui("desktop_preference"))
+        self.say_text(self.lines.ui("desktop_copied"), priority=Priority.MEDIUM)
+
     def open_connection(self, *, onboarding: bool = False) -> None:
         self._connection_onboarding = onboarding or self.state.save.connection_prompt == "pending"
         self._connection_waiting = True
@@ -1554,12 +1606,20 @@ class PetController(QObject):
             self._build_remote_multi(remote_menu, sessions)
         else:
             self._build_remote_single(remote_menu)
-        remote_menu.setEnabled(self.hub.link_enabled)  # 临时关闭联动：整个子菜单置灰
+        enabled = self.hub.link_enabled and self._has_active_cc()
+        remote_menu.setEnabled(enabled)
+        if not enabled:
+            hint = ui("remote_cc_only_hint")
+            remote_menu.menuAction().setToolTip(hint)
+            remote_menu.setToolTipsVisible(True)
+            for action in remote_menu.actions():
+                action.setEnabled(False)
+                action.setToolTip(hint)
         self._build_rest_of_menu(menu)
         return menu
 
     def _build_remote_single(self, remote_menu: QMenu) -> None:
-        """0 或 1 个相关会话：与按会话区分之前完全一样（停下是全局暂停，反馈无归属）。"""
+        """单会话结构（停下是 CC 全局暂停，反馈无归属）；无 CC 活动时由 build_menu 整组禁用。"""
         ui = self.lines.ui
         if self.state.paused:
             remote_menu.addAction(ui("menu_resume")).triggered.connect(lambda: self.resume_work())
@@ -1757,6 +1817,13 @@ class PetController(QObject):
             chat.addAction(ui("link_manage")).triggered.connect(lambda: review_connection(self))
             chat.addAction(ui("link_disable" if self.chatgpt.enabled else "link_enable")).triggered.connect(self.toggle_chatgpt)
             chat.addAction(ui("link_remove")).triggered.connect(lambda: review_connection(self, True))
+
+        desktop = ai_menu.addMenu(ui("desktop_menu"))
+        if self.desktop_connection.receipt.exists():
+            desktop.addAction(ui("desktop_remove")).triggered.connect(lambda: self.manage_desktop_chat(True))
+        else:
+            desktop.addAction(ui("desktop_connect")).triggered.connect(lambda: self.manage_desktop_chat())
+        desktop.addAction(ui("desktop_copy")).triggered.connect(self.copy_desktop_preference)
 
         settings_menu = menu.addMenu(ui("menu_settings"))
         settings_menu.setToolTipsVisible(True)  # 开机自启错误

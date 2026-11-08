@@ -213,7 +213,8 @@ def test_menu_contents(env):
     assert [a.text() for a in find_action(menu, "桌宠").menu().actions() if not a.isSeparator()] == [
         "表情", "活跃度", "动作", "大小", "置于最上层", "松手后落到任务栏"]
     assert menu_tree(find_action(menu, "AI 连接").menu()) == [
-        ("Claude Code", ["连接：未连接", "活动：空闲", "-", "连接 / 查看配置", "临时关闭联动"])]
+        ("Claude Code", ["连接：未连接", "活动：空闲", "-", "连接 / 查看配置", "临时关闭联动"]),
+        ("Claude 桌面版", ["连接聊天", "复制个人偏好"])]
     assert [a.text() for a in find_action(menu, "设置").menu().actions()] == ["语言", "开机自启", "统计用量", "周报显示项目链接"]
     assert find_action(menu, "开机自启").isCheckable()
     assert not find_action(menu, "开机自启").isChecked()
@@ -223,12 +224,13 @@ def test_menu_contents(env):
 
 
 def test_menu_good_feedback_shows_proud(env):
+    env.state.claude_event("prompt", None, env.now)
     menu = env.ctl.build_menu()  # 要留着引用，菜单被回收后动作也没了
     find_action(find_action(menu, "工作遥控").menu(), "做得好").trigger()
     assert env.win.sprite_name == "proud"
     assert env.data.affection == 3
     assert env.data.feedback_queue == [{"kind": "good", "text": ""}]
-    assert env.said == ["收到！下次干活时我就转告～"]
+    assert len(env.said) == 1 and env.said[0] in env.ctl.lines._lines["praise_menu_working"]
 
 
 def test_menu_size_changes_window_and_save_and_checkmark(env):
@@ -779,6 +781,6 @@ def test_desktop_chat_observes_without_control(env, private):
     assert env.ctl.chat_activity.phase == "need_input"
     assert not env.ctl.hub.permissions.pending()
     event("done")
-    assert env.said[-1] == env.ctl.lines.ui("desktop_chat_done")
+    assert env.said[-1] in env.ctl.lines._lines["desktop_chat_done"]
     event("offline")
     assert not env.ctl.chat_activity.clients and not env.state.observed_working

@@ -46,6 +46,7 @@ def isolated_user(tmp_path_factory, monkeypatch):
     drive, tail = os.path.splitdrive(str(home))
     monkeypatch.setenv("HOMEDRIVE", drive)
     monkeypatch.setenv("HOMEPATH", tail)
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))
     monkeypatch.setenv("SHION_DATA_DIR", str(home / "Shion"))

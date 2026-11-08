@@ -77,22 +77,18 @@ def test_every_shipped_language_is_complete(code):
 
 
 @pytest.mark.parametrize("code", ["zh", "en", "ja"])
-def test_ready_reminders_are_native_and_brand_only_describes_connection(code):
+def test_ready_reminders_are_native_and_desktop_chat_pools_and_shion_branding(code):
     raw = _raw(code)
     for key in ("plan_ready", "cheek_pull", "cheek_release", "tickle", "tickle_end", "claude_done"):
         assert raw["lines"][key]  # 必须原生提供，不能依赖中文回退
         assert Lines(code).pick(key) in raw["lines"][key]
-    # 只有连接相关的标签（Claude Code 名称/子菜单标题、确认说明）可以出现 Claude Code；其余文案一律不含。
-    # 状态行改为“{name}：…”模板、连接项改为两边共用的文案后，原来的 menu_connect/menu_reconnect/menu_connection_status 已删除。
-    compatibility = {"connection_explain", "menu_claude"}
-    assert all("Claude Code" in raw["ui"][key] for key in compatibility)
-    # 周报的 token 标签按产品要求写明 Claude Code（统计的就是 Claude Code 的用量）。
-    weekly_labels = {"weekly_total", "weekly_output"}
-    chat_source_labels = {"desktop_chat_working", "desktop_chat_done", "desktop_chat_need_input"}
-    assert all("Claude" in raw["ui"][key] for key in chat_source_labels)
-    visible = [text for key, text in raw["ui"].items() if key not in compatibility | weekly_labels | chat_source_labels] + [s if isinstance(s, str) else s["text"]
-                                          for pool in raw["lines"].values() for s in pool]
-    assert all("claude" not in text.casefold() for text in visible)
+    for key in ("desktop_chat_working", "desktop_chat_need_input", "desktop_chat_done"):
+        pool = raw["lines"][key]
+        assert len(set(pool)) >= 2 and all("Claude" in line for line in pool)
+        assert key not in raw["ui"]
+    for key in ("about_title", "about_body", "connection_title"):
+        text = raw["ui"][key].casefold()
+        assert "claude" not in text and "anthropic" not in text
     assert "done_summary" not in raw["ui"]
 
 

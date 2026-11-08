@@ -61,6 +61,7 @@ def prepare(e, scenario):
         e.state.claude_event("working", "", e.now)
         e.ctl.sync()
     elif scenario == "paused":
+        e.state.claude_event("prompt", None, e.now)
         e.ctl.stop_work()
     elif scenario == "temporary":
         e.win.patted.emit()

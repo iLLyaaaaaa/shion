@@ -119,6 +119,16 @@ No Python required.
 
 Only **newly started** Claude Code sessions pick up the change.
 
+## Connecting Claude Desktop chat
+
+Choose AI connections → Claude Desktop → Connect chat. In Claude’s developer settings, choose Edit Config and note the file it opens. Fully quit Claude from the tray, then select that file in Shion. Detected configuration locations are hints. Confirm the active file using Edit Config.
+
+Shion saves a local backup and inserts its own MCP entry. An existing shion entry, invalid JSON or a detected concurrent change stops the update. Disconnect removes only the unchanged entry registered by Shion and preserves other additions. Fully quit and restart Claude after either operation.
+
+Choose Copy personal preference and paste it into Claude’s personal preferences. After restarting, verify that shion_working, shion_done and shion_need_input appear in the client’s tool list. Receiving the MCP online message establishes the live channel. Saving configuration alone does not establish it.
+
+This supports local Claude Desktop. Claude initiates calls and may miss them. Shion shows status and a short task name, hidden in privacy mode. After 15 minutes without a follow-up, it returns quietly to idle. Chat tokens cannot be counted locally. Keep the backup on your computer, as it contains the original configuration.
+
 ## Connecting to ChatGPT (Codex)
 
 The ChatGPT integration is installed separately: right-click → **AI connections** → **ChatGPT** → **Connect / inspect configuration**.

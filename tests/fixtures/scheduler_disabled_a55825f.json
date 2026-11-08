@@ -7,7 +7,7 @@
       "working": 0,
       "received": 0,
       "sprite": "idle",
-      "menu_sha256": "06fc4b3eadb63198d7834158439ddcbdf2b5e1e0086b73f771d4e7552d56cd47"
+      "menu_sha256": "e4b736d98dd4092bdb841d60c32c878f7f6f96a19a29720f6d2967987439e54b"
     },
     {
       "stage": "working",
@@ -16,7 +16,7 @@
       "working": 1,
       "received": 1,
       "sprite": "working",
-      "menu_sha256": "056aef108bb2f457dc145352cc8f7290c9bbe18127297b193768cea049197fb9"
+      "menu_sha256": "d3fe48bb09e9f28d08ca9c577040124239f4defa1d7bf6b853436fa68faba24b"
     },
     {
       "stage": "permission",
@@ -25,7 +25,7 @@
       "working": 1,
       "received": 2,
       "sprite": "working",
-      "menu_sha256": "99055a094f35bc3d64c7bc9b671cb5998003d524e3ed059bbd8b10b8263b9429"
+      "menu_sha256": "8a6f4f636fa6bc6ec531b9206194991de5bd959e26b76866e9ddcb6860bd23e9"
     },
     {
       "stage": "ended",
@@ -34,7 +34,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "42546e1197add9ca355b623edac70660616920147543dbf9deb16a785a04afcd"
+      "menu_sha256": "d78d44429b36722d1dea860f33fd916a454232ec258fce72264a18fe06e80677"
     },
     {
       "stage": "degraded",
@@ -43,7 +43,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "42546e1197add9ca355b623edac70660616920147543dbf9deb16a785a04afcd"
+      "menu_sha256": "d78d44429b36722d1dea860f33fd916a454232ec258fce72264a18fe06e80677"
     },
     {
       "stage": "disabled",
@@ -52,7 +52,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "861d63f15e2fb6aeaeddcbc4b91cb92858020885c58d36b6b8644f71add7d6d2"
+      "menu_sha256": "bc54289d34765b194bc4d1360bd0facdc1215f2f158d47649f1953d81fe0407c"
     },
     {
       "stage": "reenabled",
@@ -61,7 +61,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "42546e1197add9ca355b623edac70660616920147543dbf9deb16a785a04afcd"
+      "menu_sha256": "d78d44429b36722d1dea860f33fd916a454232ec258fce72264a18fe06e80677"
     }
   ],
   "en": [
@@ -72,7 +72,7 @@
       "working": 0,
       "received": 0,
       "sprite": "idle",
-      "menu_sha256": "addde7b96d8eaa6efd9878c13d8bfc9d17ad2ceecc98a0d1b0ef63eeba580043"
+      "menu_sha256": "24d32e145d2bf2c1a5d0070f7271c8b4f10d30b4d75377fc525f51f557e6754e"
     },
     {
       "stage": "working",
@@ -81,7 +81,7 @@
       "working": 1,
       "received": 1,
       "sprite": "working",
-      "menu_sha256": "98251fa7c13580a656c0a485b212b6478facee0839a9af3939fcd1a40bddab7b"
+      "menu_sha256": "cc19663b7a64e7ce45e771ca54bcf1a1ad571894a39f96bf2788d3af332d3f7a"
     },
     {
       "stage": "permission",
@@ -90,7 +90,7 @@
       "working": 1,
       "received": 2,
       "sprite": "working",
-      "menu_sha256": "bceec2f5965307adcbbe7e592f772b726f02c72658dbb0285df2d7cc8d2f975d"
+      "menu_sha256": "ae11b9650b93e5345ef63977e572ca8aa12f66f1c09aee0def5983aae5be220f"
     },
     {
       "stage": "ended",
@@ -99,7 +99,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "eacf5fa44418b307c748e9bd310b083ee331c5649381638f28a49c5dbca90143"
+      "menu_sha256": "e9bf1a66b12c9b7d578fd09fdfa0fdab36ef4aff250976d41d3999e4cfc79b5e"
     },
     {
       "stage": "degraded",
@@ -108,7 +108,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "eacf5fa44418b307c748e9bd310b083ee331c5649381638f28a49c5dbca90143"
+      "menu_sha256": "e9bf1a66b12c9b7d578fd09fdfa0fdab36ef4aff250976d41d3999e4cfc79b5e"
     },
     {
       "stage": "disabled",
@@ -117,7 +117,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "3c2698bac8987490525c4134fd0488b4e41c412d0c9a42d31306430409575d78"
+      "menu_sha256": "49c144d0e13892f2bd3985cb1de8cb3d079881349efad8256dd2d2ac362d3d86"
     },
     {
       "stage": "reenabled",
@@ -126,7 +126,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "eacf5fa44418b307c748e9bd310b083ee331c5649381638f28a49c5dbca90143"
+      "menu_sha256": "e9bf1a66b12c9b7d578fd09fdfa0fdab36ef4aff250976d41d3999e4cfc79b5e"
     }
   ],
   "ja": [
@@ -137,7 +137,7 @@
       "working": 0,
       "received": 0,
       "sprite": "idle",
-      "menu_sha256": "c0013afd1ff181c73af07ece307692e1c8d6e5a6122b4d68c691d84b9577cedd"
+      "menu_sha256": "a142257b6eecb860331ba0a68d872b085a54acb74161f69a99f4771fe34afa65"
     },
     {
       "stage": "working",
@@ -146,7 +146,7 @@
       "working": 1,
       "received": 1,
       "sprite": "working",
-      "menu_sha256": "c8999c439e2471856b8963fb405faec41e84e134c785f0d06a0727ddc263d92e"
+      "menu_sha256": "8e6827e430583ec381436e7bc009158ce6ef829d256649fc2c92e6e63bafcdb3"
     },
     {
       "stage": "permission",
@@ -155,7 +155,7 @@
       "working": 1,
       "received": 2,
       "sprite": "working",
-      "menu_sha256": "7d286da7e325030b7bf751a42d0fada8f478886bff8de9cd35bf89bc7580fdee"
+      "menu_sha256": "52337555fd408e4202857873ce975b7e1cd276d22302b87c3e73165985ea7d76"
     },
     {
       "stage": "ended",
@@ -164,7 +164,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "2599073c1ad50cd266d08a75a5d07cbb1c385b52d22257d4899c16ee92f1c8b8"
+      "menu_sha256": "112e6d06bb62740204bac3ed31eed1d906443837274ce5dfff614c50ebfc3bd0"
     },
     {
       "stage": "degraded",
@@ -173,7 +173,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "2599073c1ad50cd266d08a75a5d07cbb1c385b52d22257d4899c16ee92f1c8b8"
+      "menu_sha256": "112e6d06bb62740204bac3ed31eed1d906443837274ce5dfff614c50ebfc3bd0"
     },
     {
       "stage": "disabled",
@@ -182,7 +182,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "dbe24b208a0d4886850948e4393ade2d8d66ade501a2c516ed72fb6a59d769bd"
+      "menu_sha256": "0df260809a7b657cd31a4926801dc8daa75ec9a7216147abb7b0f6197731cceb"
     },
     {
       "stage": "reenabled",
@@ -191,7 +191,7 @@
       "working": 0,
       "received": 3,
       "sprite": "idle",
-      "menu_sha256": "2599073c1ad50cd266d08a75a5d07cbb1c385b52d22257d4899c16ee92f1c8b8"
+      "menu_sha256": "112e6d06bb62740204bac3ed31eed1d906443837274ce5dfff614c50ebfc3bd0"
     }
   ]
 }

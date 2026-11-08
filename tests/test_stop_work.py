@@ -252,6 +252,7 @@ def test_checkpoint_server_down_is_silent_and_fast(tmp_path, name):
 # ---------------------------------------------------------------- 控制器
 @pytest.fixture
 def pet(env):  # noqa: F811
+    env.state.claude_event("prompt", None, env.now)  # 暂停测试必须先有活动中的 CC。
     env.sticky = []
 
     def say(text, sticky=False):
@@ -280,7 +281,7 @@ def remote_texts(pet):
 
 def test_menu_stop_turns_into_continue(pet):
     menu, remote, texts = remote_texts(pet)
-    assert texts == [("停下", True), ("立即中断", False), ("做得好", True), ("有问题……", True)]
+    assert texts == [("停下", True), ("立即中断", True), ("做得好", True), ("有问题……", True)]
     find_action(remote, "停下").trigger()
     assert pet.ctl.hub.is_paused and pet.state.paused
     assert pet.said[-1] == STOP_REQUESTED
@@ -362,7 +363,7 @@ def test_turn_ending_before_checkpoint_cancels_stop(pet):
     pet.ctl.hub.resume()  # 服务线程收到 Stop 且没人在等时做的
     pet.ctl.handle_event("stop")
     assert not pet.state.paused and pet.win.sprite_name != "stop"
-    assert remote_texts(pet)[2][0] == ("停下", True)
+    assert remote_texts(pet)[2][0] == ("停下", False)
 
 
 def test_no_panel_pops_up_any_more(pet):
