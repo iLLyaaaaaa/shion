@@ -274,7 +274,8 @@ def test_window_controls_and_mouse_coordinates(rig):
         assert w.settings.pinch_maximum == 200
         class Event:
             def position(self):
-                return QPointF(12 + 530 * 0.4, 12 + 580 * 0.4)
+                ox,oy=w.canvas.image_origin
+                return QPointF(ox + 530 * 0.4, oy + 580 * 0.4)
         assert w.canvas.point(Event()) == pytest.approx([530, 580])
         w.reset()
         assert w.settings.pinch_maximum == 120

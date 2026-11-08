@@ -8,7 +8,26 @@
 & '..\claude pet\.venv\Scripts\python.exe' -m v3proto
 ```
 
-窗口标题包含 `诗音 V3 · 敲头 / 摸头`，旧窗口需要关闭后重新运行。默认 0.4 倍，支持八款原表情、呼吸、眨眼、头发摆动、捏脸、敲头、摸头、只看垫底及 FPS。
+窗口标题包含 `诗音 V3 · 拎起 / 拖动`，旧窗口需要关闭后重新运行。默认 0.4 倍，支持八款原表情、呼吸、眨眼、头发摆动、捏脸、敲头、摸头、拎起、只看垫底及 FPS。
+
+## 拎起、拖动与回原位（默认预览手感已验收）
+
+- 按住可见的身体、手臂或腿，移动严格超过 6 个 Qt 逻辑像素后才拎起；点击、双击或容差内抖动不触发。头顶、脸颊保留原手势，不转为拎起。
+- 整体随鼠标移动并随横向速度轻倾，最大 8°；手臂绕肩、双腿绕胯轻晃，头发沿用弹簧。停手后倾斜回正。先惊讶 0.2 秒，之后委屈。
+- 水平反向移动至少 24 个逻辑像素才记一次有效反转，2 秒内第 3 次晃晕；直线移动、竖向移动、小抖动及仅按住均不计。晃晕锁定到松手后的余韵结束。
+- 松手回到原站位，不保留横向落点；0.9 秒内轻微弹簧回弹并回正。普通委屈余韵 0.6 秒，晃晕余韵 2 秒，再用 0.35 秒淡回原表情。失焦等同松手，重复松手不重启返回。
+- 回弹中可以重新抓住身体，也可捏脸/敲摸接管表情；整体继续回原位，旧反应不再复活。原表情选择在互动中锁定；关闭拎起开关会松手返回，恢复默认结束动作。
+
+移动限定在实验台留出的空间：横向 ±240、纵向 −220～40 原图像素。渲染与命中共用整体变换，不移动桌面窗口，不引入新图片、依赖、好感或台词系统。
+
+```powershell
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/lift/held.png --lift-preview held --time .6
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/lift/return.png --lift-preview release --time 1.35
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/lift/dizzy.png --lift-preview shake --time .8
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --benchmark 60 --benchmark-lift --benchmark-output build/v3/lift/benchmark.json
+```
+
+`release` / `shake` 场景在 1.2 秒松手；`held` 保持抓取。`--lift-preview` 与 `--head-preview` 互斥；三种互动性能基准也互斥。真实窗口验收：轻拖/快速晃动、停手回正、回弹中重抓、敲摸/捏脸接管、不同尺寸和 DPI、原表情恢复及 FPS。离屏结果不代替手感验收。
 
 ## 敲头与摸头（待人工验收）
 

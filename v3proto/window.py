@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, Q
 from .animation import Animator, Settings
 from .render import Renderer, Rig
 from .head_touch import HeadGesture
+from .lift import BodyGesture, SCENE_PADDING, clamp_offset
 
 
 FACE_LABELS = ("得意", "平静", "开心", "惊讶", "委屈", "生气", "困倦", "晕乎")
@@ -27,7 +28,9 @@ class Canvas(QWidget):
         self.rig, self.settings, self.display_scale = rig, settings, scale
         self.animator = Animator(settings, seed, now=time.perf_counter())
         self.renderer = Renderer(rig, scale * self.devicePixelRatioF())
-        self.setFixedSize(math.ceil(rig.size[0] * scale) + 24, math.ceil(rig.size[1] * scale) + 24)
+        left,top,right,bottom = SCENE_PADDING
+        self.setFixedSize(math.ceil((rig.size[0]+left+right)*scale)+24,
+                          math.ceil((rig.size[1]+top+bottom)*scale)+24)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.last_tick = time.perf_counter()
@@ -37,8 +40,10 @@ class Canvas(QWidget):
         self.measure = False
         self.benchmark_pinch = False
         self.benchmark_head = None
+        self.benchmark_lift = False
         self.next_benchmark_knock = 0.
         self.head_gesture = HeadGesture()
+        self.body_gesture = BodyGesture()
         self.reaction_changed = lambda: None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -59,11 +64,18 @@ class Canvas(QWidget):
             self.next_benchmark_knock = now+.45
         elif self.benchmark_head == 'pat':
             self.animator.stroke_head(math.cos(now*5), now=now)
+        elif self.benchmark_lift:
+            if not self.animator.lift.held:self.animator.begin_lift((543,790),now=now)
+            x=180*math.sin(now*6)
+            self.animator.move_lift((x,-120+50*math.sin(now*3)),x*self.display_scale,now=now)
         if self.head_gesture.active and (self.settings.underlays_only or not (self.settings.knock or self.settings.pat)):
             self.head_gesture.clear()
+        if self.body_gesture.active and (self.settings.underlays_only or not self.settings.lift):
+            self.body_gesture.clear()
         self.animator.advance(dt, now=now)
         self.reaction_changed()
-        if not self.animator.dragging and not self.head_gesture.active and QWidget.mouseGrabber()==self:
+        if (not self.animator.dragging and not self.head_gesture.active and not self.body_gesture.active
+                and QWidget.mouseGrabber()==self):
             self.releaseMouse()
             self.unsetCursor()
         self.update()
@@ -73,11 +85,12 @@ class Canvas(QWidget):
         scale = self.display_scale * self.devicePixelRatioF()
         if abs(self.renderer.scale - scale) > 1e-6:
             self.renderer = Renderer(self.rig, scale)
-        im = self.renderer.render(self.settings, self.animator.pose)
+        im = self.renderer.render(self.settings, self.animator.pose, padding=SCENE_PADDING)
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#eee9e5"))
-        p.drawImage(QRectF(12, 12, self.rig.size[0] * self.display_scale,
-                           self.rig.size[1] * self.display_scale), im)
+        left,top,right,bottom = SCENE_PADDING
+        p.drawImage(QRectF(12, 12, (self.rig.size[0]+left+right)*self.display_scale,
+                           (self.rig.size[1]+top+bottom)*self.display_scale), im)
         p.end()
         end = time.perf_counter()
         self.paint_times.append(end)
@@ -87,13 +100,20 @@ class Canvas(QWidget):
 
     def point(self, event):
         p = event.position()
-        return np.array([(p.x() - 12) / self.display_scale, (p.y() - 12) / self.display_scale])
+        x,y = self.image_origin
+        return np.array([(p.x()-x)/self.display_scale, (p.y()-y)/self.display_scale])
+
+    @property
+    def image_origin(self):
+        return (12+SCENE_PADDING[0]*self.display_scale, 12+SCENE_PADDING[1]*self.display_scale)
 
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         point = self.point(event)
         hit, local = self.renderer.hit_test(point, self.settings, self.animator.pose, crown=True)
+        if self.animator.lift.held:
+            return
         if hit == "cheek":
             self.animator.press(local, now=time.perf_counter())
             self.animator.advance(0)
@@ -109,6 +129,11 @@ class Canvas(QWidget):
             self.animator.impulse(1 if point[0] >= 543 else -1)
         elif hit == 'crown':
             self.animator.impulse(1 if point[0] >= 543 else -1)
+        elif hit == 'body' and self.settings.lift and not self.settings.underlays_only:
+            self.body_gesture.press((event.position().x(),event.position().y()), point,
+                                    self.animator.pose.root_offset)
+            self.grabMouse()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseDoubleClickEvent(self, event):
         self.mousePressEvent(event)
@@ -123,20 +148,47 @@ class Canvas(QWidget):
 
     def mouseMoveEvent(self, event):
         point=self.point(event)
-        if self.head_gesture.active:
+        if self.body_gesture.active:
+            self._move_body(event)
+        elif self.head_gesture.active:
             self._move_head(event)
         elif self.animator.dragging:
+            point=self.renderer.rig_point(point,self.animator.pose)
             local=self.renderer.head_surface.source_point(point,self.animator.pose,allow_outside=True)
             if local is not None:self.animator.drag(local)
         else:
             hit,_=self.renderer.hit_test(point,self.settings,self.animator.pose,crown=True)
-            if hit=='cheek' or (hit=='crown' and (self.settings.knock or self.settings.pat)):
+            if (hit=='cheek' or (hit=='crown' and (self.settings.knock or self.settings.pat))
+                    or (hit=='body' and self.settings.lift and not self.settings.underlays_only)):
                 self.setCursor(Qt.CursorShape.OpenHandCursor)
             else:self.unsetCursor()
 
+    def _move_body(self, event):
+        was_started = self.body_gesture.started
+        if not self.body_gesture.move((event.position().x(),event.position().y())):
+            return
+        now = time.perf_counter()
+        if not was_started:
+            pivot = self.renderer.rig_point(self.body_gesture.point,self.animator.pose)
+            self.body_gesture.offset = tuple(self.animator.pose.root_offset)
+            self.animator.begin_lift(pivot,now=now)
+        offset = clamp_offset(np.array(self.body_gesture.offset)+self.point(event)-self.body_gesture.point)
+        self.animator.move_lift(tuple(offset), (offset[0]-self.body_gesture.offset[0])*self.display_scale,
+                                now=now)
+        self.animator.advance(0)
+        self.reaction_changed()
+        self.update()
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.head_gesture.active:
+            if self.body_gesture.active:
+                self._move_body(event)
+                self.animator.release_lift(now=time.perf_counter())
+                self.body_gesture.clear()
+                self.animator.advance(0)
+                self.reaction_changed()
+                self.update()
+            elif self.head_gesture.active:
                 self._move_head(event)
                 if self.head_gesture.release():
                     direction = 1 if self.point(event)[0] >= self.rig.pivots['neck'][0] else -1
@@ -155,6 +207,8 @@ class Canvas(QWidget):
 
     def focusOutEvent(self, event):
         self.head_gesture.clear()
+        self.body_gesture.clear()
+        self.animator.release_lift(now=time.perf_counter())
         self.animator.release_head(now=time.perf_counter())
         self.animator.release(now=time.perf_counter())
         if QWidget.mouseGrabber()==self:self.releaseMouse()
@@ -167,7 +221,7 @@ class Preview(QWidget):
         super().__init__()
         source=rig.data.get('manual_source_set',{}).get('name','去粉线版')
         suffix=" · 被捏反应" if rig.cheek_config else ""
-        self.setWindowTitle(f"诗音 V3 · 敲头 / 摸头 · {source}{suffix}")
+        self.setWindowTitle(f"诗音 V3 · 拎起 / 拖动 · {source}{suffix}")
         if "Microsoft YaHei" not in QFontDatabase.families():
             font = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyh.ttc"
             if font.exists():
@@ -191,7 +245,7 @@ class Preview(QWidget):
         self.form = QFormLayout()
         panel.addLayout(self.form)
         for key, label in (("breath", "呼吸"), ("blink", "眨眼"), ("sway", "头发摆动"),
-                           ("pinch", "麻薯捏脸"), ("knock", "敲头"), ("pat", "摸头")):
+                           ("pinch", "麻薯捏脸"), ("knock", "敲头"), ("pat", "摸头"), ("lift", "拎起 / 拖动")):
             check = QCheckBox(label)
             check.setChecked(getattr(settings, key))
             check.toggled.connect(lambda value, k=key: self.change(k, value))
@@ -273,11 +327,14 @@ class Preview(QWidget):
         self.reaction_label = QLabel("被捏反应：等待抓取")
         self.reaction_label.setWordWrap(True)
         panel.addWidget(self.reaction_label)
+        self.lift_label = QLabel('拎起反应：按住身体拖动')
+        self.lift_label.setWordWrap(True)
+        panel.addWidget(self.lift_label)
         self.canvas.reaction_changed = self.update_reaction
         reset = QPushButton("恢复默认")
         reset.clicked.connect(self.reset)
         panel.addWidget(reset)
-        hint = QLabel("点头顶：整头下沉回弹、冒金星、委屈。\n连敲三下会延长委屈。\n按住头顶水平拖动 12 个屏幕逻辑像素开始摸头。\n左侧鼓脸颊仍可抓取，松手后可摸头安抚。\n其他头发保留拨动；几何滑条 px 为原图像素。")
+        hint = QLabel("按住身体或腿，移动超过 6 个逻辑像素拎起。\n来回大幅晃动会晕；松手回原站位并轻轻回弹。\n点头顶敲头，按住水平移动 12 个逻辑像素摸头。\n左侧鼓脸颊仍可捏；头部手势不转拎起。\n几何滑条 px 为原图像素。")
         hint.setWordWrap(True)
         panel.addWidget(hint)
         self.fps_label = QLabel("FPS —")
@@ -315,6 +372,9 @@ class Preview(QWidget):
         if key in ('knock','pat','underlays_only'):
             self.canvas.head_gesture.clear()
             self.canvas.animator.release_head(now=time.perf_counter())
+        if key in ('lift','underlays_only'):
+            self.canvas.body_gesture.clear()
+            self.canvas.animator.release_lift(now=time.perf_counter())
         self.canvas.animator.advance(0)
         self.update_reaction()
         self.canvas.update()
@@ -338,6 +398,10 @@ class Preview(QWidget):
         head_labels = {'idle':'等待触碰头顶','knock':'轻敲 · 委屈冒金星','protest':'连敲 · 委屈',
                        'pat':'摸头 · 开心','fade':'恢复原表情'}
         self.head_label.setText('敲摸反应：'+head_labels[h.stage]+(f' · 连敲 {h.count} 次' if h.count else ''))
+        l = self.canvas.animator.lift
+        lift_labels = {'idle':'按住身体拖动','held':'拎起 · 随手移动','return':'回原站位 · 回弹',
+                       'hold':'落稳余韵','fade':'恢复原表情'}
+        self.lift_label.setText('拎起反应：'+lift_labels[l.stage]+(' · 晃晕了' if l.dizzy else ''))
 
     def expression_changed(self):
         self.change("expression", self.combo.currentData())
@@ -357,6 +421,8 @@ class Preview(QWidget):
         self.combo.setCurrentIndex(self.combo.findData(original) if original is not None else 0)
         self.canvas.animator = Animator(self.settings, self.seed, now=time.perf_counter())
         self.canvas.head_gesture.clear()
+        self.canvas.body_gesture.clear()
+        if QWidget.mouseGrabber()==self.canvas:self.canvas.releaseMouse()
         self.update_reaction()
         self.canvas.update()
 
@@ -373,10 +439,11 @@ class Preview(QWidget):
         super().closeEvent(event)
 
 
-def benchmark(window, seconds, output, app, pinch=False, head=None):
+def benchmark(window, seconds, output, app, pinch=False, head=None, lift=False):
     """Count paintEvent completions, not timer callbacks; exclude warm-up."""
     window.canvas.benchmark_pinch = pinch
     window.canvas.benchmark_head = head
+    window.canvas.benchmark_lift = lift
     def start():
         window.canvas.measure = True
         QTimer.singleShot(round(seconds * 1000), finish)
@@ -386,7 +453,7 @@ def benchmark(window, seconds, output, app, pinch=False, head=None):
         times = np.array([r[0] for r in rows])
         ms = np.array([r[1] for r in rows])
         result = {"platform": app.platformName(), "scale": window.canvas.display_scale,
-                  "device_pixel_ratio": window.canvas.devicePixelRatioF(), "pinch": pinch, "head":head,
+                  "device_pixel_ratio": window.canvas.devicePixelRatioF(), "pinch": pinch, "head":head, "lift":lift,
                   "frames": len(rows), "fps": float((len(rows) - 1) / (times[-1] - times[0])),
                   "render_ms_p50": float(np.median(ms)), "render_ms_p95": float(np.percentile(ms, 95)),
                   "frame_interval_ms_p95": float(np.percentile(np.diff(times) * 1000, 95))}

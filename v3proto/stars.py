@@ -74,7 +74,7 @@ def star_particles(age, burst=DEFAULT_STAR_BURST):
     return tuple(particles)
 
 
-def paint_stars(image, rig, scale, pose):
+def paint_stars(image, rig, scale, pose, offset=(0,0)):
     particles = [(star,burst.origin) for age,burst in pose.star_effects
                  for star in star_particles(age,burst)]
     if not particles:
@@ -85,6 +85,7 @@ def paint_stars(image, rig, scale, pose):
     painter = QPainter(result)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.scale(scale,scale)
+    painter.translate(*offset)
     for star,anchor in particles:
         painter.save()
         painter.setOpacity(star.opacity)

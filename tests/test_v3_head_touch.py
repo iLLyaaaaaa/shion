@@ -234,7 +234,7 @@ def input_event(x,y,button=None):
 
 
 def test_window_double_click_is_two_knocks_and_hover_is_passive(window):
-    c=window.canvas;e=input_event(12+500*.4,12+150*.4)
+    c=window.canvas;ox,oy=c.image_origin;e=input_event(ox+500*.4,oy+150*.4)
     c.mouseMoveEvent(e)
     assert not c.animator.interaction_active
     c.mousePressEvent(e);c.mouseReleaseEvent(e)
@@ -248,7 +248,7 @@ def test_window_double_click_is_two_knocks_and_hover_is_passive(window):
 @pytest.mark.parametrize('scale',[.25,.4,.6])
 def test_gesture_threshold_stays_in_logical_pixels_at_display_scales(window,scale):
     c=window.canvas;c.display_scale=scale
-    x,y=12+500*scale,12+150*scale
+    ox,oy=c.image_origin;x,y=ox+500*scale,oy+150*scale
     c.mousePressEvent(input_event(x,y))
     c.mouseMoveEvent(input_event(x+11,y))
     assert not c.animator.head_touch.active
@@ -261,7 +261,7 @@ def test_gesture_threshold_stays_in_logical_pixels_at_display_scales(window,scal
 def test_focus_loss_clears_pending_press_without_knock_and_releases_pat(window):
     from PySide6.QtCore import QEvent
     from PySide6.QtGui import QFocusEvent
-    c=window.canvas;x,y=212,72
+    c=window.canvas;ox,oy=c.image_origin;x,y=ox+200,oy+60
     c.mousePressEvent(input_event(x,y))
     c.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))
     assert not c.animator.interaction_active and not c.head_gesture.active

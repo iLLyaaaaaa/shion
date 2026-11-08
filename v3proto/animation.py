@@ -9,6 +9,7 @@ from .reaction import ReactionParameters, ReactionState, press_reaction, release
 from .motion import Spring, blink_scale, breathing, limit_vector, release_step, spring_step, limit_cheek_drag
 from .head_touch import HeadParameters, HeadState, knock_head, stroke_head, release_head, step_head
 from .stars import STAR_LIFETIME,MAX_STAR_BURSTS,make_star_burst
+from .lift import LiftState, begin_lift, move_lift, release_lift, step_lift
 
 
 SWAY_PARTS = ("bangs", "ahoge", "flower", "side_hair_l", "side_hair_r", "ribbon")
@@ -32,6 +33,7 @@ class Settings:
     knock: bool = True
     pat: bool = True
     head_touch: HeadParameters = field(default_factory=HeadParameters)
+    lift: bool = True
 
 
 @dataclass
@@ -49,10 +51,15 @@ class Pose:
     arm_degrees: float = 0.
     head_roll: float = 0.
     star_effects: tuple = ()  # (age, immutable click burst); world coordinates, not head-local.
+    root_offset: tuple = (0., 0.)
+    root_roll: float = 0.
+    root_pivot: tuple = (543., 790.)
+    leg_degrees: float = 0.
 
     @property
     def is_rest(self):
-        return self.rig_is_rest and not self.star_effects
+        return (self.rig_is_rest and not self.star_effects
+                and not any(self.root_offset) and self.root_roll == 0)
 
     @property
     def star_age(self):
@@ -62,7 +69,8 @@ class Pose:
     def rig_is_rest(self):
         return (self.body_scale == 1 and self.head_y == 0 and self.eye_scale == 1
                 and not any(self.angles.values()) and not any(self.pinch_delta)
-                and self.reaction_face is None and self.arm_degrees == 0 and self.head_roll == 0)
+                and self.reaction_face is None and self.arm_degrees == 0 and self.head_roll == 0
+                and self.leg_degrees == 0)
 
 
 class Animator:
@@ -75,6 +83,7 @@ class Animator:
         self.clock = now
         self.reaction = ReactionState()
         self.head_touch = HeadState()
+        self.lift = LiftState()
         self._rebound_time = 1.
         self.blink_start = self.rng.uniform(3, 6)
         self.double_pending = False
@@ -94,8 +103,9 @@ class Animator:
         self.double_pending = False
 
     def press(self, point, now=None):
-        if self.settings.pinch:
+        if self.settings.pinch and not self.lift.held:
             if now is not None:self.clock = max(self.clock, now)
+            self._yield_lift()
             if self.head_touch.active:
                 h = step_head(self.head_touch, self.clock, 0.)
                 weight = 1-h.fade
@@ -135,11 +145,45 @@ class Animator:
 
     @property
     def interaction_active(self):
-        return self.reaction.active or self.head_touch.active
+        return self.reaction.active or self.head_touch.active or self.lift.active
 
     @property
     def original_expression(self):
-        return self.reaction.base or self.head_touch.base or self.settings.expression
+        return self.reaction.base or self.head_touch.base or self.lift.base or self.settings.expression
+
+    def begin_lift(self, pivot, now=None):
+        if not self.settings.lift or self.settings.underlays_only or self.dragging:
+            return
+        if now is not None:self.clock = max(self.clock, now)
+        base = self.original_expression
+        r = self.head_touch if self.head_touch.active else self.reaction
+        if self.lift.active and self.lift.owns_face:r = self.lift
+        weight = 1-r.fade if r.active else 0.
+        seed = replace(self.pose, body_scale=1-r.body.position*weight,
+                       head_y=(r.body.position*399.4+r.drop.position)*weight)
+        self.lift = begin_lift(self.lift, self.clock, base, pivot, seed)
+        self._rebound_time = self.reaction.params.rebound_time if self.reaction.active else self._rebound_time
+        self.reaction = ReactionState(history=self.reaction.history, count=self.reaction.count)
+        self.cancel_head()
+        self.reset_blink()
+
+    def move_lift(self, offset, logical_x, now=None):
+        if now is not None:self.clock = max(self.clock, now)
+        self.lift = move_lift(self.lift, offset, logical_x, self.clock)
+
+    def release_lift(self, now=None):
+        if now is not None:self.clock = max(self.clock, now)
+        self.lift = release_lift(self.lift, self.clock)
+
+    def _yield_lift(self):
+        """New touches own the face while an already released root returns home."""
+        if self.lift.active and self.lift.owns_face:
+            r = step_lift(self.lift, self.clock)
+            weight = 1-r.fade
+            scaled = lambda v: Spring(v.position*weight, v.velocity*weight)
+            self.reaction = replace(self.reaction, base=r.base, body=scaled(r.body),
+                                    arm=scaled(r.arm), head=scaled(r.head), drop=scaled(r.drop))
+            self.lift = replace(r, owns_face=False)
 
     def cancel_head(self):
         self.head_touch = HeadState()
@@ -148,6 +192,7 @@ class Animator:
     def _head_seed(self, now):
         if now is not None:
             self.clock = max(self.clock, now)
+        self._yield_lift()
         h = step_head(self.head_touch, self.clock, 0.)
         if self.reaction.active:
             r = self.reaction
@@ -161,7 +206,7 @@ class Animator:
         return h
 
     def knock_head(self, direction=1., now=None, *, point=(500.,150.)):
-        if self.dragging or not self.settings.knock or self.settings.underlays_only:
+        if self.dragging or self.lift.held or not self.settings.knock or self.settings.underlays_only:
             return
         h = self._head_seed(now)
         self.head_touch = knock_head(h, self.clock, self.settings.expression, self.settings.head_touch)
@@ -172,7 +217,7 @@ class Animator:
         self.reset_blink()
 
     def stroke_head(self, dx, now=None):
-        if self.dragging or not self.settings.pat or self.settings.underlays_only or not dx:
+        if self.dragging or self.lift.held or not self.settings.pat or self.settings.underlays_only or not dx:
             return
         h = self._head_seed(now)
         self._star_bursts = ()
@@ -198,7 +243,12 @@ class Animator:
             self.reset_blink()
             self.cancel_pinch()
             self.cancel_head()
+            self.lift = LiftState()
             self._last_expression = self.settings.expression
+        if self.settings.underlays_only:
+            self.lift = LiftState()
+        elif not self.settings.lift:
+            self.release_lift(now=end_clock)
         if not self.settings.pinch:
             self.cancel_pinch()
         if ((self.head_touch.kind == 'knock' and not self.settings.knock)
@@ -228,6 +278,9 @@ class Animator:
                     h = self.head_touch
                     if h.kind == 'pat' and h.active and end_clock-h.last_move < h.params.follow_time:
                         target += self.settings.sway_degrees * gain * h.direction * .18
+                    if self.lift.active:
+                        speed = self.lift.velocity*math.exp(-max(0.,end_clock-self.lift.moved_at)/.1)
+                        target += max(-1.,min(1.,speed/800))*self.settings.sway_degrees*gain*.4
                     frequency,damping=(1.25,.38) if n=='ahoge' else (1.5+i*.12,.45)
                     s = spring_step(self.springs[n], step, target, frequency, damping)
                     cap = self.settings.sway_degrees*gain
@@ -246,6 +299,7 @@ class Animator:
             self.head_touch = step_head(self.head_touch, clock, step)
             if previous_head_stage != self.head_touch.stage:self.reset_blink()
         self.clock = end_clock
+        self.lift = step_lift(self.lift, self.clock)
         self.head_touch = step_head(self.head_touch, self.clock, 0.)
         s = self.settings
         if not s.pinch:
@@ -267,8 +321,10 @@ class Animator:
         r = self.reaction
         if self.head_touch.active:
             r = self.head_touch
+        if self.lift.active and self.lift.owns_face:
+            r = self.lift
         if r.active:
-            weight = 1-r.fade if isinstance(r, HeadState) else 1.
+            weight = 1-r.fade if isinstance(r, (HeadState,LiftState)) else 1.
             scale -= r.body.position * weight
             head_y += r.body.position * weight * (1063.4 - 664.)
             head_y += r.drop.position * weight
@@ -279,4 +335,8 @@ class Animator:
                          r.face, r.base, r.fade, r.arm.position*weight, r.head.position*weight)
         self._star_bursts = tuple((t,b) for t,b in self._star_bursts if self.clock-t<STAR_LIFETIME)
         self.pose.star_effects = tuple((self.clock-t,b) for t,b in self._star_bursts if self.clock>=t)
+        self.pose.root_offset = self.lift.offset
+        self.pose.root_roll = self.lift.roll.position
+        self.pose.root_pivot = self.lift.pivot
+        self.pose.leg_degrees = self.lift.leg.position*(1-self.lift.fade)
         return self.pose

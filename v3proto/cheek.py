@@ -213,7 +213,8 @@ class StaticCheekSurface:
         """
         from .render import BODY, LEGS
         from .motion import pivot_matrix,translation
-        if pose.body_scale==1 and pose.head_y==0 and pose.arm_degrees==0 and pose.head_roll==0:
+        if (pose.body_scale==1 and pose.head_y==0 and pose.arm_degrees==0
+                and pose.head_roll==0 and pose.leg_degrees==0):
             return pixels
         rig=self.r.rig
         scale_x=self.w/rig.size[0];scale_y=self.h/rig.size[1]
@@ -223,12 +224,13 @@ class StaticCheekSurface:
                 p=rig.parts[n]
                 if p.get('role'):continue
                 if p['source']=='gpt_underlay' and n not in BODY:continue
-                label=0 if n in LEGS else (3 if n=='arm_l' else 4 if n=='arm_r' else 2 if n in BODY else 1)
+                label=(5 if n=='leg_l' else 6 if n=='leg_r' else
+                       3 if n=='arm_l' else 4 if n=='arm_r' else 2 if n in BODY else 1)
                 owner.paste(label,(p['x'],p['y'],p['x']+p['size'][0],p['y']+p['size'][1]),rig.images[n].getchannel('A').point(lambda a:255 if a>128 else 0))
             a=np.asarray(owner);alpha=np.asarray(rig.rest('smug'))[...,3]>128
             _,near=nd.distance_transform_edt(~alpha,return_indices=True)
             a=a[tuple(near)]
-            self.motion_weights=[nd.gaussian_filter(np.asarray(Image.fromarray((a==i).astype(np.float32)).resize((self.w,self.h),Image.Resampling.NEAREST)),2) for i in range(1,5)]
+            self.motion_weights=[nd.gaussian_filter(np.asarray(Image.fromarray((a==i).astype(np.float32)).resize((self.w,self.h),Image.Resampling.NEAREST)),2) for i in range(1,7)]
         xs=np.append(np.arange(0,self.w,24),self.w)
         ys=np.append(np.arange(0,self.h,24),self.h)
         mx,my=np.meshgrid(xs,ys)
@@ -237,7 +239,9 @@ class StaticCheekSurface:
         body=pivot_matrix(hip,sy=pose.body_scale)
         head=translation(0,pose.head_y) @ pivot_matrix(rig.pivots['neck'],pose.head_roll)
         matrices=(head,body,body @ pivot_matrix(rig.pivots['shoulder_l'],pose.arm_degrees),
-                  body @ pivot_matrix(rig.pivots['shoulder_r'],-pose.arm_degrees))
+                  body @ pivot_matrix(rig.pivots['shoulder_r'],-pose.arm_degrees),
+                  pivot_matrix(rig.pivots['hip_l'],pose.leg_degrees),
+                  pivot_matrix(rig.pivots['hip_r'],-pose.leg_degrees))
         ox=mx.astype(float);oy=my.astype(float)
         for weight,m in zip(self.motion_weights,matrices):
             inv=np.linalg.inv(m)

@@ -81,7 +81,9 @@ def test_only_left_cheek_is_grabbable_and_outside_drag_continues(rig):
     w=Preview(rig,s);c=w.canvas
     c.grabMouse=lambda:None
     class Event:
-        def __init__(self,x,y):self.xy=QPointF(12+x*.4,12+y*.4)
+        def __init__(self,x,y):
+            ox,oy=c.image_origin
+            self.xy=QPointF(ox+x*.4,oy+y*.4)
         def position(self):return self.xy
         def button(self):return Qt.MouseButton.LeftButton
     try:

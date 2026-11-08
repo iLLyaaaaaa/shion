@@ -212,7 +212,8 @@ def test_real_canvas_click_passes_the_correct_rig_world_location(rig,scale):
     try:
         w.canvas.timer.stop();w.stats_timer.stop()
         for point in ((500,150),(540,150)):
-            event=input_event(12+point[0]*scale,12+point[1]*scale)
+            ox,oy=w.canvas.image_origin
+            event=input_event(ox+point[0]*scale,oy+point[1]*scale)
             w.canvas.mousePressEvent(event);w.canvas.mouseReleaseEvent(event)
             assert w.canvas.animator._star_bursts[-1][1].origin==pytest.approx(point)
     finally:w.close();app.processEvents()

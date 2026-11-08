@@ -13,6 +13,7 @@ from PySide6.QtGui import QImage, QPainter, QTransform
 from .animation import Pose, Settings
 from .motion import bend_inverse, pivot_matrix, transform_point, translation, rooted_rotation_inverse
 from .face import brows_image, without_brows, eye_image
+from .lift import root_matrix
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -215,7 +216,8 @@ class Renderer:
                 return matrices[n]
             p = self.rig.parts[n]
             if n in LEGS:
-                m = np.eye(3)
+                sign = 1 if n == 'leg_l' else -1
+                m = pivot_matrix(self.rig.pivots[p['pivot']], sign*pose.leg_degrees)
             elif n in BODY:
                 m = body
                 if n in ("arm_l", "arm_r"):
@@ -305,11 +307,21 @@ class Renderer:
         return (qimage(opened.resize(target,Image.Resampling.LANCZOS)),
                 qimage(background.resize(target,Image.Resampling.LANCZOS)),eyes)
 
-    def render(self, settings: Settings, pose: Pose) -> QImage:
+    def render(self, settings: Settings, pose: Pose, *, padding=(0, 0, 0, 0)) -> QImage:
         image = self._render_rig(settings,pose)
+        left, top, right, bottom = padding
+        if any(padding) or any(pose.root_offset) or pose.root_roll:
+            scene = QImage(round((self.rig.size[0]+left+right)*self.scale),
+                           round((self.rig.size[1]+top+bottom)*self.scale), image.format())
+            scene.fill(0)
+            painter = QPainter(scene)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            self._draw(painter, image, 0, 0, translation(left,top) @ root_matrix(pose))
+            painter.end()
+            image = scene
         if pose.star_age is not None and not settings.underlays_only:
             from .stars import paint_stars
-            image = paint_stars(image,self.rig,self.scale,pose)
+            image = paint_stars(image,self.rig,self.scale,pose,offset=(left,top))
         return image
 
     def _render_rig(self, settings: Settings, pose: Pose) -> QImage:
@@ -375,6 +387,7 @@ class Renderer:
 
     def hit_test(self, point, settings, pose, *, crown=False):
         """Visible face wins over its own eyes; overlying hair wins over face."""
+        point = self.rig_point(point, pose)
         if not settings.underlays_only:
             local=self.head_surface.source_point(point,pose)
             if local is not None:
@@ -419,3 +432,9 @@ class Renderer:
             if 0 <= x < image.width and 0 <= y < image.height and image.getpixel((x, y))[3] > 64:
                 return ("head" if n not in BODY | LEGS else "body"), local
         return None, point
+
+    def rig_point(self, point, pose):
+        """Inverse of the same whole-rig transform used by the scene painter."""
+        if not any(pose.root_offset) and not pose.root_roll:
+            return point
+        return transform_point(np.linalg.inv(root_matrix(pose)), point)
