@@ -461,7 +461,7 @@ def snapshot_icon_preview(out: str) -> int:
 
 def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
                           more: int = 0, expand: bool = False, with_pet: bool = False,
-                          *, scale: int = 1, fixed_scene: bool = False) -> QImage:
+                          *, scale: int = 1, fixed_scene: bool = False, renderer: str = "v2") -> QImage:
     """返回面板 QImage；默认保留真实屏幕定位，固定媒体场景隐藏窗口并在 2x 画布绘制。
 
     同意/否决按钮在 0.6 秒内是灰的，截图时按“已生效”画。
@@ -481,7 +481,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
     body = (400, 400, 100, 100)
     scene_pet = None
     if with_pet and kind != "eating":
-        scene_pet = PetWindow(autostart=False, debug=False, **(
+        scene_pet = window_class(renderer)(autostart=False, debug=False, **(
             {"height": 260, "clock": lambda: 100.0, "rng": random.Random(42), "pixel_ratio": scale}
             if fixed_scene else {}))
         if fixed_scene:
@@ -490,7 +490,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         body = scene_pet.body_rect()
     if kind == "eating":
         from shion.effects import CrumbOverlay, MOUTH_FRACTION
-        win = PetWindow(autostart=False, debug=False)
+        win = window_class(renderer)(autostart=False, debug=False)
         win.set_state("happy", animate=False)
         img = win.render_frame()
         t = [100.0]
@@ -585,9 +585,10 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
 
 
 def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
-                   more: int = 0, expand: bool = False, with_pet: bool = False) -> int:
+                   more: int = 0, expand: bool = False, with_pet: bool = False,
+                   renderer: str = "v2") -> int:
     """原面板截图入口，保留真实屏幕定位与 PNG 输出。"""
-    img = render_snapshot_panel(kind, text, lang, more, expand, with_pet)
+    img = render_snapshot_panel(kind, text, lang, more, expand, with_pet, renderer=renderer)
     ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)

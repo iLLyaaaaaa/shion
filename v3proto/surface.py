@@ -115,7 +115,7 @@ class HeadSurface:
         if key not in self.frames:
             full=self._compose_image(settings,material_pose)
             self.frames[key]=premultiplied(qimage(full.resize((self.w,self.h),Image.Resampling.LANCZOS)))
-            if len(self.frames)>24:self.frames.popitem(last=False)
+            if len(self.frames)>64:self.frames.popitem(last=False)
         self.frames.move_to_end(key)
         if settings.pinch and self.cheek.config:self.cheek.prepare(self,settings)
         original=self.frames[key]

@@ -84,7 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         return app.snapshot_icon_preview(args.snapshot)
     if args.snapshot and args.panel:
         return app.snapshot_panel(args.snapshot, args.panel, args.panel_text, args.lang,
-                                  args.panel_more, args.panel_expand, args.with_pet)
+                                  args.panel_more, args.panel_expand, args.with_pet,
+                                  renderer=args.renderer)
     if args.snapshot:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
                             args.from_state, jump=args.jump, drag=args.drag,
