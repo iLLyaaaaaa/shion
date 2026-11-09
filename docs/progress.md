@@ -13,8 +13,17 @@
   3. 换边在一次眨眼的闭眼帧完成，鼓脸颊用捏脸松手回弹弹簧“啵”一下并给头发冲量，不做水平压扁；死区、只在停稳时判断、拖动中不翻。
   4. 新台词键（三语）：`cheek_pull_combo`、`cheek_lift`；`head_knock` 系列现有文案确认前不启用。
   5. 需新画清单优先级：working 道具 > collapse/slump > desk/bed > stop > yawn > neglect1。验收线：互动场景 DPR1.5 平均 ≥55 FPS、paint P95 ≤14ms；待机/工作 CPU ≤ 单核 3% 且不超过 V2 的 2 倍。
-- **当前进度**：合并完成（`docs/progress.md` 冲突已按“V3 第 1 步在前、V2.2 在后”两边保留解决）；换边验证快照用户验收通过（2026-11-09）。
-- **下一步**：S1（`--renderer v3` 入口与显示骨架、静态状态映射、纹理按高度×DPR），先出计划给用户确认。
+- **当前进度**：合并完成；S5a 换边验证快照、S1 显示骨架均已验收（2026-11-09）。
+- **下一步**：S2（点穿遮罩、气泡/菜单/面板定位、改尺寸、换屏 DPR、降帧与跳帧、FPS/CPU 测量，另加可选外描边），先出计划给用户确认。
+
+#### 2026-11-09：S1 `--renderer v3` 入口与显示骨架，用户真实窗口验收通过
+
+- `python -m shion --renderer v3`（运行与 `--snapshot`）用 V3 纸偶显示，默认仍为 V2，不写存档。新增 `shion/v3_display.py`（状态→V3 表情映射、纹理比例）与 `shion/v3_window.py`（`V3PetWindow(PetWindow)`，只换绘制，窗口属性/状态机/拖动下落/信号沿用父类）；`app.window_class()` 选窗口类。
+- 映射：idle/working/neglect1/slump→neutral，happy/done/cheer→happy，proud→smug，stop→angry，dizzy→dizzy，neglect2→teary，yawn/collapse/sleep/bed/desk→sleep，drag→surprised，cheek_*→angry，tickle_*→happy；blink、jump_* 沿用底层状态表情。
+- 尺寸：V3 可见身高对齐 V2 同档 idle（V2 不透明高度 480/512），窗口高度与脚底线相同；纹理比例 = 显示高度×DPR（320@1.5 为 0.32）。接触表与 V2 对照在 `build/v3/integrate/s1/`（`states-dpr1*.png`、`size-compare.png`、`metrics.json`）。
+- 真实窗口用 `SHION_INSTANCE_NAME`、`SHION_DATA_DIR`（`build/v3/integrate/s1/data`）、`SHION_PORT=47699` 隔离启动，用户确认大小、固定表情、置顶与不抢焦点。
+- 测试：新增 `tests/test_v3_display.py` 10 项通过；V2 窗口/截图相关 21 个文件 + V3 显示/镜像/原型：726 passed、5 skipped、2 failed。2 个失败在 `tests/test_connection_ui.py`，原因是 worktree 无 `.venv` junction（测试需 `<worktree>\.venv\Scripts\pythonw.exe`），与 S1 无关；**S7 全仓回归前建 junction 复测**。
+- S1 限制（留给后续步骤）：手势仍是 V2 规则；遮罩只在状态切换时更新；固定 60 FPS 重绘；真实窗口 FPS/CPU 未测。
 
 #### 2026-11-09：S5a 右侧鼓脸颊验证快照，用户验收通过
 

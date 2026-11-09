@@ -155,7 +155,17 @@ def setup_logging(directory: Path, debug: bool) -> None:
         root.addHandler(logging.StreamHandler())
 
 
-def run() -> int:
+def window_class(renderer: str = "v2"):
+    """--renderer v3 用 V3 纸偶显示；默认 V2，不写进存档。"""
+    if renderer == "v3":
+        from shion.v3_window import V3PetWindow
+        return V3PetWindow
+    if renderer != "v2":
+        raise ValueError(f"未知渲染器：{renderer}")
+    return PetWindow
+
+
+def run(renderer: str = "v2") -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Shion")
     app.setApplicationVersion(__version__)
@@ -180,7 +190,7 @@ def run() -> int:
     from shion.affection import load_rules
     pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty, affection=load_rules())
 
-    win = PetWindow(height=data.window.get("height", 200), debug=debug)
+    win = window_class(renderer)(height=data.window.get("height", 200), debug=debug)
     overlay = HeartOverlay()
     bubble = BubbleWindow()
     lang = resolve_language(
@@ -252,11 +262,11 @@ class SnapshotScene:
     """一次创建、按假时钟连续取帧。调用者负责触发动作和 close。"""
 
     def __init__(self, state: str = "idle", height: int = 200, activity: str = "normal",
-                 *, seed: int | None = None, scale: int = 1):
+                 *, seed: int | None = None, scale: int = 1, renderer: str = "v2"):
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.time = [100.0]
         self.scale = scale
-        self.win = PetWindow(height=height, clock=lambda: self.time[0], autostart=False,
+        self.win = window_class(renderer)(height=height, clock=lambda: self.time[0], autostart=False,
                              debug=False, rng=random.Random(seed) if seed is not None else None,
                              pixel_ratio=scale if seed is not None or scale != 1 else None)
         self.win.setAttribute(Qt.WA_DontShowOnScreen)
@@ -303,6 +313,7 @@ def render_snapshot(
     weight_shift: str | None = None,
     nod: bool = False,
     desk_blink: str | None = None,
+    renderer: str = "v2",
 ) -> QImage:
     """离屏渲染一帧并返回 QImage。不显示窗口，不做单实例检查。
 
@@ -312,7 +323,7 @@ def render_snapshot(
     """
     # 不强制 offscreen：offscreen 平台没有任何字体，中文会变成方块；
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
-    scene = SnapshotScene(from_state or state, height, activity)
+    scene = SnapshotScene(from_state or state, height, activity, renderer=renderer)
     t, win = scene.time, scene.win
     if from_state:
         win.set_state(state)
@@ -404,10 +415,12 @@ def snapshot(
     cheek: str | None = None, tickle: bool = False, badge: bool = False, height: int = 200,
     activity: str = "normal", weight_shift: str | None = None, nod: bool = False,
     desk_blink: str | None = None,
+    renderer: str = "v2",
 ) -> int:
     """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
     img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, drag,
-                          cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
+                          cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink,
+                          renderer=renderer)
 
     ok = img.save(out, "PNG")
     if not ok:
