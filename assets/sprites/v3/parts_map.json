@@ -1,0 +1,42 @@
+{
+  "_note": "2026-11-05 用户确认。左右一律指画面左/右。值为块编号或块编号列表；null 表示不用。",
+  "parts": {
+    "back_hair": "B01",
+    "body": "B03",
+    "arm_l": "B04",
+    "arm_r": "B05",
+    "leg_l": "B06",
+    "leg_r": "B07",
+    "flower": "B08",
+    "ahoge": "B09",
+    "head_base": "H04",
+    "bangs": "H01",
+    "side_hair_l": "H02",
+    "side_hair_r": "H03",
+
+    "eye_open_l": "F01",      "eye_open_r": "F02",
+    "eye_happy_closed_l": "F03", "eye_happy_closed_r": "F04",
+    "eye_half_l": "F05",      "eye_half_r": "F06",
+    "eye_wide_l": "F07",      "eye_wide_r": "F08",
+    "eye_dizzy_l": "F09",     "eye_dizzy_r": "F10",
+    "eye_teary_l": "F11",     "eye_teary_r": "F12",
+
+    "mouth_smile": "F13",
+    "mouth_open_small": "F14",
+    "mouth_open_big": "F15",
+    "mouth_cat": "F16",
+    "mouth_pout": "F17",
+    "mouth_wavy": "F18",
+
+    "brow_normal_l": "F19",   "brow_normal_r": "F20",
+    "brow_angry_l": "F21",    "brow_angry_r": "F22",
+    "brow_worried_l": "F23",  "brow_worried_r": "F24",
+    "brow_smug_l": "F25",     "brow_smug_r": "F26",
+
+    "blush_normal_l": "F27",  "blush_normal_r": "F28",
+    "blush_strong_l": "F29",  "blush_strong_r": "F30",
+
+    "head_base_alt": "B02"
+  },
+  "overrides": {}
+}
