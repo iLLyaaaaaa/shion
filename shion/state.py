@@ -132,6 +132,9 @@ class Reaction:
     kind: str
     key: str
 
+CHEEK_COMBO_SECONDS = 10.0  # 这么久内第 3 次起捏脸算连捏
+CHEEK_COMBO_COUNT = 3
+
 
 def _say(key: str) -> Reaction:
     return Reaction("say", key)
@@ -471,6 +474,7 @@ class PetState:
         self._woken_date = None  # 今天夜里是否已被叫醒过
         self._poke_count = 0
         self._last_poke: Optional[datetime] = None
+        self._cheek_pulls: list[datetime] = []  # 10 秒内的捏脸，用来判断连捏
         self._manual: Optional[tuple[str, datetime]] = None
         self._idle_expression: Optional[tuple[str, datetime]] = None
         self._last_logged: Optional[str] = None
@@ -751,6 +755,11 @@ class PetState:
         """捏脸和肚子交互不加好感度、不计普通戳或摸头。"""
         if key not in {"belly", "cheek_pull", "cheek_release", "tickle", "tickle_end"}:
             return []
+        if key == "cheek_pull":
+            self._cheek_pulls = [t for t in self._cheek_pulls if 0 <= (now - t).total_seconds() <= CHEEK_COMBO_SECONDS]
+            self._cheek_pulls.append(now)
+            if len(self._cheek_pulls) >= CHEEK_COMBO_COUNT:
+                key = "cheek_pull_combo"
         self._touch(now, attend=True)
         self._poke_count, self._last_poke = 0, None
         self._log_state(now)

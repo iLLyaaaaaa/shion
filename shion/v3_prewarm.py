@@ -15,6 +15,7 @@ from concurrent.futures import Future
 from dataclasses import replace
 
 EYE_STEP = 0.05
+CHEEK_KEY = "cheek-prepare"  # pending/requested 里捏脸素材任务的键前缀
 EYE_MIN = 0.1
 
 
@@ -84,6 +85,20 @@ def _locked(surface):
         with lock:
             return original(*args, **kwargs)
     surface._compose_image = compose_image
+    # 捏脸素材（每个表情第一次约 100～130ms）整段持锁：主线程看到的要么没有、要么完整。
+    original_prepare = surface.cheek.prepare
+
+    def prepare(*args, **kwargs):
+        with lock:
+            return original_prepare(*args, **kwargs)
+    surface.cheek.prepare = prepare
+    # 反应脸补丁（每张约 50ms，第一次捏脸/摸头/敲头/挠痒时才会建）同样整段持锁。
+    original_patch = surface.reaction_face.patch
+
+    def patch(*args, **kwargs):
+        with lock:
+            return original_patch(*args, **kwargs)
+    surface.reaction_face.patch = patch
     surface._v3_lock = lock
     return lock
 
@@ -118,6 +133,38 @@ class Prewarmer:
             self.requested.add(key)
             self.pending[key] = self.executor.submit(self._build, settings, level)
 
+    def request_cheek(self, expression: str) -> None:
+        """后台准备该表情的捏脸素材（否则第一次捏脸或第一次换到该表情时主线程卡一下）。"""
+        key = (CHEEK_KEY, expression)
+        if key in self.requested or not self.surface.cheek.config:
+            return
+        self.requested.add(key)
+        self.pending[key] = self.executor.submit(self._prepare_cheek,
+                                                 replace(self.settings, expression=expression))
+
+    def request_reactions(self, expressions, faces) -> None:
+        """后台建反应脸补丁：各状态表情的“擦除”补丁、各反应脸的睁眼补丁。"""
+        key = (CHEEK_KEY, "reactions")
+        if key in self.requested:
+            return
+        self.requested.add(key)
+        self.pending[key] = self.executor.submit(self._prepare_reactions, tuple(expressions), tuple(faces))
+
+    def _prepare_reactions(self, expressions, faces):
+        reaction = self.surface.reaction_face
+        for expression in expressions:
+            if self.closed:
+                return
+            reaction.patch(expression, erase=True)
+        for face in faces:
+            if self.closed:
+                return
+            reaction.patch(face)
+
+    def _prepare_cheek(self, settings):
+        if not self.closed:
+            self.surface.cheek.prepare(self.surface, settings)
+
     def request_blinks(self, expression: str) -> None:
         if expression in self.blink_requested:
             return
@@ -141,6 +188,8 @@ class Prewarmer:
                 frame = future.result()
             except Exception:  # 预热失败不影响显示：主线程会照常同步合成
                 self.requested.discard(key)
+                continue
+            if key[0] == CHEEK_KEY:
                 continue
             if frame is None or self.closed:
                 continue

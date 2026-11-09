@@ -13,12 +13,15 @@ from collections import OrderedDict
 from dataclasses import replace
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QBitmap, QGuiApplication, QImage, QPainter, QRegion
+from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QBitmap, QGuiApplication, QImage, QPainter, QRegion, QTransform
 
 from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREATH_AMP,
                             WORKING_BREATH_AMP, WORKING_BREATH_PERIOD)
-from shion.pet_window import MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX, MASK_GROW, PetWindow
+from shion.behavior import (BELLY_LIFT_DISTANCE, CHEEK_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS,
+                            TICKLE_STOP_SECONDS)
+from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX,
+                              MASK_GROW, PetWindow)
 from shion.v3_display import (STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, draw_key,
                               expression_for, frame_interval, hair_moving, logical_scale)
 from shion.v3_layers import SwayEnvelope, affine_ok, render_affine
@@ -26,6 +29,7 @@ from shion.v3_prewarm import Prewarmer, quantize_eye
 
 RENDERER_CACHE = 2
 SIDE_PADDING = 48  # rig 像素：头发摆动、倾斜时不被裁掉
+BELLY_DRAG_DISTANCE = BELLY_LIFT_DISTANCE  # 没在挠时拖出这么远，转整窗拖动
 MASK_INTERVAL = 0.1  # 秒：遮罩最多 10 次/秒
 PROGRAM_FAST_DEGREES_PER_SECOND = 8.0  # V2 程序动作：倾斜变化快于此用 60 FPS
 PROGRAM_FAST_SCALE_PER_SECOND = 0.2    # 压扁/拉伸变化快于此用 60 FPS
@@ -59,6 +63,8 @@ def _premultiplied(image: QImage) -> np.ndarray:
 
 class V3PetWindow(PetWindow):
     renderer_name = "v3"
+    # 敲头：True 表示 1.5 秒内第 3 下（抗议）。不算戳，不加好感。
+    knocked = Signal(bool)
 
     # ---- 尺寸与渲染器 ----
     def _v3_setup(self) -> None:
@@ -68,15 +74,27 @@ class V3PetWindow(PetWindow):
         self._v3_rig = shared_rig("left")
         self._v3_renderers: OrderedDict[tuple, object] = OrderedDict()
         self._v3_prewarmers: dict[tuple, Prewarmer] = {}
-        # V3 手势在 S3/S4 接入，先关掉以免和 V2 手势重复。
-        self._v3_settings = Settings(expression="neutral", pinch=False, knock=False,
-                                     pat=False, lift=False, tickle=False)
+        # 捏脸、敲头、摸头、挠痒用 V3 手势（S3）；拎起 S4 接入，先关着。
+        self._v3_settings = Settings(expression="neutral", pinch=True, knock=True,
+                                     pat=True, lift=False, tickle=True)
+        from v3proto.head_touch import HeadGesture
+        from v3proto.tickle import BellyGesture
+        self._v3_head_gesture = HeadGesture()
+        self._v3_belly_gesture = BellyGesture()
+        self._v3_gesture: str | None = None
+        self._v3_cheek_started = False
+        self._v3_cheek_local = None
+        self._v3_belly_moved = False
+        self._v3_tickle_start: float | None = None
+        self._v3_tickle_last = 0.0
+        self._v3_tickle_said = 0.0
         self._v3_animator = Animator(self._v3_settings)
         self._v3_clock: float | None = None
         self._v3_image: QImage | None = None
         self._v3_key = None
         self._v3_angles: dict | None = None
         self._v3_mask_at = -1e9
+        self._v3_mask_key = None  # 上次建遮罩时的 V2 帧键；变了就立刻重建
         self._v3_mask_force = True
         self._v3_mask_state = None
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
@@ -126,6 +144,11 @@ class V3PetWindow(PetWindow):
         prewarmer.request(current)
         for expression in dict.fromkeys(STATE_EXPRESSIONS.values()):
             prewarmer.request(expression)
+        prewarmer.request_cheek(current)
+        for expression in dict.fromkeys(STATE_EXPRESSIONS.values()):
+            prewarmer.request_cheek(expression)
+        if renderer.head_surface.cheek.config:
+            prewarmer.request_reactions(dict.fromkeys(STATE_EXPRESSIONS.values()), self._v3_rig.faces)
         while len(self._v3_renderers) > RENDERER_CACHE:
             old, _ = self._v3_renderers.popitem(last=False)
             self._v3_prewarmers.pop(old).close()
@@ -249,7 +272,8 @@ class V3PetWindow(PetWindow):
             pose = replace(pose, eye_scale=eye)
         moving_hair = hair_moving(self._v3_angles, pose.angles, dt)
         self._v3_angles = dict(pose.angles)
-        fast = (self._program_active(f, dt) or self._v3_animator.interaction_active
+        program = self._program_active(f, dt)
+        fast = (program or self._v3_animator.interaction_active
                 or moving_hair or pose.star_effects)
         still = affine_ok(pose)
         soon = (pose.eye_scale < 1 or 0 <= animator.blink_start - animator.time <= LEAD
@@ -274,13 +298,219 @@ class V3PetWindow(PetWindow):
         image.setDevicePixelRatio(self._v3_dpr)
         self._v3_image = image
         stats["rendered"] += 1
-        if self._v3_mask_force or now - self._v3_mask_at >= MASK_INTERVAL:
+        # 遮罩最多 10 次/秒；但 V2 帧（倾斜/压扁/跳）在变时轮廓每帧都在动，遮罩滞后会
+        # 把落地回弹时伸出遮罩的头发尖裁掉（看起来闪一下），这时每帧重建。
+        if (self._v3_mask_force or now - self._v3_mask_at >= MASK_INTERVAL
+                or (program and frame_key != self._v3_mask_key)):
             self._update_mask(now)
+            self._v3_mask_key = frame_key
         self.update()
         if self._fps_overlay is not None:
             self._fps_overlay.follow()
         if self._pause_badge is not None:
             self._pause_badge.follow()
+
+    # ---- 手势（S3）----
+    def _v3_transform(self, f) -> QTransform:
+        """与 _draw_sprite 完全相同的 窗口 ← 图像 变换。"""
+        t = QTransform()
+        t.translate(self.width() / 2, self.height() - MARGIN_BOTTOM - self._jump_offset)
+        t.rotate(f.angle)
+        t.scale(f.sx, f.sy)
+        return t
+
+    def _to_rig(self, pos):
+        """窗口坐标 → rig 坐标（反推 _draw_sprite 的变换，含 V2 压扁/倾斜/跳跃）。"""
+        f = getattr(self, "_frame", None)
+        if f is None or self._v3_image is None:
+            return None
+        inverse, ok = self._v3_transform(f).inverted()
+        if not ok:
+            return None
+        p = inverse.map(QPointF(pos))
+        foot_x, foot_y = self._v3_rig.v3_foot
+        s = self._v3_scale
+        gap = self._height * V2_FOOT_GAP_RATIO
+        return np.array([p.x() / s + foot_x, (p.y() + gap) / s + foot_y])
+
+    def _v3_hit(self, pos):
+        point = self._to_rig(pos)
+        if point is None:
+            return None, None, None
+        hit, local = self._v3_renderer.hit_test(point, self._v3_settings, self._v3_animator.pose,
+                                                crown=True, belly=True)
+        return hit, local, point
+
+    def _hit_zone(self, pos: QPoint) -> str:
+        """V2 的矩形分区不用：窗口内一律当身体，手势由 V3 命中判断。"""
+        return "outside" if super()._hit_zone(pos) == "outside" else "body"
+
+    def _update_hover_cursor(self, pos: QPoint) -> None:
+        hit, _, _ = self._v3_hit(QPointF(pos))
+        if hit in ("cheek", "crown", "belly"):
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+    def mousePressEvent(self, e) -> None:
+        super().mousePressEvent(e)
+        self._v3_gesture = None
+        if e.button() != Qt.LeftButton or self._press_global is None or self._caught_fall:
+            return
+        hit, local, point = self._v3_hit(e.position())
+        if hit == "cheek":
+            self._v3_gesture = "cheek"
+            self._v3_cheek_started = False
+            self._v3_cheek_local = local
+        elif hit == "crown":
+            self._v3_gesture = "crown"
+            self._v3_head_gesture.press((e.position().x(), e.position().y()))
+            self.setCursor(Qt.ClosedHandCursor)
+        elif hit == "belly":
+            self._v3_gesture = "belly"
+            self._v3_belly_gesture.press((e.position().x(), e.position().y()))
+            self._v3_belly_moved = False
+            self.gesture.emit("belly")
+            self.setCursor(Qt.ClosedHandCursor)
+        elif hit in ("face", "head"):
+            self._v3_animator.impulse(1 if point[0] >= self._v3_rig.pivots["neck"][0] else -1)
+
+    def mouseMoveEvent(self, e) -> None:
+        kind = self._v3_gesture
+        if kind is None or self._press_global is None or not (e.buttons() & Qt.LeftButton):
+            super().mouseMoveEvent(e)
+            return
+        gp = e.globalPosition().toPoint()
+        self._release_velocity.feed(self._clock(), gp.x(), gp.y())
+        d = gp - self._press_global
+        distance = math.hypot(d.x(), d.y())
+        pos = (e.position().x(), e.position().y())
+        a = self._v3_animator
+        now = self._clock()
+        if kind == "cheek":
+            if distance > CHEEK_LIFT_DISTANCE:  # S3 过渡：拉过头变成整窗拖动，S4 改为拎起
+                self._v3_abort()
+                super().mouseMoveEvent(e)
+                return
+            if not self._v3_cheek_started and abs(d.x()) <= DRAG_THRESHOLD:
+                return
+            if not self._v3_cheek_started:
+                self._v3_cheek_started = True
+                a.press(self._v3_cheek_local)
+                self.setCursor(Qt.ClosedHandCursor)
+                self.gesture.emit("cheek_pull")
+            point = self._to_rig(e.position())
+            if point is not None:
+                local = self._v3_renderer.head_surface.source_point(
+                    self._v3_renderer.rig_point(point, a.pose), a.pose, allow_outside=True)
+                if local is not None:
+                    a.drag(local)
+        elif kind == "crown":
+            delta = self._v3_head_gesture.move(pos, True)
+            self._pat_step(gp)
+            if delta:
+                a.stroke_head(delta)
+        else:
+            if distance > DRAG_THRESHOLD:
+                self._v3_belly_moved = True
+            if self._v3_tickle_start is None and distance > BELLY_DRAG_DISTANCE:
+                # 没在挠：转整窗拖动（S3 过渡，S4 起只能拎脸颊移动）
+                self._v3_abort()
+                super().mouseMoveEvent(e)
+                return
+            action = self._v3_belly_gesture.move(pos, now)
+            if action == "pause":
+                self._v3_abort()
+                super().mouseMoveEvent(e)
+                return
+            if action == "tickle":
+                a.tickle_belly()
+                self._v3_tickle_touch(now)
+        self._refresh(now)
+
+    def mouseReleaseEvent(self, e) -> None:
+        kind = self._v3_gesture
+        if kind is None or e.button() != Qt.LeftButton or self._press_global is None:
+            super().mouseReleaseEvent(e)
+            self._v3_gesture = None
+            return
+        self._v3_gesture = None
+        a = self._v3_animator
+        now = self._clock()
+        consumed = False
+        if kind == "cheek":
+            if self._v3_cheek_started:
+                a.release()
+                self.gesture.emit("cheek_release")
+                consumed = True
+        elif kind == "crown":
+            pos = (e.position().x(), e.position().y())
+            delta = self._v3_head_gesture.move(pos, True)
+            if delta:
+                a.stroke_head(delta)
+            patting = self._v3_head_gesture.patting
+            if self._v3_head_gesture.release():
+                point = self._to_rig(e.position())
+                neck_x = self._v3_rig.pivots["neck"][0]
+                direction = 1 if point is None or point[0] >= neck_x else -1
+                a.knock_head(direction, point=tuple(point) if point is not None else (500., 150.))
+                self.knocked.emit(a.head_touch.stage == "protest")
+            elif patting:
+                a.release_head()
+            consumed = True
+        else:
+            a.release_tickle()
+            consumed = self._v3_belly_moved
+        if consumed:  # 让父类按“已被手势吃掉”复位按下状态：不发 clicked、不压扁
+            self._pat_mode = True
+            self._moved = True
+        super().mouseReleaseEvent(e)
+        self._refresh(now)
+
+    def focusOutEvent(self, e) -> None:
+        self._v3_abort()
+        super().focusOutEvent(e)
+
+    def _v3_abort(self) -> None:
+        """放弃当前手势（拉过头、失焦）：动画归位，不发 release 台词。"""
+        kind, self._v3_gesture = self._v3_gesture, None
+        a = self._v3_animator
+        if kind == "cheek" and self._v3_cheek_started:
+            a.release()
+        elif kind == "crown":
+            self._v3_head_gesture.clear()
+            a.release_head()
+        elif kind == "belly":
+            self._v3_belly_gesture.clear()
+            a.release_tickle()
+        self._v3_cheek_started = False
+
+    def _v3_tickle_touch(self, now: float) -> None:
+        self._v3_tickle_last = now
+        if self._v3_tickle_start is None:
+            self._v3_tickle_start = self._v3_tickle_said = now
+            self.gesture.emit("tickle")
+
+    def _v3_end_tickle(self, *, speak: bool) -> None:
+        if self._v3_tickle_start is None:
+            return
+        self._v3_tickle_start = None
+        self._v3_animator.release_tickle()
+        if speak:
+            self.gesture.emit("tickle_end")
+
+    @property
+    def motion_active(self) -> bool:
+        return super().motion_active or self._v3_tickle_start is not None
+
+    def advance_to(self, now: float) -> None:
+        if self._v3_tickle_start is not None:
+            if now - self._v3_tickle_last + 1e-9 >= TICKLE_STOP_SECONDS:
+                self._v3_end_tickle(speak=True)
+            elif now - self._v3_tickle_said >= TICKLE_SPEECH_SECONDS:
+                self._v3_tickle_said = now
+                self.gesture.emit("tickle")
+        super().advance_to(now)
 
     # ---- 遮罩 ----
     def _update_mask(self, now: float) -> None:

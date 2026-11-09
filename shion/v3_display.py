@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import os
+
 # 底层状态 / 道具状态 → V3 表情
 STATE_EXPRESSIONS = {
     "idle": "neutral",
@@ -85,6 +87,7 @@ SLEEPY_STATES = {"sleep", "bed", "desk", "collapse"}
 HAIR_FAST_DEGREES_PER_SECOND = 12.0
 
 
+FPS30_ENV = "SHION_V3_FPS30"  # 设为 1：待机/工作回到 30 FPS（临时）
 STILL_MS = 66          # 头发静止的待机、睡着：15 FPS
 WORKING_STILL_MS = 50  # 头发静止的工作：20 FPS
 
@@ -96,6 +99,9 @@ def frame_interval(fast: bool, state: str, still: bool = False, soon: bool = Fal
         return FAST_MS
     if state in SLEEPY_STATES:
         return SLEEP_MS
+    # 临时对比开关：待机/工作恢复 30 FPS（对比完删掉）。
+    if os.environ.get(FPS30_ENV) == "1":
+        return CALM_MS
     if still and not soon:
         return WORKING_STILL_MS if state == "working" else STILL_MS
     return CALM_MS

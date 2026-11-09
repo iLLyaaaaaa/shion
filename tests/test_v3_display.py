@@ -139,6 +139,20 @@ def test_frame_interval_tiers_and_hair_speed():
     assert hair_moving({"bangs": 1.0}, {"bangs": 2.0}, 1 / 60)        # flicked
 
 
+def test_fps30_switch_restores_calm_rate_for_idle_and_working(monkeypatch):
+    from shion.v3_display import FPS30_ENV
+    monkeypatch.setenv(FPS30_ENV, "1")
+    assert frame_interval(False, "idle", still=True) == CALM_MS
+    assert frame_interval(False, "working", still=True) == CALM_MS
+    assert frame_interval(True, "idle", still=True) == FAST_MS      # 互动仍 60 FPS
+    for state in ("sleep", "bed", "desk", "collapse"):             # 睡眠档不变
+        assert frame_interval(False, state, still=True) == SLEEP_MS
+    monkeypatch.setenv(FPS30_ENV, "0")
+    assert frame_interval(False, "idle", still=True) == 66
+    monkeypatch.delenv(FPS30_ENV)
+    assert frame_interval(False, "working", still=True) == 50
+
+
 @pytest.mark.parametrize("state,interval", (("idle", 66), ("working", 50), ("sleep", SLEEP_MS)))
 def test_calm_states_drop_frame_rate(qapp, state, interval):
     w, t = make(qapp, 200, 1.5)
@@ -334,6 +348,24 @@ def test_prewarm_fills_open_faces_then_current_blinks(qapp, sync_prewarm):
     t[0] += .01
     w.advance_to(t[0])
     assert all(("happy", level) in frames for level in BLINK_LEVELS)
+    w.close()
+
+
+def test_prewarm_prepares_cheek_assets_for_every_state_expression(qapp, sync_prewarm):
+    w, t = make(qapp, 200)
+    cheek = w._v3_renderer.head_surface.cheek
+    for expression in set(STATE_EXPRESSIONS.values()):
+        assert expression in cheek.backgrounds and expression in cheek.protection
+    w.close()
+
+
+def test_prewarm_builds_reaction_face_patches_so_first_pinch_does_not_stall(qapp, sync_prewarm):
+    w, t = make(qapp, 200)
+    cache = w._v3_renderer.head_surface.reaction_face.cache
+    for expression in set(STATE_EXPRESSIONS.values()):
+        assert (expression, 1.0, True) in cache
+    for face in w._v3_rig.faces:
+        assert (face, 1.0, False) in cache
     w.close()
 
 

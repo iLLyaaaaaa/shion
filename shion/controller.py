@@ -164,6 +164,8 @@ class PetController(QObject):
         w.gesture.connect(self._on_gesture)
         w.clicked.connect(self._on_click)
         w.double_clicked.connect(self._on_double_click)
+        if hasattr(w, "knocked"):  # 只有 V3 窗口有敲头
+            w.knocked.connect(self._on_knock)
         w.drag_started.connect(self._on_drag_started)
         w.drag_finished.connect(self._on_drag_finished)
         w.menu_requested.connect(self.show_menu)
@@ -409,6 +411,14 @@ class PetController(QObject):
         self.react(self.state.click(self._now()), category="poke")
         self.sync()
         self._try_time_speech()
+
+    def _on_knock(self, protest: bool = False) -> None:
+        """V3 敲头：不算戳、不加好感。有待点的周报卡片时先给它。"""
+        if self._weekly_offer is not None:
+            self._weekly_offer = None
+            self.open_weekly(True)
+            return
+        self.react([Reaction("say", "head_knock_stop" if protest else "head_knock")])
 
     def _on_gesture(self, key: str) -> None:
         self._on_pressed()
