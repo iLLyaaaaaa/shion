@@ -10,6 +10,8 @@ from .motion import Spring, blink_scale, breathing, limit_vector, release_step, 
 from .head_touch import HeadParameters, HeadState, knock_head, stroke_head, release_head, step_head
 from .stars import STAR_LIFETIME,MAX_STAR_BURSTS,make_star_burst
 from .lift import LiftState, begin_lift, move_lift, release_lift, step_lift
+from .tickle import TickleState, stroke_tickle, release_tickle, step_tickle, TORSO_PIVOT, NECK_PIVOT
+from .motion import pivot_matrix, transform_point
 
 
 SWAY_PARTS = ("bangs", "ahoge", "flower", "side_hair_l", "side_hair_r", "ribbon")
@@ -34,6 +36,7 @@ class Settings:
     pat: bool = True
     head_touch: HeadParameters = field(default_factory=HeadParameters)
     lift: bool = True
+    tickle: bool = True
 
 
 @dataclass
@@ -55,6 +58,8 @@ class Pose:
     root_roll: float = 0.
     root_pivot: tuple = (543., 790.)
     leg_degrees: float = 0.
+    body_roll: float = 0.
+    head_x: float = 0.
 
     @property
     def is_rest(self):
@@ -70,7 +75,7 @@ class Pose:
         return (self.body_scale == 1 and self.head_y == 0 and self.eye_scale == 1
                 and not any(self.angles.values()) and not any(self.pinch_delta)
                 and self.reaction_face is None and self.arm_degrees == 0 and self.head_roll == 0
-                and self.leg_degrees == 0)
+                and self.leg_degrees == 0 and self.body_roll == 0 and self.head_x == 0)
 
 
 class Animator:
@@ -84,6 +89,8 @@ class Animator:
         self.reaction = ReactionState()
         self.head_touch = HeadState()
         self.lift = LiftState()
+        self.tickle = TickleState()
+        self._lift_cheek = False
         self._rebound_time = 1.
         self.blink_start = self.rng.uniform(3, 6)
         self.double_pending = False
@@ -105,6 +112,7 @@ class Animator:
     def press(self, point, now=None):
         if self.settings.pinch and not self.lift.held:
             if now is not None:self.clock = max(self.clock, now)
+            self._yield_tickle()
             self._yield_lift()
             if self.head_touch.active:
                 h = step_head(self.head_touch, self.clock, 0.)
@@ -145,22 +153,28 @@ class Animator:
 
     @property
     def interaction_active(self):
-        return self.reaction.active or self.head_touch.active or self.lift.active
+        return self.reaction.active or self.head_touch.active or self.lift.active or self.tickle.active
 
     @property
     def original_expression(self):
-        return self.reaction.base or self.head_touch.base or self.lift.base or self.settings.expression
+        return self.reaction.base or self.head_touch.base or self.lift.base or self.tickle.base or self.settings.expression
 
-    def begin_lift(self, pivot, now=None):
-        if not self.settings.lift or self.settings.underlays_only or self.dragging:
+    def begin_lift(self, pivot, now=None, *, cheek=False):
+        if not self.settings.lift or self.settings.underlays_only or (self.dragging and not cheek):
             return
         if now is not None:self.clock = max(self.clock, now)
+        self._yield_tickle()
+        self._lift_cheek = cheek
+        if cheek:
+            self.dragging = False
+            if not np.any(self.delta):self.delta = np.array([0.,-24.])
         base = self.original_expression
         r = self.head_touch if self.head_touch.active else self.reaction
         if self.lift.active and self.lift.owns_face:r = self.lift
         weight = 1-r.fade if r.active else 0.
         seed = replace(self.pose, body_scale=1-r.body.position*weight,
-                       head_y=(r.body.position*399.4+r.drop.position)*weight)
+                       head_y=(r.body.position*399.4+r.drop.position)*weight,
+                       head_roll=self.pose.head_roll-self.pose.body_roll)
         self.lift = begin_lift(self.lift, self.clock, base, pivot, seed)
         self._rebound_time = self.reaction.params.rebound_time if self.reaction.active else self._rebound_time
         self.reaction = ReactionState(history=self.reaction.history, count=self.reaction.count)
@@ -192,6 +206,7 @@ class Animator:
     def _head_seed(self, now):
         if now is not None:
             self.clock = max(self.clock, now)
+        self._yield_tickle()
         self._yield_lift()
         h = step_head(self.head_touch, self.clock, 0.)
         if self.reaction.active:
@@ -229,6 +244,39 @@ class Animator:
         if now is not None:self.clock = max(self.clock, now)
         self.head_touch = release_head(self.head_touch, self.clock)
 
+    def tickle_belly(self, now=None):
+        if self.dragging or self.lift.held or not self.settings.tickle or self.settings.underlays_only:
+            return
+        if now is not None:self.clock = max(self.clock, now)
+        t = step_tickle(self.tickle,self.clock)
+        if not t.active or not t.owns_face:
+            h = self._head_seed(self.clock)
+            weight = 1-h.fade
+            scaled = lambda v: Spring(v.position*weight,v.velocity*weight)
+            t = replace(t,base=h.base or self.settings.expression,body=scaled(h.body),
+                        arm=scaled(h.arm),head=scaled(h.head),drop=scaled(h.drop),
+                        started_at=self.clock,updated_at=self.clock)
+            self.reaction = ReactionState(history=self.reaction.history,count=self.reaction.count)
+            self.cancel_head()
+            self.reset_blink()
+        self.tickle = stroke_tickle(t,self.clock,self.settings.expression)
+
+    def release_tickle(self, now=None):
+        if now is not None:self.clock = max(self.clock,now)
+        self.tickle = release_tickle(self.tickle,self.clock)
+
+    def _yield_tickle(self):
+        if not self.tickle.active or not self.tickle.owns_face:
+            return
+        t = step_tickle(self.tickle,self.clock)
+        if t.active:
+            weight = 1-t.fade
+            scaled = lambda v: Spring(v.position*weight,v.velocity*weight)
+            self.reaction = replace(self.reaction,base=t.base,body=scaled(t.body),arm=scaled(t.arm),
+                                    head=scaled(t.head),drop=scaled(t.drop))
+            t = replace(release_tickle(t,self.clock),owns_face=False)
+        self.tickle = t
+
     def cancel_pinch(self):
         self.dragging = False
         self.delta[:] = self.velocity[:] = 0
@@ -244,12 +292,16 @@ class Animator:
             self.cancel_pinch()
             self.cancel_head()
             self.lift = LiftState()
+            self.tickle = TickleState()
             self._last_expression = self.settings.expression
         if self.settings.underlays_only:
             self.lift = LiftState()
+            self.tickle = TickleState()
         elif not self.settings.lift:
             self.release_lift(now=end_clock)
-        if not self.settings.pinch:
+        if not self.settings.tickle:
+            self.release_tickle(now=end_clock)
+        if not self.settings.pinch and not (self._lift_cheek and np.any(self.delta)):
             self.cancel_pinch()
         if ((self.head_touch.kind == 'knock' and not self.settings.knock)
                 or (self.head_touch.kind == 'pat' and not self.settings.pat)
@@ -286,7 +338,7 @@ class Animator:
                     cap = self.settings.sway_degrees*gain
                     pos = max(-cap,min(cap,s.position))
                     self.springs[n] = Spring(pos, s.velocity if pos == s.position else 0)
-            if not self.dragging:
+            if not self.dragging and not (self.lift.held and self._lift_cheek):
                 self.delta, self.velocity = release_step(self.delta, self.velocity, step / self._rebound_time,
                                                          self.settings.pinch_maximum)
             previous_stage = self.reaction.stage
@@ -298,11 +350,13 @@ class Animator:
             previous_head_stage = self.head_touch.stage
             self.head_touch = step_head(self.head_touch, clock, step)
             if previous_head_stage != self.head_touch.stage:self.reset_blink()
+            self.tickle = step_tickle(self.tickle,clock)
         self.clock = end_clock
         self.lift = step_lift(self.lift, self.clock)
+        self.tickle = step_tickle(self.tickle,self.clock)
         self.head_touch = step_head(self.head_touch, self.clock, 0.)
         s = self.settings
-        if not s.pinch:
+        if not s.pinch and not (self._lift_cheek and np.any(self.delta)):
             self.dragging = False
             self.delta[:] = self.velocity[:] = 0
         self.delta = limit_vector(self.delta, s.pinch_maximum)
@@ -323,8 +377,10 @@ class Animator:
             r = self.head_touch
         if self.lift.active and self.lift.owns_face:
             r = self.lift
+        if self.tickle.active and self.tickle.owns_face:
+            r = self.tickle
         if r.active:
-            weight = 1-r.fade if isinstance(r, (HeadState,LiftState)) else 1.
+            weight = 1-r.fade if isinstance(r, (HeadState,LiftState,TickleState)) else 1.
             scale -= r.body.position * weight
             head_y += r.body.position * weight * (1063.4 - 664.)
             head_y += r.drop.position * weight
@@ -339,4 +395,14 @@ class Animator:
         self.pose.root_roll = self.lift.roll.position
         self.pose.root_pivot = self.lift.pivot
         self.pose.leg_degrees = self.lift.leg.position*(1-self.lift.fade)
+        self.pose.body_roll = self.tickle.torso.position*(1-self.tickle.fade)
+        if self.pose.body_roll:
+            # Rotate the complete head around the waist along with the torso.
+            # Legs keep their existing hip anchors; breathing remains unchanged.
+            neck = NECK_PIVOT
+            x,y = transform_point(pivot_matrix(TORSO_PIVOT,self.pose.body_roll),
+                                  (neck[0],neck[1]+self.pose.head_y))
+            self.pose.head_x = x-neck[0]
+            self.pose.head_y = y-neck[1]
+            self.pose.head_roll += self.pose.body_roll
         return self.pose

@@ -33,11 +33,14 @@ def main(argv=None):
     performance.add_argument("--benchmark-pinch", action="store_true")
     performance.add_argument("--benchmark-head", choices=('knock','pat'))
     performance.add_argument('--benchmark-lift', action='store_true')
+    performance.add_argument('--benchmark-tickle', action='store_true')
     scenarios = parser.add_mutually_exclusive_group()
     scenarios.add_argument("--head-preview", choices=('knock','combo','pat-left','pat-right'),
                         help="确定性敲摸截图；--time 为互动开始后的秒数")
     scenarios.add_argument('--lift-preview', choices=('held','shake','release'),
                            help='确定性拎起截图；1.2 秒松手，held 保持抓取')
+    scenarios.add_argument('--tickle-preview', choices=('rub','release','lift'),
+                           help='确定性挠痒截图；1.2 秒停手、松手或转拎起')
     parser.add_argument("--benchmark-output", type=Path, default=Path("build/v3/step1/benchmark.json"))
     args = parser.parse_args(argv)
     if not 0.1 <= args.scale <= 2 or not 0 <= args.time <= 3600:
@@ -48,6 +51,8 @@ def main(argv=None):
         parser.error("--head-preview requires --snapshot")
     if args.lift_preview and not args.snapshot:
         parser.error('--lift-preview requires --snapshot')
+    if args.tickle_preview and not args.snapshot:
+        parser.error('--tickle-preview requires --snapshot')
     if args.snapshot or args.benchmark:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtWidgets import QApplication
@@ -62,7 +67,12 @@ def main(argv=None):
     if args.snapshot:
         animator = Animator(settings, args.seed, star_seed=args.seed)
         padding = (0,0,0,0)
-        if args.lift_preview:
+        if args.tickle_preview:
+            from .tickle_scenarios import tickle_scenario
+            from .lift import SCENE_PADDING
+            pose = tickle_scenario(animator,args.tickle_preview,args.time)
+            padding = SCENE_PADDING
+        elif args.lift_preview:
             from .lift_scenarios import lift_scenario
             from .lift import SCENE_PADDING
             pose = lift_scenario(animator,args.lift_preview,args.time)
@@ -79,7 +89,7 @@ def main(argv=None):
     window.show()
     if args.benchmark:
         benchmark(window, args.benchmark, args.benchmark_output, app, args.benchmark_pinch, args.benchmark_head,
-                  args.benchmark_lift)
+                  args.benchmark_lift,args.benchmark_tickle)
     return app.exec()
 
 

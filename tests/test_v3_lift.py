@@ -130,13 +130,13 @@ def test_canvas_body_threshold_head_isolation_and_focus_release(rig,scale):
     from PySide6.QtGui import QFocusEvent
     w=Preview(rig,quiet(),scale)
     c=w.canvas;c.timer.stop();w.stats_timer.stop();c.grabMouse=lambda:None
-    ox,oy=c.image_origin;x,y=ox+543*scale,oy+850*scale
+    ox,oy=c.image_origin;x,y=ox+325*scale,oy+610*scale
     try:
         c.mouseMoveEvent(input_event(x,y));assert not c.animator.interaction_active
         c.mousePressEvent(input_event(x,y));c.mouseMoveEvent(input_event(x+6,y))
         assert not c.animator.lift.active
         c.mouseMoveEvent(input_event(x+6.1,y-20));assert c.animator.lift.held
-        assert c.animator.pose.root_offset==pytest.approx((6.1/scale,-20/scale))
+        assert c.animator.pose.root_offset==pytest.approx((0,0))
         c.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))
         at=c.animator.lift.released_at
         c.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut))
@@ -178,15 +178,15 @@ def test_pending_regrab_uses_current_return_position_and_body_clicks_are_inert(r
     w=Preview(rig,quiet());c=w.canvas;c.timer.stop();w.stats_timer.stop();c.grabMouse=lambda:None
     try:
         ox,oy=c.image_origin
-        e=input_event(ox+543*.4,oy+850*.4)
+        e=input_event(ox+543*.4,oy+1010*.4)
         c.mousePressEvent(e);c.mouseReleaseEvent(e);c.mouseDoubleClickEvent(e);c.mouseReleaseEvent(e)
         assert not c.animator.interaction_active
         a=c.animator;a.begin_lift((543,790));a.move_lift((100,-100),40);a.advance(.2)
         a.release_lift();a.advance(.05)
-        x,y=transform_point(root_matrix(a.pose),(543,850))
+        x,y=transform_point(root_matrix(a.pose),(325,610))
         e=input_event(ox+x*.4,oy+y*.4);c.mousePressEvent(e)
         a.advance(.08);current=a.pose.root_offset
-        c.mouseMoveEvent(input_event(e.position().x()+7,e.position().y()))
-        assert a.pose.root_offset==pytest.approx((current[0]+7/.4,current[1]))
+        c.mouseMoveEvent(input_event(e.position().x(),e.position().y()-13))
+        assert a.pose.root_offset==pytest.approx(current)
         assert a.lift.held
     finally:w.close()

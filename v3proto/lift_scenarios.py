@@ -4,7 +4,7 @@ import math
 
 def lift_scenario(animator, name, duration):
     start = animator.clock
-    animator.begin_lift((543.,790.),now=start)
+    animator.begin_lift((325.,586.),now=start,cheek=True)
     end = min(duration,1.2)
     cursor = 0.
     steps = max(1,math.ceil(end*60))

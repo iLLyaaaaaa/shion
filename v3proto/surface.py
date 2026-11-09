@@ -241,7 +241,7 @@ class HeadSurface:
         return result
 
     def source_point(self,point,pose,allow_outside=False):
-        x=(point[0]-self.x)*self.r.scale
+        x=(point[0]-pose.head_x-self.x)*self.r.scale
         y=(point[1]-pose.head_y-self.y)*self.r.scale
         if not allow_outside and not (0<=x<self.w and 0<=y<self.h):return None
         raw_x,raw_y=x,y

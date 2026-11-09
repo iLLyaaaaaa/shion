@@ -19,6 +19,7 @@ class Cheek:
         self.textures={}
         self.texture_planes={}
         self.grids=OrderedDict()
+        self.last_deformation = None  # One immutable material frame, not an animation cache.
         if self.config:
             self.x,self.y,self.right,self.bottom=self.config['box']
 
@@ -41,7 +42,7 @@ class Cheek:
         return np.array([float(x),float(y)])
 
     def contains(self,point,settings,pose):
-        if not self.config or not settings.pinch:return False
+        if not self.config or not (settings.pinch or settings.lift):return False
         source=self.source_point(point,settings,pose)
         x,y=round(source[0]-self.x),round(source[1]-self.y)
         hit=self.assets[settings.expression]['hit']
@@ -101,6 +102,11 @@ class Cheek:
         key=(settings.expression,round(pose.eye_scale,5))
         self.prepare(surface,settings)
         if original is None:original=surface.frames[key]
+        deformation_key = (settings.expression,tuple(pose.pinch_delta),settings.pinch_maximum,
+                           settings.pinch_radius,pose.eye_scale)
+        cached = self.last_deformation
+        if cached is not None and cached[0] is original and cached[1] == deformation_key:
+            return cached[2]
         out=original.copy()
         (bx0,by0,bx1,by1),difference=self.backgrounds[settings.expression]
         out[by0:by1,bx0:bx1]=np.clip(original[by0:by1,bx0:bx1].astype(np.int16)+difference,0,255).astype(np.uint8)
@@ -146,6 +152,10 @@ class Cheek:
         if u<1:
             weight=u*u*(3-2*u)
             dest[:]=np.rint(original[y0:y1,x0:x1]*(1-weight)+dest*weight).astype(np.uint8)
+        # Callers add faces / motion into their own buffers. Holding the source
+        # reference also prevents object-id reuse from producing a false hit.
+        out.flags.writeable = False
+        self.last_deformation = (original,deformation_key,out)
         return out
 
 
@@ -214,7 +224,7 @@ class StaticCheekSurface:
         from .render import BODY, LEGS
         from .motion import pivot_matrix,translation
         if (pose.body_scale==1 and pose.head_y==0 and pose.arm_degrees==0
-                and pose.head_roll==0 and pose.leg_degrees==0):
+                and pose.head_roll==0 and pose.leg_degrees==0 and pose.body_roll==0 and pose.head_x==0):
             return pixels
         rig=self.r.rig
         scale_x=self.w/rig.size[0];scale_y=self.h/rig.size[1]
@@ -236,8 +246,8 @@ class StaticCheekSurface:
         mx,my=np.meshgrid(xs,ys)
         gx=mx/scale_x;gy=my/scale_y
         hip=(np.array(rig.pivots['hip_l'])+rig.pivots['hip_r'])/2
-        body=pivot_matrix(hip,sy=pose.body_scale)
-        head=translation(0,pose.head_y) @ pivot_matrix(rig.pivots['neck'],pose.head_roll)
+        body=pivot_matrix(hip,pose.body_roll,sy=pose.body_scale)
+        head=translation(pose.head_x,pose.head_y) @ pivot_matrix(rig.pivots['neck'],pose.head_roll)
         matrices=(head,body,body @ pivot_matrix(rig.pivots['shoulder_l'],pose.arm_degrees),
                   body @ pivot_matrix(rig.pivots['shoulder_r'],-pose.arm_degrees),
                   pivot_matrix(rig.pivots['hip_l'],pose.leg_degrees),

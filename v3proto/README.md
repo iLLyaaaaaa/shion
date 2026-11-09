@@ -8,26 +8,23 @@
 & '..\claude pet\.venv\Scripts\python.exe' -m v3proto
 ```
 
-窗口标题包含 `诗音 V3 · 拎起 / 拖动`，旧窗口需要关闭后重新运行。默认 0.4 倍，支持八款原表情、呼吸、眨眼、头发摆动、捏脸、敲头、摸头、拎起、只看垫底及 FPS。
+窗口标题包含 `诗音 V3 · 脸颊拎起 / 挠痒`，旧窗口需要关闭后重新运行。默认 0.4 倍，支持八款原表情、呼吸、眨眼、头发摆动、捏脸、敲头、摸头、拎起、挠痒、只看垫底及 FPS。
 
-## 拎起、拖动与回原位（默认预览手感已验收）
+## 脸颊专用拎起与肚子揉动（待人工验收）
 
-- 按住可见的身体、手臂或腿，移动严格超过 6 个 Qt 逻辑像素后才拎起；点击、双击或容差内抖动不触发。头顶、脸颊保留原手势，不转为拎起。
-- 整体随鼠标移动并随横向速度轻倾，最大 8°；手臂绕肩、双腿绕胯轻晃，头发沿用弹簧。停手后倾斜回正。先惊讶 0.2 秒，之后委屈。
-- 水平反向移动至少 24 个逻辑像素才记一次有效反转，2 秒内第 3 次晃晕；直线移动、竖向移动、小抖动及仅按住均不计。晃晕锁定到松手后的余韵结束。
-- 松手回到原站位，不保留横向落点；0.9 秒内轻微弹簧回弹并回正。普通委屈余韵 0.6 秒，晃晕余韵 2 秒，再用 0.35 秒淡回原表情。失焦等同松手，重复松手不重启返回。
-- 回弹中可以重新抓住身体，也可捏脸/敲摸接管表情；整体继续回原位，旧反应不再复活。原表情选择在互动中锁定；关闭拎起开关会松手返回，恢复默认结束动作。
-
-移动限定在实验台留出的空间：横向 ±240、纵向 −220～40 原图像素。渲染与命中共用整体变换，不移动桌面窗口，不引入新图片、依赖、好感或台词系统。
+- 只有画面左侧突出的鼓脸颊可以开始拎起，按当前变形轮廓命中。左右拉仍为捏脸；向上移动严格超过 12 个 Qt 逻辑像素、且上移量超过横向位移的 1.2 倍，转为拎起。
+- 拎起从当前位置接续；拖动期间脸颊保持抓起时的拉伸形变，整个人跟手移动。松手或失焦后脸颊才开始弹回，同时整个人回原站位。重复释放不重启回弹。
+- 身体、手臂、腿和肚子均不能开始拎起，从这些地方按住再划过脸颊也不转换。头顶敲摸保持原规则。
+- 肚子左右揉动仍按 1.5 秒内两次至少 8px 反转开始挠痒，2px 有效水平移动续动作。超过旧的 40px 不再拎起；距离按下点超过 120px 暂停，返回后重新揉动。停手 0.22 秒或松手后逐渐平静，恢复原表情。
+- 拎起后的倾斜、晃晕、松手返回及表情恢复沿用上一轮效果；关闭捏脸时，脸颊仍可作为拎起入口。无新增素材或依赖。
 
 ```powershell
-& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/lift/held.png --lift-preview held --time .6
-& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/lift/return.png --lift-preview release --time 1.35
-& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/lift/dizzy.png --lift-preview shake --time .8
-& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --benchmark 60 --benchmark-lift --benchmark-output build/v3/lift/benchmark.json
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/cheek-lift/held.png --lift-preview held --time .8
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/cheek-lift/release.png --lift-preview release --time 1.4
+& '..\claude pet\.venv\Scripts\python.exe' -m v3proto --snapshot build/v3/cheek-lift/tickle.png --tickle-preview rub --time .8
 ```
 
-`release` / `shake` 场景在 1.2 秒松手；`held` 保持抓取。`--lift-preview` 与 `--head-preview` 互斥；三种互动性能基准也互斥。真实窗口验收：轻拖/快速晃动、停手回正、回弹中重抓、敲摸/捏脸接管、不同尺寸和 DPI、原表情恢复及 FPS。离屏结果不代替手感验收。
+`--lift-preview` 的 held/shake/release 均模拟脸颊形变持有；`--tickle-preview lift` 表示先松开肚子，再从脸颊拎起，不表示肚子转换。快照和基准不能代替真实窗口手感/DPI/FPS 验收。
 
 ## 敲头与摸头（待人工验收）
 

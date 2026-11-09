@@ -17,6 +17,7 @@ from .animation import Animator, Settings
 from .render import Renderer, Rig
 from .head_touch import HeadGesture
 from .lift import BodyGesture, SCENE_PADDING, clamp_offset
+from .tickle import BellyGesture
 
 
 FACE_LABELS = ("得意", "平静", "开心", "惊讶", "委屈", "生气", "困倦", "晕乎")
@@ -41,9 +42,13 @@ class Canvas(QWidget):
         self.benchmark_pinch = False
         self.benchmark_head = None
         self.benchmark_lift = False
+        self.benchmark_tickle = False
         self.next_benchmark_knock = 0.
         self.head_gesture = HeadGesture()
         self.body_gesture = BodyGesture()
+        self.cheek_gesture = BodyGesture()
+        self.belly_gesture = BellyGesture()
+        self.belly_point = (543.,880.)
         self.reaction_changed = lambda: None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -65,16 +70,22 @@ class Canvas(QWidget):
         elif self.benchmark_head == 'pat':
             self.animator.stroke_head(math.cos(now*5), now=now)
         elif self.benchmark_lift:
-            if not self.animator.lift.held:self.animator.begin_lift((543,790),now=now)
+            if not self.animator.lift.held:self.animator.begin_lift((325,586),now=now,cheek=True)
             x=180*math.sin(now*6)
             self.animator.move_lift((x,-120+50*math.sin(now*3)),x*self.display_scale,now=now)
+        elif self.benchmark_tickle:
+            self.animator.tickle_belly(now=now)
         if self.head_gesture.active and (self.settings.underlays_only or not (self.settings.knock or self.settings.pat)):
             self.head_gesture.clear()
         if self.body_gesture.active and (self.settings.underlays_only or not self.settings.lift):
             self.body_gesture.clear()
+        if self.belly_gesture.active and (self.settings.underlays_only or not self.settings.tickle):
+            self.belly_gesture.clear()
+            self.animator.release_tickle(now=now)
         self.animator.advance(dt, now=now)
         self.reaction_changed()
         if (not self.animator.dragging and not self.head_gesture.active and not self.body_gesture.active
+                and not self.belly_gesture.active and not self.cheek_gesture.active
                 and QWidget.mouseGrabber()==self):
             self.releaseMouse()
             self.unsetCursor()
@@ -111,10 +122,13 @@ class Canvas(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         point = self.point(event)
-        hit, local = self.renderer.hit_test(point, self.settings, self.animator.pose, crown=True)
+        hit, local = self.renderer.hit_test(point, self.settings, self.animator.pose, crown=True,
+                                          belly=self.settings.tickle)
         if self.animator.lift.held:
             return
         if hit == "cheek":
+            self.cheek_gesture.press((event.position().x(),event.position().y()),point,
+                                     self.animator.pose.root_offset)
             self.animator.press(local, now=time.perf_counter())
             self.animator.advance(0)
             self.reaction_changed()
@@ -129,9 +143,9 @@ class Canvas(QWidget):
             self.animator.impulse(1 if point[0] >= 543 else -1)
         elif hit == 'crown':
             self.animator.impulse(1 if point[0] >= 543 else -1)
-        elif hit == 'body' and self.settings.lift and not self.settings.underlays_only:
-            self.body_gesture.press((event.position().x(),event.position().y()), point,
-                                    self.animator.pose.root_offset)
+        elif hit == 'belly' and not self.settings.underlays_only:
+            self.belly_gesture.press((event.position().x(),event.position().y()))
+            self.belly_point = tuple(point)
             self.grabMouse()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
@@ -148,20 +162,52 @@ class Canvas(QWidget):
 
     def mouseMoveEvent(self, event):
         point=self.point(event)
-        if self.body_gesture.active:
+        if self.belly_gesture.active:
+            self._move_belly(event)
+        elif self.body_gesture.active:
             self._move_body(event)
         elif self.head_gesture.active:
             self._move_head(event)
-        elif self.animator.dragging:
-            point=self.renderer.rig_point(point,self.animator.pose)
-            local=self.renderer.head_surface.source_point(point,self.animator.pose,allow_outside=True)
-            if local is not None:self.animator.drag(local)
+        elif self.cheek_gesture.active:
+            self._move_cheek(event)
         else:
-            hit,_=self.renderer.hit_test(point,self.settings,self.animator.pose,crown=True)
+            hit,_=self.renderer.hit_test(point,self.settings,self.animator.pose,crown=True,
+                                         belly=self.settings.tickle)
             if (hit=='cheek' or (hit=='crown' and (self.settings.knock or self.settings.pat))
-                    or (hit=='body' and self.settings.lift and not self.settings.underlays_only)):
+                    or hit=='belly'):
                 self.setCursor(Qt.CursorShape.OpenHandCursor)
             else:self.unsetCursor()
+
+    def _move_belly(self, event):
+        now = time.perf_counter()
+        logical = (event.position().x(),event.position().y())
+        action = self.belly_gesture.move(logical,now)
+        if action == 'tickle':
+            self.animator.tickle_belly(now=now)
+        elif action == 'pause':
+            self.animator.release_tickle(now=now)
+        if action:
+            self.animator.advance(0)
+            self.reaction_changed()
+            self.update()
+
+    def _move_cheek(self, event):
+        now = time.perf_counter()
+        logical = (event.position().x(),event.position().y())
+        dx = logical[0]-self.cheek_gesture.origin[0]
+        up = self.cheek_gesture.origin[1]-logical[1]
+        point = self.renderer.rig_point(self.point(event),self.animator.pose)
+        local = self.renderer.head_surface.source_point(point,self.animator.pose,allow_outside=True)
+        if local is not None:self.animator.drag(local)
+        if self.settings.lift and up > 12. and up > abs(dx)*1.2:
+            self.animator.advance(0)
+            self.animator.begin_lift(point,now=now,cheek=True)
+            self.body_gesture.press(logical,self.point(event),self.animator.pose.root_offset)
+            self.body_gesture.started = True
+            self.cheek_gesture.clear()
+            self.animator.advance(0)
+            self.reaction_changed()
+            self.update()
 
     def _move_body(self, event):
         was_started = self.body_gesture.started
@@ -181,7 +227,27 @@ class Canvas(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.body_gesture.active:
+            if self.cheek_gesture.active:
+                self._move_cheek(event)
+                self.cheek_gesture.clear()
+                if self.body_gesture.active:
+                    self.animator.release_lift(now=time.perf_counter())
+                    self.body_gesture.clear()
+                else:self.animator.release(now=time.perf_counter())
+                self.animator.advance(0)
+                self.reaction_changed()
+                self.update()
+            elif self.belly_gesture.active:
+                self._move_belly(event)
+                self.belly_gesture.clear()
+                self.animator.release_tickle(now=time.perf_counter())
+                if self.body_gesture.active:
+                    self.animator.release_lift(now=time.perf_counter())
+                    self.body_gesture.clear()
+                self.animator.advance(0)
+                self.reaction_changed()
+                self.update()
+            elif self.body_gesture.active:
                 self._move_body(event)
                 self.animator.release_lift(now=time.perf_counter())
                 self.body_gesture.clear()
@@ -206,8 +272,11 @@ class Canvas(QWidget):
             self.unsetCursor()
 
     def focusOutEvent(self, event):
+        self.cheek_gesture.clear()
         self.head_gesture.clear()
         self.body_gesture.clear()
+        self.belly_gesture.clear()
+        self.animator.release_tickle(now=time.perf_counter())
         self.animator.release_lift(now=time.perf_counter())
         self.animator.release_head(now=time.perf_counter())
         self.animator.release(now=time.perf_counter())
@@ -221,7 +290,7 @@ class Preview(QWidget):
         super().__init__()
         source=rig.data.get('manual_source_set',{}).get('name','去粉线版')
         suffix=" · 被捏反应" if rig.cheek_config else ""
-        self.setWindowTitle(f"诗音 V3 · 拎起 / 拖动 · {source}{suffix}")
+        self.setWindowTitle(f"诗音 V3 · 脸颊拎起 / 挠痒 · {source}{suffix}")
         if "Microsoft YaHei" not in QFontDatabase.families():
             font = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyh.ttc"
             if font.exists():
@@ -245,7 +314,8 @@ class Preview(QWidget):
         self.form = QFormLayout()
         panel.addLayout(self.form)
         for key, label in (("breath", "呼吸"), ("blink", "眨眼"), ("sway", "头发摆动"),
-                           ("pinch", "麻薯捏脸"), ("knock", "敲头"), ("pat", "摸头"), ("lift", "拎起 / 拖动")):
+                           ("pinch", "麻薯捏脸"), ("knock", "敲头"), ("pat", "摸头"),
+                           ("lift", "拎起 / 拖动"), ("tickle", "肚子挠痒")):
             check = QCheckBox(label)
             check.setChecked(getattr(settings, key))
             check.toggled.connect(lambda value, k=key: self.change(k, value))
@@ -327,14 +397,17 @@ class Preview(QWidget):
         self.reaction_label = QLabel("被捏反应：等待抓取")
         self.reaction_label.setWordWrap(True)
         panel.addWidget(self.reaction_label)
-        self.lift_label = QLabel('拎起反应：按住身体拖动')
+        self.lift_label = QLabel('拎起反应：向上提左脸颊')
         self.lift_label.setWordWrap(True)
         panel.addWidget(self.lift_label)
+        self.tickle_label = QLabel('挠痒反应：在肚子来回揉动')
+        self.tickle_label.setWordWrap(True)
+        panel.addWidget(self.tickle_label)
         self.canvas.reaction_changed = self.update_reaction
         reset = QPushButton("恢复默认")
         reset.clicked.connect(self.reset)
         panel.addWidget(reset)
-        hint = QLabel("按住身体或腿，移动超过 6 个逻辑像素拎起。\n来回大幅晃动会晕；松手回原站位并轻轻回弹。\n点头顶敲头，按住水平移动 12 个逻辑像素摸头。\n左侧鼓脸颊仍可捏；头部手势不转拎起。\n几何滑条 px 为原图像素。")
+        hint = QLabel("只有左侧突出的脸颊可以拎起。\n左右拉是捏脸；向上提超过 12px 拎起。\n拖动时保持脸颊拉伸，松手才回弹。\n肚子来回揉动挠痒；其他身体不拎起。")
         hint.setWordWrap(True)
         panel.addWidget(hint)
         self.fps_label = QLabel("FPS —")
@@ -375,6 +448,9 @@ class Preview(QWidget):
         if key in ('lift','underlays_only'):
             self.canvas.body_gesture.clear()
             self.canvas.animator.release_lift(now=time.perf_counter())
+        if key in ('tickle','underlays_only'):
+            self.canvas.belly_gesture.clear()
+            self.canvas.animator.release_tickle(now=time.perf_counter())
         self.canvas.animator.advance(0)
         self.update_reaction()
         self.canvas.update()
@@ -399,9 +475,13 @@ class Preview(QWidget):
                        'pat':'摸头 · 开心','fade':'恢复原表情'}
         self.head_label.setText('敲摸反应：'+head_labels[h.stage]+(f' · 连敲 {h.count} 次' if h.count else ''))
         l = self.canvas.animator.lift
-        lift_labels = {'idle':'按住身体拖动','held':'拎起 · 随手移动','return':'回原站位 · 回弹',
+        lift_labels = {'idle':'向上提左脸颊','held':'拎起 · 随手移动','return':'回原站位 · 回弹',
                        'hold':'落稳余韵','fade':'恢复原表情'}
         self.lift_label.setText('拎起反应：'+lift_labels[l.stage]+(' · 晃晕了' if l.dizzy else ''))
+        t = self.canvas.animator.tickle
+        tickle_labels = {'idle':'在肚子来回揉动','tickle':'开心躲闪','settle':'慢慢平静',
+                         'hold':'开心余韵','fade':'恢复原表情'}
+        self.tickle_label.setText('挠痒反应：'+tickle_labels[t.stage])
 
     def expression_changed(self):
         self.change("expression", self.combo.currentData())
@@ -422,6 +502,8 @@ class Preview(QWidget):
         self.canvas.animator = Animator(self.settings, self.seed, now=time.perf_counter())
         self.canvas.head_gesture.clear()
         self.canvas.body_gesture.clear()
+        self.canvas.cheek_gesture.clear()
+        self.canvas.belly_gesture.clear()
         if QWidget.mouseGrabber()==self.canvas:self.canvas.releaseMouse()
         self.update_reaction()
         self.canvas.update()
@@ -439,11 +521,12 @@ class Preview(QWidget):
         super().closeEvent(event)
 
 
-def benchmark(window, seconds, output, app, pinch=False, head=None, lift=False):
+def benchmark(window, seconds, output, app, pinch=False, head=None, lift=False, tickle=False):
     """Count paintEvent completions, not timer callbacks; exclude warm-up."""
     window.canvas.benchmark_pinch = pinch
     window.canvas.benchmark_head = head
     window.canvas.benchmark_lift = lift
+    window.canvas.benchmark_tickle = tickle
     def start():
         window.canvas.measure = True
         QTimer.singleShot(round(seconds * 1000), finish)
@@ -453,7 +536,8 @@ def benchmark(window, seconds, output, app, pinch=False, head=None, lift=False):
         times = np.array([r[0] for r in rows])
         ms = np.array([r[1] for r in rows])
         result = {"platform": app.platformName(), "scale": window.canvas.display_scale,
-                  "device_pixel_ratio": window.canvas.devicePixelRatioF(), "pinch": pinch, "head":head, "lift":lift,
+                  "device_pixel_ratio": window.canvas.devicePixelRatioF(), "pinch": pinch, "head":head,
+                  "lift":lift,"tickle":tickle,
                   "frames": len(rows), "fps": float((len(rows) - 1) / (times[-1] - times[0])),
                   "render_ms_p50": float(np.median(ms)), "render_ms_p95": float(np.percentile(ms, 95)),
                   "frame_interval_ms_p95": float(np.percentile(np.diff(times) * 1000, 95))}

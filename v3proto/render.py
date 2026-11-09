@@ -14,6 +14,7 @@ from .animation import Pose, Settings
 from .motion import bend_inverse, pivot_matrix, transform_point, translation, rooted_rotation_inverse
 from .face import brows_image, without_brows, eye_image
 from .lift import root_matrix
+from .tickle import in_belly
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -207,8 +208,8 @@ class Renderer:
 
     def matrices(self, pose):
         hip = (np.array(self.rig.pivots["hip_l"]) + np.array(self.rig.pivots["hip_r"])) / 2
-        body = pivot_matrix(hip, sy=pose.body_scale)
-        head = translation(0, pose.head_y) @ pivot_matrix(self.rig.pivots["neck"],pose.head_roll)
+        body = pivot_matrix(hip, pose.body_roll, sy=pose.body_scale)
+        head = translation(pose.head_x, pose.head_y) @ pivot_matrix(self.rig.pivots["neck"],pose.head_roll)
         matrices = {}
         # Rig parents are not necessarily in drawing order (ribbon precedes flower).
         def calc(n):
@@ -376,7 +377,7 @@ class Renderer:
         surface=self.head_surface
         # A translated 1:1 QImage can take Qt's integer blit fast path. Bake the
         # fractional pixel into the inverse map so a 2-pixel breath is smooth.
-        px=surface.x*self.scale;py=(surface.y+pose.head_y)*self.scale
+        px=(surface.x+pose.head_x)*self.scale;py=(surface.y+pose.head_y)*self.scale
         ix,iy=int(np.floor(px)),int(np.floor(py))
         picture=surface.render(settings,pose,(px-ix,py-iy))
         im=body.result()
@@ -385,7 +386,7 @@ class Renderer:
         painter.end()
         return im
 
-    def hit_test(self, point, settings, pose, *, crown=False):
+    def hit_test(self, point, settings, pose, *, crown=False, belly=False):
         """Visible face wins over its own eyes; overlying hair wins over face."""
         point = self.rig_point(point, pose)
         if not settings.underlays_only:
@@ -430,6 +431,8 @@ class Renderer:
             x, y = int(local[0] - p["x"]), int(local[1] - p["y"])
             image = self.rig.images[n]
             if 0 <= x < image.width and 0 <= y < image.height and image.getpixel((x, y))[3] > 64:
+                if belly and n in {'body','body_under'} and in_belly(local):
+                    return 'belly',local
                 return ("head" if n not in BODY | LEGS else "body"), local
         return None, point
 
