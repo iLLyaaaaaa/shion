@@ -130,19 +130,19 @@ class HeadSurface:
         from .face import reference_face,brows_image,plate_face
         rig=self.r.rig
         full=Image.new('RGBA',self.reference_size)
+        mirror=self.cheek.mirror
+        if mirror is not None:
+            # The old left cheek was removed from the hair slices for good;
+            # show the hidden hair there instead of an empty hole.
+            left=rig.left_cheek_images[settings.expression]['mask']
+            full.alpha_composite(self._hidden_hair(left,rig.cheek_config['box'][:2]))
         if cut_cheek and self.cheek.config:
             # Reveal the existing hidden hair only where the cheek was removed.
-            p=rig.parts['back_hair_under'];under=np.asarray(rig.images['back_hair_under']).copy()
-            color=under[...,:3].astype(int)
-            under[(color[...,0]-color[...,1]<=12)&(color.max(-1)>80),3]=0
-            backing=Image.new('RGBA',self.reference_size)
-            backing.alpha_composite(Image.fromarray(under),(p['x']-self.x,p['y']-self.y))
-            mask=Image.new('L',self.reference_size)
-            mask.paste(self.cheek.assets[settings.expression]['mask'],(self.cheek.x-self.x,self.cheek.y-self.y))
-            a=np.asarray(backing).copy();a[np.asarray(mask)==0]=0
-            full.alpha_composite(Image.fromarray(a))
+            full.alpha_composite(self._hidden_hair(self.cheek.assets[settings.expression]['mask'],
+                                                   (self.cheek.x,self.cheek.y),mirrored=mirror is not None))
+        first_side_hair=next(n for n in self.names if n in ('side_hair_l','side_hair_r'))
         for n in self.names:
-            if n=='side_hair_l':
+            if n==first_side_hair:
                 cover=Image.new('RGBA',full.size)
                 for body in self.body_names:
                     p=rig.parts[body]
@@ -170,6 +170,24 @@ class HeadSurface:
                 if brow:full.alpha_composite(brow[0],(brow[1][0]-self.x,brow[1][1]-self.y))
         return full
 
+    def _hidden_hair(self,mask_image,origin,mirrored=False):
+        """Underlay hair (skin-colored pixels removed) limited to a cheek mask."""
+        rig=self.r.rig
+        p=rig.parts['back_hair_under'];image=rig.images['back_hair_under'];x=p['x']
+        if mirrored:
+            from PIL import ImageOps
+            from .mirror import flipped_origin
+            image=ImageOps.mirror(image);x=flipped_origin(rig.mirror_sum,x,image.width)
+        under=np.asarray(image).copy()
+        color=under[...,:3].astype(int)
+        under[(color[...,0]-color[...,1]<=12)&(color.max(-1)>80),3]=0
+        backing=Image.new('RGBA',self.reference_size)
+        backing.alpha_composite(Image.fromarray(under),(x-self.x,p['y']-self.y))
+        mask=Image.new('L',self.reference_size)
+        mask.paste(mask_image,(origin[0]-self.x,origin[1]-self.y))
+        a=np.asarray(backing).copy();a[np.asarray(mask)==0]=0
+        return Image.fromarray(a)
+
     def render(self,settings,pose,fractional=(0.,0.)):
         from .render import from_premultiplied
         a=self.compose(settings,pose)
@@ -187,8 +205,9 @@ class HeadSurface:
             if self.occupancy is None:
                 occupied=a[...,3]>0
                 if self.cheek.config:
-                    x0=max(0,int((self.cheek.x-202-self.x)*self.r.scale))
-                    x1=min(self.w,int((self.cheek.right+14-self.x)*self.r.scale)+1)
+                    outward,inward=self.cheek.stretch_extent()
+                    x0=max(0,int((self.cheek.x-outward-self.x)*self.r.scale))
+                    x1=min(self.w,int((self.cheek.right+inward-self.x)*self.r.scale)+1)
                     y0=max(0,int((self.cheek.y-26-self.y)*self.r.scale))
                     y1=min(self.h,int((self.cheek.bottom+26-self.y)*self.r.scale)+1)
                     occupied[y0:y1,x0:x1]=True

@@ -20,8 +20,24 @@ class Cheek:
         self.texture_planes={}
         self.grids=OrderedDict()
         self.last_deformation = None  # One immutable material frame, not an animation cache.
+        # The motion math is written for the left-side cheek. On the right side
+        # coordinates are reflected (u -> mirror_sum-u) around every motion call,
+        # and the pose still describes the pull in left-side terms (outward < 0).
+        self.mirror=getattr(rig,'mirror_sum',None)
         if self.config:
-            self.x,self.y,self.right,self.bottom=self.config['box']
+            x0,y0,x1,y1=self.config['box']
+            if self.mirror is not None:
+                from .mirror import mirrored_box
+                x0,y0,x1,y1=mirrored_box(self.config,self.mirror)
+            self.x,self.y,self.right,self.bottom=x0,y0,x1,y1
+
+    def motion_x(self,x):
+        """Surface-frame x to the left-side space the motion math lives in."""
+        return x if self.mirror is None else self.mirror-x
+
+    def stretch_extent(self):
+        """(outward, inward) reference pixels the cheek zone may reach on screen."""
+        return (202,14) if self.mirror is None else (14,202)
 
     def cut(self,image,origin,face):
         if not self.config:return image
@@ -32,14 +48,14 @@ class Cheek:
         yy,xx=np.indices(clear.shape);xx+=origin[0];yy+=origin[1]
         # Keep a small opaque overlap at pinned seams. Independent alpha
         # resampling on both sides otherwise opens a bright one-pixel line.
-        clear &= (xx<self.config['root_x']-4)&(yy>self.config['vertical'][0]+2)&(yy<self.config['vertical'][-1]-2)
+        clear &= (self.motion_x(xx)<self.config['root_x']-4)&(yy>self.config['vertical'][0]+2)&(yy<self.config['vertical'][-1]-2)
         a[clear]=0
         return Image.fromarray(a)
 
     def source_point(self,point,settings,pose):
         d=cheek_displacement(pose.pinch_delta,settings.pinch_maximum)
-        x,y=cheek_inverse(np.asarray(point[0]),np.asarray(point[1]),d,settings.pinch_radius,self.config)
-        return np.array([float(x),float(y)])
+        x,y=cheek_inverse(np.asarray(self.motion_x(point[0])),np.asarray(point[1]),d,settings.pinch_radius,self.config)
+        return np.array([float(self.motion_x(x)),float(y)])
 
     def contains(self,point,settings,pose):
         if not self.config or not (settings.pinch or settings.lift):return False
@@ -72,14 +88,19 @@ class Cheek:
         yy,xx=np.indices(mask.shape,dtype=np.float32)
         gx=(xx+.5)/(surface.w/surface.reference_size[0])+surface.x-.5
         gy=(yy+.5)/(surface.h/surface.reference_size[1])+surface.y-.5
-        mask|=cheek_weight(gx,gy,110,self.config)==0
+        mask|=cheek_weight(self.motion_x(gx),gy,110,self.config)==0
         self.protection[face]=nd.binary_dilation(mask,iterations=1)
-        # The left eye is the only one overlapping this local surface. Keep
-        # its actual source window so the guard can follow the blink pivot.
-        left=self.assets[face]['protect'].crop((0,0,520,self.rig.size[1]))
+        # The eye on the cheek's side is the only one overlapping this local
+        # surface. Keep its actual source window so the guard can follow the
+        # blink pivot. Mirrored protect masks keep the eye in the right half.
+        if self.mirror is None:
+            side_window=(0,0,520,self.rig.size[1]);role='eye_l'
+        else:
+            side_window=(self.mirror-519,0,self.rig.size[0],self.rig.size[1]);role='eye_r'
+        left=self.assets[face]['protect'].crop(side_window)
         box=left.getbbox()
-        name=next(n for n in self.rig.face_parts(face) if self.rig.parts[n]['role']=='eye_l')
-        self.eye_windows[face]=(left.crop(box),(box[0],box[1]),self.rig.parts[name]['blink_pivot'][1])
+        name=next(n for n in self.rig.face_parts(face) if self.rig.parts[n]['role']==role)
+        self.eye_windows[face]=(left.crop(box),(box[0]+side_window[0],box[1]),self.rig.parts[name]['blink_pivot'][1])
 
     def protection_for_pose(self,surface,face,eye_scale):
         if eye_scale==1:return self.protection[face]
@@ -113,9 +134,13 @@ class Cheek:
         d=cheek_displacement(pose.pinch_delta,settings.pinch_maximum)
         scale_x=surface.w/surface.reference_size[0]
         scale_y=surface.h/surface.reference_size[1]
-        x0=max(0,math.floor((self.x+min(0,d[0])-surface.x)*self.scale)-2)
+        if self.mirror is None:
+            left_edge=self.x+min(0,d[0]);right_edge=self.right+12
+        else:
+            left_edge=self.x-12;right_edge=self.right-min(0,d[0])
+        x0=max(0,math.floor((left_edge-surface.x)*self.scale)-2)
         y0=max(0,math.floor((self.y-24-surface.y)*self.scale)-2)
-        x1=min(surface.w,math.ceil((self.right+12-surface.x)*self.scale)+2)
+        x1=min(surface.w,math.ceil((right_edge-surface.x)*self.scale)+2)
         y1=min(surface.h,math.ceil((self.bottom+24-surface.y)*self.scale)+2)
         grid_key=(x0,y0,x1,y1)
         if grid_key not in self.grids:
@@ -131,12 +156,15 @@ class Cheek:
         self.grids.move_to_end(grid_key)
         yy,xx,cx,cy=self.grids[grid_key]
         h,w=yy.shape
+        lx=self.motion_x(cx)
         if d[1]==0:
-            sx=horizontal_inverse(cx,cy,d[0],settings.pinch_radius,self.config)
+            sx=horizontal_inverse(lx,cy,d[0],settings.pinch_radius,self.config)
             sy=cy
         else:
-            sx,sy=cheek_inverse(cx,cy,d,settings.pinch_radius,self.config,iterations=12)
-        dx=nd.zoom(cx-sx,(h/cx.shape[0],w/cx.shape[1]),order=1,prefilter=False)
+            sx,sy=cheek_inverse(lx,cy,d,settings.pinch_radius,self.config,iterations=12)
+        # Displacement in surface space; reflected back on the mirrored side.
+        shift=lx-sx if self.mirror is None else sx-lx
+        dx=nd.zoom(shift,(h/cx.shape[0],w/cx.shape[1]),order=1,prefilter=False)
         dy=nd.zoom(cy-sy,(h/cx.shape[0],w/cx.shape[1]),order=1,prefilter=False) if d[1] else 0.
         coords=np.array([yy+y0-dy*scale_y,xx+x0-dx*scale_x],dtype=np.float32)
         from .sampling import sample_rgba

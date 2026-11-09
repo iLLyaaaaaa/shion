@@ -59,8 +59,9 @@ def sample(a: np.ndarray, x, y) -> QImage:
 
 
 class Rig:
-    def __init__(self, path=DEFAULT_RIG):
+    def __init__(self, path=DEFAULT_RIG, cheek_side='left'):
         path = Path(path)
+        self.mirror_sum = None
         self.data = json.loads(path.read_text(encoding="utf-8"))
         if self.data.get("version") != 2:
             raise ValueError("V3 prototype requires rig version 2")
@@ -131,6 +132,9 @@ class Rig:
                     expected=self.size if key=='protect' else (box[2]-box[0],box[3]-box[1])
                     if image.size!=tuple(expected) or not image.getbbox():
                         raise ValueError('invalid cheek asset: '+face+'/'+key)
+        if cheek_side!='left':
+            from .mirror import apply_cheek_side
+            apply_cheek_side(self,cheek_side)
 
     def face_parts(self, expression):
         return [n for n in self.order if self.parts[n].get("variant") == expression]

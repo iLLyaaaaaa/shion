@@ -28,6 +28,13 @@ def plate_face(rig,expression,eye_scale):
     if expression not in rig.expression_plates:
         return _blink_plate(rig,expression,eye_scale)
     opened,origin=rig.expression_plates[expression]
+    if getattr(rig,'mirror_sum',None) is not None:
+        # The stored open plates still carry the original left bulge. Rebuild
+        # them from the mirrored clean plate (fringe tips keep original pixels).
+        if expression not in rig._mirror_opened:
+            rig._mirror_opened[expression]=_blink_plate(rig,expression,1)[0]
+        opened=rig._mirror_opened[expression]
+        origin=rig.face_plate[1]
     cache=getattr(rig,'_blink_regions',None)
     if cache is None:cache=rig._blink_regions={}
     if expression not in cache:
@@ -69,6 +76,12 @@ def _blink_plate(rig,expression,eye_scale):
     if expression in rig.expression_plates and rig.source_fringe_mask is not None:
         opened,_=rig.expression_plates[expression]
         mask=rig.source_fringe_mask.crop((origin[0],origin[1],origin[0]+canvas.width,origin[1]+canvas.height))
+        if getattr(rig,'mirror_sum',None) is not None:
+            # Original-side fringe pixels would bring back the old right-hand
+            # blush and contour on top of the mirrored bulge.
+            from PIL import ImageChops
+            from .mirror import fringe_keep
+            mask=ImageChops.multiply(mask,fringe_keep(rig,canvas.size,origin))
         canvas.paste(opened,(0,0),mask)
     return canvas,origin
 

@@ -42,7 +42,11 @@ def main(argv=None):
     scenarios.add_argument('--tickle-preview', choices=('rub','release','lift'),
                            help='确定性挠痒截图；1.2 秒停手、松手或转拎起')
     parser.add_argument("--benchmark-output", type=Path, default=Path("build/v3/step1/benchmark.json"))
+    parser.add_argument("--cheek-side", choices=("left", "right"), default="left",
+                        help="鼓脸颊所在侧（右侧为只镜像脸部皮肤的验证渲染，仅支持 --snapshot）")
     args = parser.parse_args(argv)
+    if args.cheek_side != "left" and not args.snapshot:
+        parser.error("--cheek-side right requires --snapshot")
     if not 0.1 <= args.scale <= 2 or not 0 <= args.time <= 3600:
         parser.error("scale must be 0.1-2; time must be 0-3600 seconds")
     if args.benchmark is not None and not 1 <= args.benchmark <= 600:
@@ -63,7 +67,7 @@ def main(argv=None):
     settings = Settings(expression=args.expression, underlays_only=args.underlays_only)
     if args.no_animation:
         settings.breath = settings.blink = settings.sway = settings.pinch = False
-    rig = Rig()
+    rig = Rig(cheek_side=args.cheek_side)
     if args.snapshot:
         animator = Animator(settings, args.seed, star_seed=args.seed)
         padding = (0,0,0,0)
@@ -75,7 +79,8 @@ def main(argv=None):
         elif args.lift_preview:
             from .lift_scenarios import lift_scenario
             from .lift import SCENE_PADDING
-            pose = lift_scenario(animator,args.lift_preview,args.time)
+            pivot = (325., 586.) if rig.mirror_sum is None else (rig.mirror_sum - 325., 586.)
+            pose = lift_scenario(animator,args.lift_preview,args.time,pivot)
             padding = SCENE_PADDING
         elif args.head_preview:
             from .head_scenarios import head_scenario

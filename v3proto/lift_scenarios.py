@@ -2,9 +2,9 @@
 import math
 
 
-def lift_scenario(animator, name, duration):
+def lift_scenario(animator, name, duration, pivot=(325., 586.)):
     start = animator.clock
-    animator.begin_lift((325.,586.),now=start,cheek=True)
+    animator.begin_lift(pivot,now=start,cheek=True)
     end = min(duration,1.2)
     cursor = 0.
     steps = max(1,math.ceil(end*60))
