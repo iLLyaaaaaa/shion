@@ -82,6 +82,87 @@
 
 **S3、S4 已完成**：S3 启用 `head_knock` / `head_knock_stop` 与 `cheek_pull_combo`；S4 把窗口移动限定为“只能拎脸颊”，S3 过渡的“拖身体挪窗口”“捏脸拖过 80px 转整窗拖动”“肚子拖出 40px 转整窗拖动”均已删除。按错地方拖动时提示 `v3_lift_hint`（60 秒冷却）。
 
+**S6 已完成**（2026-11-10）：状态姿态、工作点头、碎屑锚点；slump/neglect1/yawn 表情用 S0 部件拼成；需新画清单见下方。
+
 **S5 换边已实现但默认关闭**（2026-11-10）：右鼓的 S5a 镜像脸部底板在桌面尺寸下刘海发丝断开、脸像歪了，需新画右鼓版脸部底板后再开启（`SHION_V3_AUTO_SIDE=1` 可试用）。“需新画清单”增加：右鼓版脸部底板（含刘海发梢）。
 
 每步：测试 → 用户验收 → 更新 progress → 本地提交。全仓原有 16 项基线失败与汇总后原生退出异常单独比对，不笼统宣称全量通过。
+
+## 需新画清单（S6，2026-11-10，用户定序）
+
+顺序：**working 道具 > 右鼓版脸部底板 > collapse/slump > desk/bed > stop > yawn > neglect1**。slump、yawn、neglect1 的表情已用 S0 部件解决（见各项），还需新画的是：working 道具、右鼓版脸部底板、collapse 姿势、desk/bed、stop 手臂。可选（不排序）：dizzy 转圈星星、咀嚼嘴型。
+
+### 通用约定
+
+- 坐标系：rig 画布 **1086×1448**（`rig.json canvas`，即 ref.png 像素坐标）。左右一律指画面左/右。
+- **背景**：纯白 #FFFFFF；不要投影、地面、渐变、边框、文字或水印（`tools/v3_extract.py remove_white_bg` 按白底切连通块）。
+- **画风**：与参考图一致的深棕描边、平涂加少量高光；线宽与原图相同，不要加粗或改色。
+- **参考图**：一条命令生成到 `build/v3/art-refs/`，每张图的尺寸、对应的 rig 裁切框和放大倍数写在同目录 `refs.json`：
+  ```
+  .venv\Scripts\python -m tools.v3_art_refs refs
+  ```
+  裁切图的 rig 坐标 = 裁切框左上角 + 图内像素 ÷ 放大倍数。
+- **GPT 输出尺寸不对时**：等比缩放后白边补齐到目标尺寸（居中），再交给切片工具：
+  ```
+  .venv\Scripts\python -m tools.v3_art_refs pad <GPT 输出> <补齐后> [--size 1086x1448]
+  ```
+- GPT 原件放 `assets/sprites/raw/v3/s6/`（只读、不进 git）；处理结果进 `assets/sprites/v3/`。
+
+| 参考图 | 尺寸 | 内容 |
+|---|---|---|
+| `working-full.png` | 1086×1448 | neutral 全身 |
+| `arms-x2.png` | 1580×620 | 双臂区域 ×2（rig 框 150,700–940,1010） |
+| `full-left-ref.png` | 1086×1448 | 当前左鼓原图（smug，S0 定稿） |
+| `head-left-ref.png` | 1820×1520 | 左鼓头部 ×2（rig 框 90,0–1000,760） |
+| `pose-full.png` | 1086×1448 | 站姿全身，姿势比例参考 |
+| `scene-wide.png` | 2172×1448 | 左右各扩 50%，给家具留位置（rig 框 -543,0–1629,1448） |
+| `face-smug-ref.png` | 1086×1448 | 表情输入底图（`v3_replace_expressions` 对位用） |
+| `face-neutral.png` / `face-sleep.png` | 1086×1448 | 现有 neutral / sleep 表情参考 |
+
+### 1. working 道具
+
+- **用途**：工作中手边的道具（参照 V2 working 精灵的道具语义）。现回退：neutral + 头略低 + 每 4～6 秒轻点头 + 工作气泡。
+- **GPT 输入**：`working-full.png`（对位）+ `arms-x2.png`（手的位置和大小）。
+- **要两张图**：① 道具**单独**一张白底零件图，道具完整、不被手遮挡、不带角色；② 角色拿着道具的全身图（与 `working-full.png` 同画布同姿势），只用来对位。
+- **分层**：道具一层；若道具压在手上，另出“手在道具前”的前景小块（可选）。
+- **切片/对位**：零件图复用 `tools/v3_extract.py extract` → 写 `parts_map.json` → `name` 切出 PNG；对位**需新写**小工具：在 ② 上做模板匹配（复用 `v3_extract` 的匹配函数），把位置写成 rig.json 新 part。
+- **接入改动**：`rig.json`（新 part 与 layer）；`v3proto/render.py`（按 `Settings.props` 显示/隐藏）；`shion/v3_display.py` 加 `STATE_PROPS`；`shion/v3_window.py` 每帧设 props、遮罩；预热。
+
+### 2. 右鼓版脸部底板（含刘海发梢）
+
+- **用途**：换边（S5）开关的前提。S5a 的镜像底板在桌面尺寸下刘海发丝断开、脸像歪了（`build/v3/integrate/s5/head-left-vs-right-zoom.png`）。现回退：换边默认关闭。
+- **GPT 输入**：`head-left-ref.png`（1820×1520）为主，`full-left-ref.png` 看整体。
+- **要求**：按左鼓原图**整张重画头部，不镜像**；刘海、发梢、花饰、发带、呆毛、五官位置和形状与原图一致，只把鼓起的脸颊从画面左侧换到右侧，左脸颊恢复正常轮廓。输出与 `head-left-ref.png` 同尺寸同构图。不要求分层。
+- **切片/对位**：**需新写** `tools/v3_right_plate.py`：先把 ×2 图缩回 rig 坐标；用 `tools/v3_replace_expressions.py` 的 `align_head` 对位到原图；用现有 `face_fringe_mask` / `face_contour`（翻到右侧）切出 `head_skin` 与干净底板；再跑 `tools/v3_cheek.py` 生成右侧捏脸素材。
+- **接入改动**：`v3proto/mirror.py` `apply_cheek_side('right')` 改为加载画好的底板；`rig.json mirror` 段；`shion/v3_window.py` `auto_side` 默认改 True；`tests/test_v3_side.py` 默认开启；重出 `tools/v3_mirror_check.py` 对比快照。
+
+### 3. collapse / slump
+
+- **用途**：体力 3 档瘫倒、2 档疲惫。现回退：站姿下压 + 低头 + 手臂收拢 + 呼吸眨眼放慢。
+- **GPT 输入**：collapse 用 `pose-full.png`；slump 表情用 `face-smug-ref.png`（同画布同姿势只改五官）+ `face-neutral.png`（风格）。
+- **collapse 分层**：坐倒全身，按零件分开画在一张白底图上：身体、左腿、右腿、左臂、右臂各一块，互不重叠、不缺遮挡部分；另出一张拼好的合成图用来对位。头部沿用现有，不画。
+- **slump 表情**：**不用新画**——用户已采用 S0 部件拼的 `tired`（半闭眼，`tools/v3_s0_faces.py`）。此项只剩 collapse 姿势。
+- **切片/对位**：表情复用 `tools/v3_replace_expressions.py`（需小改：允许新表情名）+ `tools/v3_face_features.py REGIONS` 补区域 + `tools/v3_cheek.py` 生成捏脸素材；姿势零件 `v3_extract` 切 + 新对位工具（同 #1）。
+- **接入改动**：表情：`rig.json faces`、`STATE_EXPRESSIONS`、预热表情列表、`tests/test_v3_display.py` 的表情集合；姿势：rig 加姿势变体、`load_rig` 的脚底/可见范围按姿势算、`STATE_POSES` 改用新姿势。整身新姿势需扩 rig，接入时另开计划。
+
+### 4. desk / bed
+
+- **用途**：书桌趴睡、床上躺睡。现回退：站着睡 / 站着睡 + 低头。
+- **GPT 输入**：`scene-wide.png`（家具位置与比例）+ `pose-full.png`。
+- **分层**：书桌、床各自单独一张零件图（不带角色）；趴桌姿势、躺姿按 #3 的方式分零件 + 合成图对位。
+- **切片/对位**：同 #3；家具同 #1 道具流程。
+- **接入改动**：同 #1 + #3；另调睡觉 Z 的位置、窗口遮罩和点穿（家具不可点）。
+
+### 5. stop 挡手
+
+- **用途**：“停”状态伸手挡。现回退：angry + 双臂略外抬。
+- **GPT 输入**：`arms-x2.png`。
+- **分层**：只要伸出的手臂零件（手掌朝外），左右各一块，白底单张；肩部接口与现有手臂对齐。
+- **切片/对位**：`v3_extract` 切；对位到 `rig.json pivots` 的 `shoulder_l` / `shoulder_r`。
+- **接入改动**：`rig.json` 加手臂变体；`v3proto/render.py` 按状态换手臂；`STATE_POSES["stop"]` 去掉占位抬手。
+
+### 6. yawn 表情 / 7. neglect1 无聊表情（已解决，不用新画）
+
+- **neglect1**：用户采用 S0 部件拼的 `bored`（半闭眼 + 波浪嘴）。
+- **yawn**：用户选了 sleep 眼 + S0 张大嘴放大 1.8 倍（`tools/v3_s0_faces.py YAWN_SCALE`）。
+- 以后若要换成新画的版本：GPT 输入用 `face-smug-ref.png` + `face-sleep.png` / `face-neutral.png`，整张同姿态脸，走 #3 的表情流程。

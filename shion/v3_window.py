@@ -22,8 +22,9 @@ from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREAT
 from shion.behavior import BELLY_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS, TICKLE_STOP_SECONDS
 from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX,
                               MASK_GROW, PetWindow)
-from shion.v3_display import (STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, desired_side, draw_key,
-                              expression_for, frame_interval, hair_moving, logical_scale)
+from shion.v3_display import (REST_POSE, STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, StateMotion,
+                              desired_side, draw_key, expression_for, frame_interval, hair_moving,
+                              logical_scale, state_pose)
 from shion.v3_layers import SwayEnvelope, affine_ok, render_affine
 from shion.v3_prewarm import BLINK_LEVELS, Prewarmer, quantize_eye
 
@@ -43,6 +44,8 @@ PROGRAM_FAST_DEGREES_PER_SECOND = 8.0  # V2 程序动作：倾斜变化快于此
 PROGRAM_FAST_SCALE_PER_SECOND = 0.2    # 压扁/拉伸变化快于此用 60 FPS
 SWAY_DEGREES = 2.0  # 轻摆满幅（原型默认值）
 LEAD = 0.07  # 秒：眨眼、轻摆开始前提前提速
+POSE_EASE_TAU = 0.12  # 秒：状态姿态切换的缓动时间常数（约 0.35 秒到位）
+MOUTH_RIG = (529.0, 588.5)  # rig 坐标：neutral 嘴部区域中心（rig.json expression_sources.neutral.regions.mouth）
 
 _RIGS: dict[str, object] = {}
 # 测试可换成同步执行器；None 表示共用的后台线程
@@ -146,6 +149,15 @@ class V3PetWindow(PetWindow):
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
                           "affine": 0, "mesh": 0, "side_switches": 0}
         self._v3_sway = None
+        # 状态姿态（S6）：静态部分缓动；周期动作（点头/哈欠/画圈/咀嚼）直接叠加；
+        # 换状态时把上一状态的周期动作余量交给 carry 衰减掉，不跳。
+        self._v3_motion = StateMotion()
+        self._v3_pose_static = None
+        self._v3_pose_dynamic = REST_POSE
+        self._v3_pose_carry = REST_POSE
+        self._v3_pose_state = None
+        self._v3_pose_weight = 1.0
+        self._v3_pose = None
         self._v3_screen_hooked = False
         self._v3_ready = True
 
@@ -465,6 +477,7 @@ class V3PetWindow(PetWindow):
         pose = animator.advance(dt)
         if animator.lift.active:
             pose.root_offset = (0.0, 0.0)  # 窗口自己在动；root_roll / 身体 / 手臂照常
+        pose, posing = self._v3_state_pose(pose, now, dt)
         self._v3_side_step(now)
         if any(animator.delta) and not any(pose.pinch_delta):
             pose = replace(pose, pinch_delta=tuple(animator.delta))  # 换边“啵”的第一帧就带上拉伸
@@ -490,7 +503,7 @@ class V3PetWindow(PetWindow):
                 or any(pose.pinch_delta))
         still = affine_ok(pose)
         soon = (pose.eye_scale < 1 or 0 <= animator.blink_start - animator.time <= LEAD
-                or self._v3_sway.until_start(now) <= LEAD)
+                or self._v3_sway.until_start(now) <= LEAD or posing)
         interval = frame_interval(bool(fast), self.sprite_name, still, soon)
         if self._timer.interval() != interval:
             self._timer.setInterval(interval)
@@ -499,6 +512,7 @@ class V3PetWindow(PetWindow):
         key = draw_key(expression, pose, self.v3_texture_scale, frame_key)
         self._sync_sleep_z(now, f)
         self._frame = f
+        self._v3_pose = pose
         if key is not None and key == self._v3_key and self._v3_image is not None:
             return
         self._v3_key = key
@@ -523,6 +537,55 @@ class V3PetWindow(PetWindow):
             self._fps_overlay.follow()
         if self._pause_badge is not None:
             self._pause_badge.follow()
+
+    # ---- 状态姿态（S6）----
+    def _v3_state_pose(self, pose, now: float, dt: float):
+        """叠加状态姿态；返回 (新 pose, 是否还在动)。互动期间整体淡出，结束后淡回。"""
+        self._animator.whole_nod = False  # 工作点头由 V3 只动头来做，V2 不再整图点头
+        state = self.sprite_name
+        static = state_pose(state)
+        motion = self._v3_motion
+        if state != self._v3_pose_state:
+            self._v3_pose_carry = self._v3_pose_carry + self._v3_pose_dynamic
+            self._v3_pose_state = state
+        dynamic = motion.sample(state, now)
+        a = 1.0 if self._v3_pose_static is None else (1.0 - math.exp(-dt / POSE_EASE_TAU) if dt > 0 else 0.0)
+        current = self._v3_pose_static if self._v3_pose_static is not None else static
+        current = current.moved_toward(static, a)
+        self._v3_pose_static = current
+        self._v3_pose_carry = self._v3_pose_carry.moved_toward(REST_POSE, a)
+        self._v3_pose_dynamic = dynamic
+        target_w = 0.0 if self._v3_animator.interaction_active else 1.0
+        w = self._v3_pose_weight + (target_w - self._v3_pose_weight) * a
+        if abs(w - target_w) < 1e-3:
+            w = target_w
+        self._v3_pose_weight = w
+        settings = self._v3_settings
+        settings.breath_rate, settings.blink_gap = static.breath_rate, static.blink_gap
+        offset = (current + dynamic + self._v3_pose_carry).scaled(w)
+        moving = (current != static or self._v3_pose_carry != REST_POSE
+                  or w != target_w or motion.busy(state, now))
+        return offset.apply(pose), moving
+
+    def start_chewing(self, seconds: float) -> None:
+        """喂零食：点头咀嚼 seconds 秒。"""
+        self._v3_motion.chew(self._clock(), seconds)
+
+    def mouth_anchor(self) -> QPoint:
+        """嘴部中心（全局坐标）：跟随低头、点头和 V2 的压扁/倾斜/跳跃。"""
+        f = getattr(self, "_frame", None)
+        pose = self._v3_pose
+        if f is None or pose is None:
+            return super().mouth_anchor()
+        from v3proto.motion import pivot_matrix, translation
+        head = translation(pose.head_x, pose.head_y) @ pivot_matrix(self._v3_rig.pivots["neck"], pose.head_roll)
+        rx, ry, _ = head @ np.array([MOUTH_RIG[0], MOUTH_RIG[1], 1.0])
+        foot_x, foot_y = self._v3_rig.v3_foot
+        s = self._v3_scale
+        gap = self._height * V2_FOOT_GAP_RATIO
+        local = QPointF((rx - foot_x) * s, (ry - foot_y) * s - gap)
+        p = self._v3_transform(f).map(local)
+        return self.mapToGlobal(QPoint(round(p.x()), round(p.y())))
 
     # ---- 手势（S3）----
     def _v3_transform(self, f) -> QTransform:

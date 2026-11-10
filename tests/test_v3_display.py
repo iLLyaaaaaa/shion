@@ -7,7 +7,7 @@ from shion.pet_window import MARGIN_BOTTOM, PROP_STATES, SEQUENCE_GROUPS, STATES
 from shion.v3_display import (STATE_EXPRESSIONS, V2_VISIBLE_RATIO, expression_for,
                               logical_scale, texture_scale)
 
-V3_FACES = {"smug", "neutral", "happy", "surprised", "teary", "angry", "sleep", "dizzy"}
+V3_FACES = {"smug", "neutral", "happy", "surprised", "teary", "angry", "sleep", "dizzy", "tired", "bored", "yawn"}
 
 
 @pytest.fixture(scope="module")

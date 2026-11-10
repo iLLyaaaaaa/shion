@@ -12,10 +12,27 @@
   2. 换边只镜像脸部皮肤（含鼓脸颊），以脸部中线为轴，按 `rig.json mirror.swap_layers` 对调左右鬓发顺序；头发、刘海、花饰、发带、五官、身体不镜像。先做左右各一张验证快照（8 表情、捏脸拉伸中、拎起中），不行再讨论新画右鼓版底板。
   3. 换边在一次眨眼的闭眼帧完成，鼓脸颊用捏脸松手回弹弹簧“啵”一下并给头发冲量，不做水平压扁；死区、只在停稳时判断、拖动中不翻。
   4. 新台词键（三语）：`cheek_pull_combo`、`cheek_lift`；`head_knock` 系列现有文案确认前不启用。
-  5. 需新画清单优先级：working 道具 > collapse/slump > desk/bed > stop > yawn > neglect1。验收线：互动场景 DPR1.5 平均 ≥55 FPS、paint P95 ≤14ms；待机/工作 CPU ≤ 单核 3% 且不超过 V2 的 2 倍。**（此条已在 S2 改为新验收线，见下方 S2 记录。）**
-- **当前进度**：合并完成；S5a 换边验证快照、S1 显示骨架、S2 点穿/定位/性能、S3 手势接入、S4 拎脸颊移动窗口已验收；S5 换边逻辑已做完但**默认关闭**（右鼓素材不合格，见下方 S5 记录）（2026-11-10）。
-- **下一步**：S6（其余状态动作与需新画清单），先在计划模式出做法给用户确认。换边保持默认关闭，等新画右鼓版脸部底板后再打开（`SHION_V3_AUTO_SIDE=1` 可试用）；右鼓版脸部底板列入需新画清单。
-- **待优化（S7 统一评估）**：内存。真实应用总工作集（260 高，启动后 25 秒）V3 约 286MB，V2 约 184MB；数据见下方 S5 记录。
+  5. 需新画清单优先级：working 道具 > collapse/slump > desk/bed > stop > yawn > neglect1（S6 改为：working 道具 > 右鼓版脸部底板 > collapse/slump > desk/bed > stop > yawn > neglect1）。验收线：互动场景 DPR1.5 平均 ≥55 FPS、paint P95 ≤14ms；待机/工作 CPU ≤ 单核 3% 且不超过 V2 的 2 倍。**（此条已在 S2 改为新验收线，见下方 S2 记录。）**
+- **当前进度**：合并完成；S5a 换边验证快照、S1 显示骨架、S2 点穿/定位/性能、S3 手势接入、S4 拎脸颊移动窗口已验收；S5 换边逻辑已做完但**默认关闭**（右鼓素材不合格，见下方 S5 记录）（2026-11-10）；S6 状态姿态与需新画清单已验收（2026-11-10）。
+- **下一步**：S7（全仓回归、reviewer 审查、文档收尾，并统一评估内存与 CPU），先在计划模式出做法。换边保持默认关闭，等新画右鼓版脸部底板（需新画清单第 2 项）后再打开（`SHION_V3_AUTO_SIDE=1` 可试用）。
+- **待优化（S7 统一评估）**：内存（真实应用总工作集 260 高、启动后 25 秒：V3 约 286MB，V2 约 184MB，见 S5 记录）；待机/工作 CPU 今天复测比 S2 高、working 超 S2 工作线（S6 前后一样，见 S6 记录）。
+
+#### 2026-11-10：S6 状态姿态与需新画清单，用户真实窗口验收通过
+
+- **做了什么**：
+  - 状态姿态表 `STATE_POSES` 与周期动作 `StateMotion`（`shion/v3_display.py`），只用原型 Pose 已有字段（头部位移/旋转、身体下压、手臂角度）。working 头略低 + 每 4～6 秒轻点头（0.5 秒）；neglect1/neglect2 低头；slump 下压低头手臂收拢；collapse 最大下压低头（站姿）；desk 低头；sleep/bed/neglect1/slump/collapse 呼吸和眨眼放慢；yawn 每 6～8 秒一次上抻（约 2.5 秒）；dizzy 头部画圈（半秒渐入）；喂零食时点头咀嚼。stop 双臂略外抬作占位。幅度是初值。
+  - 窗口接入（`V3PetWindow._v3_state_pose`）：静态姿态 0.35 秒缓动到位；换状态时上一状态的周期动作余量衰减掉，不跳；捏脸/摸头/敲头/挠痒/拎起期间整体淡出、结束淡回；周期动作进行中临时 30 FPS，其余帧率不变；全部走仿射路径。V2 动画器的整图点头在 V3 下关掉（`Animator.whole_nod`，V2 默认不变），避免叠两次。
+  - 原型唯一改动：`Settings.breath_rate`、`Settings.blink_gap`（默认 1，呼吸/眨眼时间线逐位不变；呼吸相位用单独累加的 `breath_time`，改速率不跳相）。
+  - 碎屑锚点：`PetWindow.mouth_anchor()`（V2 位置不变）与 `start_chewing()`（V2 什么也不做）；V3 覆盖为 rig 嘴部中心，跟随低头/点头和 V2 压扁/倾斜/跳。控制器和 `--panel eating` 截图都改用它。
+  - 参考图工具 `tools/v3_art_refs.py`（`refs` 生成 GPT 输入参考图和 refs.json，`pad` 把 GPT 输出等比缩放白边补齐）；`tools/v3_perf.py` 加 `state:<名字>` 场景。
+  - **需新画清单**写进 `docs/v3-integration-plan.md`“需新画清单”章节，按用户定序：working 道具 > 右鼓版脸部底板 > collapse/slump > desk/bed > stop > yawn > neglect1；每项写明 GPT 输入参考图（含尺寸）、背景、分层、切片/对位工具、接入改动位置。
+- **试拼三表情**（S0 留下的部件按现五官比例缩放，`build/v3/integrate/s6/trial-faces.png`）。用户决定：**slump、neglect1 采用**；yawn 嘴 ×1.0 不采用，另出以嘴中心放大 1.6 / 1.8 倍的对比（`build/v3/integrate/s6/trial-yawn.png`），**用户选 1.8 倍**。
+- **新表情接入**：新工具 `tools/v3_s0_faces.py` 生成 `tired`（neutral 底 + 半闭眼）和 `bored`（neutral 底 + 半闭眼 + 波浪嘴）的五官图，以及 `yawn`（sleep 底 + 张大嘴放大 1.8 倍，`YAWN_SCALE`）（`assets/sprites/v3/expressions/expr_tired_*`、`expr_bored_*`、`expr_yawn_*`）并写 rig.json（部件、`faces`、表情槽位，眨眼轴取新眼底边上 1 像素）；`tools/v3_face_features.py REGIONS` tired/bored 沿用 neutral 范围、yawn 沿用 sleep；再跑 `tools/v3_cheek.py` 重建捏脸素材（原 8 个表情的素材重建后逐字节不变）。`STATE_EXPRESSIONS` 改为 slump→tired、neglect1→bored、yawn→yawn，预热自动包含。生成命令：`python -m tools.v3_s0_faces` 然后 `python -m tools.v3_cheek`。检查图 `build/v3/integrate/s6/new-faces-check.png`、`yawn-check.png`（睁眼/眨眼中/捏脸三格正常，yawn 与 sleep 行为一致）。踩坑：Rig 加载时校验捏脸素材必须覆盖全部表情，所以工具先移除 `interactions.cheek_left`，由 `v3_cheek` 整体重建。
+- **状态总览**：`build/v3/integrate/s6/states-dpr1.png`、`states-dpr1.5.png`（`tools/v3_state_sheet.py`，四档高度 × 全部状态）。
+- **性能**（真实窗口 320@1.5，各 30 秒，`build/v3/integrate/s6/perf*.jsonl`）：同一时段对比 S6 前（`499c6b4`）/后：待机单核 34.5%→32.2%，工作 29.3%→30.1%，**S6 没有带来退化**。slump 19.9%、collapse 18.7%（比待机低，帧率降到 9～12）；dizzy 68.2%（总 CPU 2.1%，V2 本来就整图 60 FPS 摇晃，且 dizzy 是几秒的临时状态）。今天整体比 S2 记录高（V2 待机 24.5% vs S2 22.0%，V3 待机 32% vs S2 17.8%），按 S2 的工作线（≤V2 待机单核）V3 working 超线，改动前就超；机器状态不同，**留 S7 统一复测评估**，和内存一起。
+- **测试**：新增 `tests/test_v3_state_pose.py` 18 项（姿态表覆盖、工作点头间隔、哈欠/画圈/咀嚼、压身体时头跟着脖子、换状态不跳、点头走仿射且 V2 不再整图点头、呼吸眨眼放慢、互动淡出淡回、嘴部锚点位置与跟随、V2 锚点不变、原型默认时间线不变、参考图尺寸与 refs.json 一致、pad）回归（V3 全部 + pet_window/touch_actions/motion_update/idle_life/controller/state/lines/animator/effects）**850 passed、1 skipped、0 失败**，日志 `build/v3/integrate/s6/s6-regression.log`。接入 tired/bored 后重跑（加 1 条映射测试）：851 中 1 条失败——`test_v3_slice.py::test_committed_rig_v2_is_consistent` 只认三种部件来源，新增来源 `s0_part` 后补进允许列表（`source` 在代码里只用来区分垫底），该文件重跑 16 passed；日志 `s6-regression-2.log`。接入 yawn 后同组回归 **851 passed、1 skipped、0 失败**（`s6-regression-3.log`）。
+- **验收工具**：`tools/v3_state_preview.py`（只开 V3 窗口 + 按钮面板，可切到菜单里没有的 neglect1/yawn/slump/collapse，带“喂零食”按钮；不连 Claude、不读写存档）。喂零食碎屑和菜单固定表情另用隔离启动的完整应用看（`SHION_INSTANCE_NAME` / `SHION_DATA_DIR=build3\integrate\s6\data` / `SHION_PORT=47699`）。
+- **验收**：用户按下列清单用预览工具和隔离启动的完整应用验收，回复“没问题”。清单：① 菜单固定表情逐个切：working 低头和点头、neglect1/2 低头、slump/collapse 下压低头、yawn 偶尔上抻、dizzy 头画圈、desk 低头，切换不跳；② 工作中点头自然、不和整图点头叠加；③ 喂零食：碎屑从嘴里掉、头在点；④ 低体力状态下捏脸/摸头时姿态先收回、松手后回去；⑤ slump、neglect1、yawn 的新表情在桌面尺寸下看着对、眨眼正常。
 
 #### 2026-11-10：S5 收尾（用户认可 S5 处理）
 

@@ -5,6 +5,7 @@
 python -m tools.v3_perf                      # whole matrix, ~1 hour, results in build/v3/integrate/perf/
 python -m tools.v3_perf --round2             # idle/working everywhere (60 s) + 320@1.5 pinch/lift spot check
 python -m tools.v3_perf --only v3 320 1.5 pinch 10   # one run, prints one JSON line
+python -m tools.v3_perf --only v3 320 1.5 state:slump 30   # 只切状态不互动
 
 Every run is a separate process with a real (non-offscreen) window. Nothing is
 connected and no save file is read or written. DPR 1 uses QT_ENABLE_HIGHDPI_SCALING=0.
@@ -53,7 +54,10 @@ def run_one(renderer, height, dpr, scenario, seconds):
         win = V3PetWindow(height=height, debug=False)
     avail = QGuiApplication.primaryScreen().availableGeometry()
     win.move(avail.center().x() - win.width() // 2, avail.bottom() - win.height())
-    win.set_state('working' if scenario == 'working' else 'idle', animate=False)
+    # 'state:<名字>'：只切到该状态、不互动（S6 抽查 slump / dizzy 等状态姿态）
+    state = scenario.split(':', 1)[1] if scenario.startswith('state:') else (
+        'working' if scenario == 'working' else 'idle')
+    win.set_state(state, animate=False)
     win.show()
 
     paints, durations, stamps = [0], [], []

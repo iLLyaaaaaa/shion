@@ -489,7 +489,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         scene_pet.move(body[0] - MARGIN_X, body[1] - MARGIN_TOP)
         body = scene_pet.body_rect()
     if kind == "eating":
-        from shion.effects import CrumbOverlay, MOUTH_FRACTION
+        from shion.effects import CrumbOverlay
         win = window_class(renderer)(autostart=False, debug=False)
         win.set_state("happy", animate=False)
         img = win.render_frame()
@@ -503,8 +503,8 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         crumbs.fill(0)
         panel.render(crumbs)
         p = QPainter(img)
-        sw, sh = win.sprite_size
-        p.drawImage(MARGIN_X + sw // 2 - panel.SIZE // 2, MARGIN_TOP + round(sh * MOUTH_FRACTION) - 40, crumbs)
+        mouth = win.mapFromGlobal(win.mouth_anchor())  # V2 与原来同一位置；V3 是 rig 嘴部
+        p.drawImage(mouth.x() - panel.SIZE // 2, mouth.y() - 40, crumbs)
         p.end()
         win.close()
     elif kind in ("dialogue", "snacks"):

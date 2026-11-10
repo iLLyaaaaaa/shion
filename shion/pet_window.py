@@ -240,6 +240,15 @@ class PetWindow(QWidget):
         """精灵本体的屏幕矩形 (x, y, w, h)，不含留边。"""
         return (self.x() + MARGIN_X, self.y() + MARGIN_TOP, self._sw, self._sh)
 
+    def mouth_anchor(self) -> QPoint:
+        """嘴部位置（全局坐标），喂零食的碎屑从这里掉。"""
+        from shion.effects import MOUTH_FRACTION
+        x, y, w, h = self.body_rect()
+        return QPoint(x + w // 2, y + round(h * MOUTH_FRACTION))
+
+    def start_chewing(self, seconds: float) -> None:
+        """喂零食开始。V2 精灵没有咀嚼动作，什么也不做；V3 窗口点头咀嚼。"""
+
     def moveEvent(self, e) -> None:
         super().moveEvent(e)
         if self._sleep_z is not None:

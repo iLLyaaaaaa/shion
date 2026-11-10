@@ -27,6 +27,8 @@ class Settings:
     pinch: bool = True
     breath_amount: float = 1.0
     blink_amount: float = 1.0
+    breath_rate: float = 1.0  # 呼吸快慢倍数（<1 变慢）；1 时与原来逐位相同
+    blink_gap: float = 1.0    # 眨眼间隔倍数（>1 变稀）；1 时与原来逐位相同
     sway_degrees: float = 2.0
     pinch_maximum: float = 120.0
     pinch_radius: float = 110.0
@@ -85,6 +87,7 @@ class Animator:
         self.star_rng = random.Random(star_seed)
         self._star_bursts = ()
         self.time = 0.0
+        self.breath_time = 0.0  # 按 breath_rate 推进的呼吸相位时钟
         self.clock = now
         self.reaction = ReactionState()
         self.head_touch = HeadState()
@@ -106,7 +109,7 @@ class Animator:
         self._last_expression = settings.expression
 
     def reset_blink(self):
-        self.blink_start = self.time + self.rng.uniform(3, 6)
+        self.blink_start = self.time + self.rng.uniform(3, 6) * self.settings.blink_gap
         self.double_pending = False
 
     def press(self, point, now=None):
@@ -316,11 +319,13 @@ class Animator:
             step = min(remaining, 1 / 120)
             remaining -= step
             self.time += step
+            breath_step = step * self.settings.breath_rate
+            self.breath_time += breath_step
             if self.settings.sway:
                 drive=0.
                 if self.settings.breath:
-                    head=breathing(self.time,self.settings.breath_amount)[1]
-                    previous=breathing(self.time-step,self.settings.breath_amount)[1]
+                    head=breathing(self.breath_time,self.settings.breath_amount)[1]
+                    previous=breathing(self.breath_time-breath_step,self.settings.breath_amount)[1]
                     drive=-(head-previous)/step*.10
                 for i, n in enumerate(SWAY_PARTS):
                     ph = self.phases[n]
@@ -369,9 +374,9 @@ class Animator:
                 self.blink_start += 0.24
                 self.double_pending = True
             else:
-                self.blink_start += self.rng.uniform(3, 6)
+                self.blink_start += self.rng.uniform(3, 6) * s.blink_gap
                 self.double_pending = False
-        scale, head_y = breathing(self.time, s.breath_amount) if s.breath else (1., 0.)
+        scale, head_y = breathing(self.breath_time, s.breath_amount) if s.breath else (1., 0.)
         r = self.reaction
         if self.head_touch.active:
             r = self.head_touch

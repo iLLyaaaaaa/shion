@@ -24,7 +24,7 @@ from shion.chat_activity import ChatActivity
 from shion.activity import ActivityLog, describe, make_entry, parse_working
 from shion.bubble import BubbleWindow
 from shion.behavior import IDLE_EXPRESSIONS, IDLE_EXPRESSION_WEIGHTS, IdleBehavior, NEGLECT_DESK_CHANCE
-from shion.effects import HeartOverlay, CrumbOverlay, MOUTH_FRACTION
+from shion.effects import HeartOverlay, CrumbOverlay
 from shion.dialogue import DialoguePanel
 from shion.menu_content import MenuContent, localized
 from shion.lines import Lines
@@ -1594,8 +1594,7 @@ class PetController(QObject):
 
     # ------------------------------------------------------------ 菜单
     def _mouth_anchor(self) -> QPoint:
-        x, y, w, h = self.window.body_rect()
-        return QPoint(x + w // 2, y + round(h * MOUTH_FRACTION))
+        return self.window.mouth_anchor()
 
     def open_dialogue(self) -> None:
         if self.hub.permissions.pending():
@@ -1631,6 +1630,7 @@ class PetController(QObject):
                 set_topmost(self._crumbs, self.state.save.always_on_top)
             self._crumbs.start(self._mouth_anchor(), self.state.save.window["height"],
                                self.state.config.eating_for.total_seconds())
+            self.window.start_chewing(self.state.config.eating_for.total_seconds())
         response = item.responses[0]
         if not self.state.save.bubble_muted and self._speech.allows(
                 self.window.monotonic_time(), Priority.MEDIUM, "dialogue"):

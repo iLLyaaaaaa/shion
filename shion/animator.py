@@ -162,6 +162,8 @@ class Animator:
         nod_rng = random.Random()
         nod_rng.setstate(self._rng.getstate())
         self._nod_rng = nod_rng
+        # V3 自己点头（只动头）；设为 False 时不再给整张图加点头，节奏仍照常推进
+        self.whole_nod = True
         self._nod_enabled = False
         self._next_nod = math.inf
         self._nod_at = -math.inf
@@ -218,6 +220,8 @@ class Animator:
             self._nod_at = self._next_nod
             self._next_nod += self._nod_rng.uniform(*WORKING_NOD_INTERVAL)
         p = (now - self._nod_at) / WORKING_NOD_DURATION
+        if not self.whole_nod:
+            return 0.0
         return math.sin(math.pi * p) ** 2 if self._nod_enabled and 0 < p < 1 else 0.0
 
     # ---- 压扁 ----
