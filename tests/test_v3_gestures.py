@@ -403,7 +403,10 @@ def test_mouse_handler_cost_stays_far_below_the_frame_budget(qapp):
         t0 = time.perf_counter()
         w._v3_hit(QPointF(find(w, "crown")) + QPointF(i % 7, 0))
         hit_times.append((time.perf_counter() - t0) * 1000)
-    assert np.percentile(hit_times, 95) < 1.5, np.percentile(hit_times, 95)
+    # 单独跑 P95 约 0.3～0.5ms；长时间全量跑时机器有负载，曾到 1.57ms。
+    # 线放到 3ms：仍不到 60 FPS 一帧（16ms）的五分之一，真退化（例如每次命中都
+    # 重新合成图层，约 10ms 以上）照样会抓到。
+    assert np.percentile(hit_times, 95) < 3.0, np.percentile(hit_times, 95)
     w.close()
 
 
