@@ -873,3 +873,53 @@ V3 立绘改成“零件 + 转轴”，为以后的呼吸、眨眼、头发摆�
 - 转换从当前根位置接续，不瞬移；脸颊拉伸在整个人拖动期间保持，松手或失焦后才进入原欠阻尼弹簧回弹。持有与回弹分开，不让脸颊在拎起期间提前回正。关闭捏脸仍允许脸颊作为拎起入口。
 - 肚子取消 40px 转拎起；120px 内可继续揉动，超出暂停并清空反转采样，回来重新揉动。身体、手臂和腿不提供拎起入口，敲头/摸头保留原手势。
 - 预览提示、基准及拎起快照同步改为脸颊抓取；挠痒转拎起的演示表示松开肚子后重新抓脸颊。本次仍仅 V3 独立预览，不接入 shion。
+
+## V3 正式接入（V3 第 2 步 S1–S7，2026-11-09～11-10，开发预览）
+
+V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer v3`（运行与 `--snapshot` 都支持），**默认仍是 V2**，不写存档里的渲染器选择。分支 `feature/v3-integrate`，未合并 master。
+
+### 结构
+- `shion/v3_window.py`：`V3PetWindow(PetWindow)`，窗口属性、状态机接口、V2 程序动作帧（压扁/倾斜/跳）、拖动/下落/夹边和所有信号沿用父类，只换“画什么”和手势命中。`app.window_class()` 按 `--renderer` 选窗口类。
+- `shion/v3_display.py`：状态→表情映射 `STATE_EXPRESSIONS`、状态姿态 `STATE_POSES` / 周期动作 `StateMotion`、帧间隔 `frame_interval`、换边判断 `desired_side`、绘制量化键 `draw_key`。
+- `shion/v3_layers.py`：两条渲染路径与待机头发间歇轻摆 `SwayEnvelope`。
+- `shion/v3_prewarm.py`：眨眼开合度量化（0.05 一档，19 档）与后台预热线程。
+- `shion/v3_memory.py`：窗口用 rig 的省内存处理（S7）。
+- `v3proto/`：原型渲染核心（rig、头部表面、捏脸、反应脸、手势与动画），窗口只用它的公开入口；原型改动都保持默认行为不变。
+
+### 尺寸与显示
+- V3 可见身高对齐 V2 同档 idle（V2 不透明高度 480/512），窗口高度、脚底线与 V2 相同；纹理比例 = 显示高度 × DPR ÷ rig 可见高度，QImage 1:1 绘制。改尺寸/换屏 DPR 时重建或复用渲染器（每侧最多缓存 2 份）。
+- 点穿遮罩外扩 4px，最多 10 次/秒更新；拎起中每帧重建；V2 帧（sx/sy/角度/跳）相对上次遮罩漂移 ≥3px 时提前重建。
+- 气泡/菜单/面板按 V3 头顶锚点定位；吃零食碎屑用 `mouth_anchor()`（V3 为 rig 嘴部中心）。
+
+### 渲染路径与帧节奏
+- **仿射路径**：头发静止、无捏脸形变、无反应脸、无金星时，身体用 QPainter，头部用缓存帧整张平移/旋转。**网格路径**：其余情况（头发摆动、捏脸、拍/敲/挠/拎起反应、金星）。两路径同姿态平均差 <0.1/255。
+- 待机头发间歇轻摆：每 6～12 秒一次、约 2.5 秒，0.6 秒淡入淡出；互动时立即满幅。
+- 帧间隔：互动/程序动作/头发大幅摆动 16ms；睡眠类 66ms；头发静止的待机 66ms、工作 50ms；眨眼和轻摆开始前后、状态周期动作进行中 33ms；画面量化键不变时跳过重画。
+
+### 手势（只用 V3 命中：cheek/crown/face/head/belly/body）
+- **捏脸**：脸颊左右拉，`gesture("cheek_pull")` 只发一次、松手 `cheek_release`；10 秒内第 3 次起说 `cheek_pull_combo`。
+- **拎起（唯一挪窗口的方式）**：脸颊上相对按下点向上 >12 逻辑像素且竖向 >1.2×横向 → 真实移动窗口，复用 PetWindow 拖动/慢放停留/快甩或放到任务栏下落/落地压扁；台词 `cheek_lift`；来回 ≥24px 三次/2 秒晃晕。在脸颊以外拖动超过点击容差时窗口不动，发 `drag_ignored`，控制器 LOW 优先级说 `v3_lift_hint`（冷却 60 秒）；首次以 V3 启动约 10 秒后提示一次，说出后写存档 `v3_lift_hint_shown`（旧存档默认 False）。
+- **摸头**：crown 区域来回摸，每 40px 发 `patted`（好感/统计照旧）。
+- **敲头**：crown 单击，只播 V3 敲头动画，发 `knocked(bool)`（1.5 秒内第 3 下为抗议），**不算戳**、无好感/统计；台词 `head_knock` / `head_knock_stop`（LOW，4 秒类别冷却）。
+- **挠痒**：肚子上来回揉，`gesture("tickle")` 开始并每 4 秒重复，停手 1 秒 `tickle_end`；肚子单击是普通戳（与 V2 不同，已告知用户）。
+- 新台词键三语齐全：`cheek_pull_combo`、`cheek_lift`、`v3_lift_hint`；`head_knock`、`head_knock_stop` 已启用。
+
+### 状态表现
+- 表情：idle/working→neutral，neglect1→bored，slump→tired，happy/done/cheer→happy，proud→smug，stop→angry，dizzy→dizzy，neglect2→teary，yawn→yawn，collapse/sleep/bed/desk→sleep，drag→surprised。bored/tired/yawn 由 `tools/v3_s0_faces.py` 用 S0 部件拼成。
+- 姿态（只用 Pose 已有字段）：working 头略低、每 4～6 秒轻点头；neglect1/2 低头；slump/collapse 下压低头；desk 低头；yawn 每 6～8 秒上抻；dizzy 头部画圈；喂零食点头咀嚼；stop 双臂略外抬（占位）。静态姿态 0.35 秒缓动，换状态不跳，互动期间整体淡出。V3 下关掉 V2 整图点头（`Animator.whole_nod`）。
+- 需新画素材清单与优先级见 `docs/v3-integration-plan.md`“需新画清单”。
+
+### 换边（已实现，默认关闭）
+- 窗口中心在可用区域右半 → 左鼓，左半 → 右鼓，中线死区 max(5% 宽, 40px)；只在停稳 0.5 秒且无互动时判断，后台准备另一侧，在一次眨眼的闭眼帧切换并“啵”一下；旧侧闲置 5 分钟释放。
+- 右鼓素材（S5a 镜像脸部底板）桌面尺寸下不合格，`auto_side` 默认 False，`SHION_V3_AUTO_SIDE=1` 可试用；等新画右鼓版脸部底板。
+
+### 预热、缓存与内存（S7 版本）
+- 后台单个低优先级守护线程，排序：当前表情睁眼帧与最深闭眼档、当前表情捏脸素材 → 其余表情睁眼帧 → 其余表情捏脸素材 → 反应脸补丁；当前表情的 19 档眨眼帧在不互动时补齐，互动时取消排队中的眨眼帧。结果只在主线程写入缓存；预热未好时用最近已缓存档位。启动后约 10 秒做完。
+- 缓存上限：头部帧 64、仿射用 QImage 64、头发位移场每缕 24（float32）、反应脸补丁 40、反应脸遮罩 8、捏脸眨眼保护 32。
+- 窗口用 rig 经 `compact_rig`：整画布稀疏遮罩（各表情捏脸保护遮罩、两张刘海遮罩、pink_cleanup）只存有内容的一块（`SparseCanvas`，crop 结果逐像素相同），有 face_plate 时释放用不到的 face_contour。
+- 工具：`python -m tools.v3_mem`（离屏或真实窗口的分项字节数与进程工作集）；`python -m tools.v3_perf`（真实窗口 FPS/CPU，`--warmup 20` 排除启动预热）。
+
+### 性能与内存验收线
+- 互动场景 DPR1.5：160/200 平均 ≥55 FPS、计算+绘制 P95 ≤14ms；260/320 ≥50 FPS、P95 ≤20ms。
+- 待机：总 CPU ≤3% 且单核不超过 V2 同档待机的 2 倍；工作：总 CPU ≤3% 且单核不超过 V2 同尺寸同 DPR 的待机单核。CPU 需与 V2 在同一时段测，并等预热做完（`--warmup 20`）。
+- 内存（S7）：真实应用总工作集（260 高、启动后 25 秒）≤230MB。

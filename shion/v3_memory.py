@@ -14,10 +14,14 @@ import numpy as np
 class SparseCanvas:
     """只存非零那一块和它的位置；crop 结果与原图 crop 逐像素相同（画布外和空白处都是 0）。"""
 
-    def __init__(self, image):
+    def __init__(self, image, alpha_only: bool = False):
+        """alpha_only：只用于整张叠加的 RGBA 图（pink_cleanup），按 alpha 取范围；
+        透明像素的颜色值叠加时不起作用。用于 crop 的图必须按全部通道取范围。"""
         self.size = image.size
         self.mode = image.mode
         a = np.asarray(image)
+        if alpha_only:
+            a = a[..., 3]
         nonzero = a.any(axis=-1) if a.ndim == 3 else a != 0
         rows, cols = np.nonzero(nonzero)
         if rows.size:
@@ -59,7 +63,7 @@ def compact_rig(rig):
     for name in ("fringe_mask", "source_fringe_mask", "pink_cleanup"):
         image = getattr(rig, name, None)
         if image is not None and not isinstance(image, SparseCanvas):
-            setattr(rig, name, SparseCanvas(image))
+            setattr(rig, name, SparseCanvas(image, alpha_only=name == "pink_cleanup"))
     if rig.face_plate is not None:
         rig.face_contour = None  # 两处合成都在用到它之前 continue 了
     return rig
