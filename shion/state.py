@@ -235,6 +235,7 @@ class SaveData:
     claude_link_enabled: bool = True  # 临时关闭联动时为 False；旧档没有这个字段 = 开启
     time_speech: dict = field(default_factory=lambda: {"date": "", "spoken": []})
     connection_prompt: Optional[str] = None  # pending / connect / later / skipped；旧档启动时标 skipped
+    v3_lift_hint_shown: bool = False  # V3 窗口“捏着脸往上提”的首次提示已经说过
 
     weekly_stats: dict = field(default_factory=dict)
     usage_enabled: bool = True
@@ -274,6 +275,7 @@ class SaveData:
             "claude_link_enabled": self.claude_link_enabled,
             "time_speech": {"date": self.time_speech["date"], "spoken": list(self.time_speech["spoken"])},
             "connection_prompt": self.connection_prompt,
+            "v3_lift_hint_shown": self.v3_lift_hint_shown,
         }
 
     @classmethod
@@ -324,6 +326,7 @@ class SaveData:
         d.time_speech = _time_speech_record(raw.get("time_speech"))
         prompt = raw.get("connection_prompt")
         d.connection_prompt = prompt if prompt in ("pending", "connect", "later", "skipped") else None
+        d.v3_lift_hint_shown = _bool(raw.get("v3_lift_hint_shown"), False)
         lang = raw.get("language")
         d.language = lang if isinstance(lang, str) and lang else None
         expr = raw.get("fixed_expression")
@@ -691,12 +694,12 @@ class PetState:
     def sleep_in_bed(self, now: datetime) -> bool:
         return self._menu_sleep or (self._in_night(now) and self._is_asleep(now))
 
-    def drag_start(self, now: datetime) -> list[Reaction]:
+    def drag_start(self, now: datetime, line: str = "drag") -> list[Reaction]:
         reactions = self._touch(now, attend=True)
         self._dragging = True
         self._poke_count, self._last_poke = 0, None
         if not reactions:
-            reactions.append(_say("drag"))
+            reactions.append(_say(line))
         self._log_state(now)
         return reactions
 

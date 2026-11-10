@@ -89,6 +89,12 @@ def _locked(surface):
     original_prepare = surface.cheek.prepare
 
     def prepare(*args, **kwargs):
+        # 主线程每帧都会调一次。该表情的素材已经有了（或没有捏脸配置）时原函数什么都不做，
+        # 这时不能去抢锁——后台正在合成眨眼帧时，抢锁会让这一帧白等最多 45ms。
+        cheek = surface.cheek
+        settings = args[1] if len(args) > 1 else kwargs.get("settings")
+        if settings is not None and (not cheek.config or settings.expression in cheek.backgrounds):
+            return None
         with lock:
             return original_prepare(*args, **kwargs)
     surface.cheek.prepare = prepare
@@ -170,6 +176,15 @@ class Prewarmer:
             return
         self.blink_requested.add(expression)
         self.request(expression, BLINK_LEVELS)
+
+    def cancel_blinks(self) -> None:
+        """互动时不让后台继续合成眨眼帧（它们会占着锁，主线程渲染要等）。排队中的取消，
+        正在跑的那一张（最多约 45ms）跑完；互动结束后 request_blinks 会补回来。"""
+        for key, future in list(self.pending.items()):
+            if key[0] != CHEEK_KEY and key[1] < 1.0 and future.cancel():
+                del self.pending[key]
+                self.requested.discard(key)
+                self.blink_requested.discard(key[0])
 
     def _build(self, settings, level):
         if self.closed:

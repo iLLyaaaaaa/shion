@@ -181,9 +181,9 @@ class Animator:
         self.cancel_head()
         self.reset_blink()
 
-    def move_lift(self, offset, logical_x, now=None):
+    def move_lift(self, offset, logical_x, now=None, clamp=True):
         if now is not None:self.clock = max(self.clock, now)
-        self.lift = move_lift(self.lift, offset, logical_x, self.clock)
+        self.lift = move_lift(self.lift, offset, logical_x, self.clock, clamp)
 
     def release_lift(self, now=None):
         if now is not None:self.clock = max(self.clock, now)

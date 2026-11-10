@@ -18,8 +18,7 @@ from PySide6.QtGui import QBitmap, QGuiApplication, QImage, QPainter, QRegion, Q
 
 from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREATH_AMP,
                             WORKING_BREATH_AMP, WORKING_BREATH_PERIOD)
-from shion.behavior import (BELLY_LIFT_DISTANCE, CHEEK_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS,
-                            TICKLE_STOP_SECONDS)
+from shion.behavior import BELLY_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS, TICKLE_STOP_SECONDS
 from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX,
                               MASK_GROW, PetWindow)
 from shion.v3_display import (STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, draw_key,
@@ -29,8 +28,11 @@ from shion.v3_prewarm import Prewarmer, quantize_eye
 
 RENDERER_CACHE = 2
 SIDE_PADDING = 48  # rig 像素：头发摆动、倾斜时不被裁掉
-BELLY_DRAG_DISTANCE = BELLY_LIFT_DISTANCE  # 没在挠时拖出这么远，转整窗拖动
+BELLY_HINT_DISTANCE = BELLY_LIFT_DISTANCE  # 肚子上没在挠、拖出这么远：提示“要拎脸颊”
+LIFT_UP = 12.0     # 逻辑像素：脸颊上向上超过这么多，且竖向 > LIFT_RATIO × 横向，才算拎起
+LIFT_RATIO = 1.2
 MASK_INTERVAL = 0.1  # 秒：遮罩最多 10 次/秒
+MASK_DRIFT_PX = 3.0  # 轮廓自上次遮罩漂过这么多像素就提前重建（遮罩外扩 MASK_GROW=4px）
 PROGRAM_FAST_DEGREES_PER_SECOND = 8.0  # V2 程序动作：倾斜变化快于此用 60 FPS
 PROGRAM_FAST_SCALE_PER_SECOND = 0.2    # 压扁/拉伸变化快于此用 60 FPS
 SWAY_DEGREES = 2.0  # 轻摆满幅（原型默认值）
@@ -65,6 +67,8 @@ class V3PetWindow(PetWindow):
     renderer_name = "v3"
     # 敲头：True 表示 1.5 秒内第 3 下（抗议）。不算戳，不加好感。
     knocked = Signal(bool)
+    # 在脸颊以外按住拖动超过点击容差（窗口不动）：控制器用它提示“捏着脸往上提”。
+    drag_ignored = Signal()
 
     # ---- 尺寸与渲染器 ----
     def _v3_setup(self) -> None:
@@ -74,9 +78,17 @@ class V3PetWindow(PetWindow):
         self._v3_rig = shared_rig("left")
         self._v3_renderers: OrderedDict[tuple, object] = OrderedDict()
         self._v3_prewarmers: dict[tuple, Prewarmer] = {}
-        # 捏脸、敲头、摸头、挠痒用 V3 手势（S3）；拎起 S4 接入，先关着。
+        # 捏脸、敲头、摸头、挠痒（S3）和拎脸颊（S4）都用 V3 手势。
         self._v3_settings = Settings(expression="neutral", pinch=True, knock=True,
-                                     pat=True, lift=False, tickle=True)
+                                     pat=True, lift=True, tickle=True)
+        self._v3_lifting = False
+        self._v3_skip_refresh = False
+        self._v3_lift_origin = QPoint()
+        self._v3_lift_dizzy = False
+        self._v3_idle_moved = False
+        self._v3_ignored_sent = False
+        self._v3_belly_tickled = False
+        self._v3_press_point = None
         from v3proto.head_touch import HeadGesture
         from v3proto.tickle import BellyGesture
         self._v3_head_gesture = HeadGesture()
@@ -94,7 +106,7 @@ class V3PetWindow(PetWindow):
         self._v3_key = None
         self._v3_angles: dict | None = None
         self._v3_mask_at = -1e9
-        self._v3_mask_key = None  # 上次建遮罩时的 V2 帧键；变了就立刻重建
+        self._v3_mask_frame = None  # 上次建遮罩时的 V2 帧 (sx, sy, angle, jump)
         self._v3_mask_force = True
         self._v3_mask_state = None
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
@@ -239,6 +251,8 @@ class V3PetWindow(PetWindow):
                 or abs(f.sx - last.sx) > PROGRAM_FAST_SCALE_PER_SECOND * dt)
 
     def _refresh(self, now: float) -> None:
+        if self._v3_skip_refresh:
+            return
         stats = self._v3_stats
         stats["refresh"] += 1
         self._animator.idle_enabled = not (self.motion_active or self._dragging or self._falling
@@ -262,12 +276,20 @@ class V3PetWindow(PetWindow):
             self._v3_sway.force(now)
         self._v3_settings.sway_degrees = SWAY_DEGREES * self._v3_sway.value(now)
         pose = animator.advance(dt)
+        if animator.lift.active:
+            pose.root_offset = (0.0, 0.0)  # 窗口自己在动；root_roll / 身体 / 手臂照常
         prewarmer = self._v3_prewarmer
         prewarmer.collect()
-        prewarmer.request_blinks(expression)
+        if animator.interaction_active or self.is_pressed or self._dragging:
+            prewarmer.cancel_blinks()
+        else:
+            prewarmer.request_blinks(expression)
         eye = quantize_eye(pose.eye_scale)
         if pose.reaction_face is None:
             eye = prewarmer.choose(expression, eye)
+        elif eye < 1.0 and (pose.reaction_face, round(eye, 5), False) not in \
+                self._v3_renderer.head_surface.reaction_face.cache:
+            eye = 1.0  # 反应脸的眨眼补丁没算过：这次不眨（现算一张约 50ms，会卡一下）
         if eye != pose.eye_scale:
             pose = replace(pose, eye_scale=eye)
         moving_hair = hair_moving(self._v3_angles, pose.angles, dt)
@@ -298,12 +320,13 @@ class V3PetWindow(PetWindow):
         image.setDevicePixelRatio(self._v3_dpr)
         self._v3_image = image
         stats["rendered"] += 1
-        # 遮罩最多 10 次/秒；但 V2 帧（倾斜/压扁/跳）在变时轮廓每帧都在动，遮罩滞后会
-        # 把落地回弹时伸出遮罩的头发尖裁掉（看起来闪一下），这时每帧重建。
+        # 遮罩最多 10 次/秒；但 V2 帧（倾斜/压扁/跳）快速变化时轮廓每帧都在动，遮罩滞后会
+        # 把落地回弹时伸出遮罩的头发尖裁掉（看起来闪一下），这时才每帧重建。
+        # 判据是“轮廓相对上次遮罩漂了多少像素”，不是“有没有按着鼠标”：setMask 是原生调用，
+        # 约 4ms/次，按着摸头时每帧重建会让每帧多花 5ms。
         if (self._v3_mask_force or now - self._v3_mask_at >= MASK_INTERVAL
-                or (program and frame_key != self._v3_mask_key)):
+                or self._v3_mask_stale(f) or self._v3_animator.lift.active):
             self._update_mask(now)
-            self._v3_mask_key = frame_key
         self.update()
         if self._fps_overlay is not None:
             self._fps_overlay.follow()
@@ -355,13 +378,19 @@ class V3PetWindow(PetWindow):
     def mousePressEvent(self, e) -> None:
         super().mousePressEvent(e)
         self._v3_gesture = None
-        if e.button() != Qt.LeftButton or self._press_global is None or self._caught_fall:
+        self._v3_idle_moved = False
+        self._v3_ignored_sent = False
+        self._v3_belly_tickled = False
+        if e.button() != Qt.LeftButton or self._press_global is None:
             return
         hit, local, point = self._v3_hit(e.position())
-        if hit == "cheek":
+        if hit == "cheek":  # 接住下落中的宠物时也可以捏、可以拎
             self._v3_gesture = "cheek"
             self._v3_cheek_started = False
             self._v3_cheek_local = local
+            self._v3_press_point = point
+        elif self._caught_fall:
+            self._v3_gesture = "idle"
         elif hit == "crown":
             self._v3_gesture = "crown"
             self._v3_head_gesture.press((e.position().x(), e.position().y()))
@@ -372,25 +401,51 @@ class V3PetWindow(PetWindow):
             self._v3_belly_moved = False
             self.gesture.emit("belly")
             self.setCursor(Qt.ClosedHandCursor)
-        elif hit in ("face", "head"):
-            self._v3_animator.impulse(1 if point[0] >= self._v3_rig.pivots["neck"][0] else -1)
+        else:
+            # 脸、头发、身体、空白：只能点击（戳）。窗口只能靠拎脸颊移动，按住拖不动。
+            if hit in ("face", "head"):
+                self._v3_animator.impulse(1 if point[0] >= self._v3_rig.pivots["neck"][0] else -1)
+            self._v3_gesture = "idle"
+
+    def stop_motion(self) -> None:
+        # 摸头每 40px 控制器会调一次；父类末尾会立刻同步渲染一帧（V3 约 10ms），手势进行中
+        # 交给定时器下一帧画。
+        self._v3_skip_refresh = self._v3_gesture is not None
+        try:
+            super().stop_motion()
+        finally:
+            self._v3_skip_refresh = False
+
+    def _v3_notify_ignored(self) -> None:
+        if not self._v3_ignored_sent:
+            self._v3_ignored_sent = True
+            self.drag_ignored.emit()
 
     def mouseMoveEvent(self, e) -> None:
         kind = self._v3_gesture
         if kind is None or self._press_global is None or not (e.buttons() & Qt.LeftButton):
             super().mouseMoveEvent(e)
             return
+        a = self._v3_animator
+        now = self._clock()
+        if self._v3_lifting:
+            super().mouseMoveEvent(e)  # 真实窗口跟着鼠标走（父类的拖动分支）
+            self._v3_lift_follow()
+            return
         gp = e.globalPosition().toPoint()
         self._release_velocity.feed(self._clock(), gp.x(), gp.y())
         d = gp - self._press_global
         distance = math.hypot(d.x(), d.y())
         pos = (e.position().x(), e.position().y())
-        a = self._v3_animator
-        now = self._clock()
+        if kind == "idle":
+            if distance > DRAG_THRESHOLD:
+                self._v3_idle_moved = True
+                self._v3_notify_ignored()
+            return
         if kind == "cheek":
-            if distance > CHEEK_LIFT_DISTANCE:  # S3 过渡：拉过头变成整窗拖动，S4 改为拎起
-                self._v3_abort()
-                super().mouseMoveEvent(e)
+            up = -d.y()
+            if up > LIFT_UP and up > LIFT_RATIO * abs(d.x()):
+                self._v3_begin_lift(e)
                 return
             if not self._v3_cheek_started and abs(d.x()) <= DRAG_THRESHOLD:
                 return
@@ -413,20 +468,49 @@ class V3PetWindow(PetWindow):
         else:
             if distance > DRAG_THRESHOLD:
                 self._v3_belly_moved = True
-            if self._v3_tickle_start is None and distance > BELLY_DRAG_DISTANCE:
-                # 没在挠：转整窗拖动（S3 过渡，S4 起只能拎脸颊移动）
-                self._v3_abort()
-                super().mouseMoveEvent(e)
-                return
             action = self._v3_belly_gesture.move(pos, now)
             if action == "pause":
-                self._v3_abort()
-                super().mouseMoveEvent(e)
-                return
-            if action == "tickle":
+                a.release_tickle()  # 停手：手势保持，再揉可以接着挠
+            elif action == "tickle":
+                self._v3_belly_tickled = True
                 a.tickle_belly()
                 self._v3_tickle_touch(now)
-        self._refresh(now)
+            if not self._v3_belly_tickled and distance > BELLY_HINT_DISTANCE:
+                self._v3_notify_ignored()
+        # 这里不 _refresh：鼠标一秒可以发几百个移动事件，每个都渲染一帧会把界面线程占满
+        #（125Hz 摸头每帧 13ms，250Hz 27ms）。动画状态已更新，定时器下一帧（60 FPS）画出来。
+
+    # ---- 拎脸颊（S4）----
+    @property
+    def lifting(self) -> bool:
+        return self._v3_lifting
+
+    def _v3_begin_lift(self, e) -> None:
+        """脸颊上向上拖：V3 拎起反应 + 真实窗口跟着走（父类拖动：移动、下落、夹边、信号）。"""
+        a = self._v3_animator
+        a.advance(0)
+        point = self._v3_press_point
+        pivot = self._v3_renderer.rig_point(point, a.pose) if point is not None else point
+        a.begin_lift(tuple(pivot) if pivot is not None else (543.0, 586.0), cheek=True)
+        self._v3_cheek_started = False  # 捏脸转拎起：松手不再说 cheek_release
+        self._v3_lifting = True
+        self._v3_lift_origin = self.pos()
+        super().mouseMoveEvent(e)  # drag_started 在这里发，此时 lifting 已为 True
+        self._animator.set_drag(False)  # V2 的拖动倾斜让给 V3 的 root_roll，不叠加
+        self._v3_lift_follow()
+        self._refresh(self._clock())
+
+    def _v3_lift_follow(self) -> None:
+        disp = self.pos() - self._v3_lift_origin
+        s = self._v3_scale
+        # 画面不再平移（窗口自己在动），位移只用来算速度、倾斜和晃晕。
+        self._v3_animator.move_lift((disp.x() / s, disp.y() / s), float(disp.x()), clamp=False)
+
+    def consume_shaken(self) -> bool:
+        """晃晕以 V3 拎起的判断为准（来回 ≥24px 三次/2 秒），和画面上的晕脸一致。"""
+        super().consume_shaken()
+        shaken, self._v3_lift_dizzy = self._v3_lift_dizzy, False
+        return shaken
 
     def mouseReleaseEvent(self, e) -> None:
         kind = self._v3_gesture
@@ -437,6 +521,13 @@ class V3PetWindow(PetWindow):
         self._v3_gesture = None
         a = self._v3_animator
         now = self._clock()
+        if self._v3_lifting:
+            self._v3_lift_dizzy = self._v3_lift_dizzy or a.lift.dizzy
+            a.release_lift()
+            self._v3_lifting = False
+            super().mouseReleaseEvent(e)  # 慢放：原地停留并夹边；快甩/放到任务栏：下落
+            self._refresh(now)
+            return
         consumed = False
         if kind == "cheek":
             if self._v3_cheek_started:
@@ -458,6 +549,8 @@ class V3PetWindow(PetWindow):
             elif patting:
                 a.release_head()
             consumed = True
+        elif kind == "idle":
+            consumed = self._v3_idle_moved
         else:
             a.release_tickle()
             consumed = self._v3_belly_moved
@@ -472,10 +565,14 @@ class V3PetWindow(PetWindow):
         super().focusOutEvent(e)
 
     def _v3_abort(self) -> None:
-        """放弃当前手势（拉过头、失焦）：动画归位，不发 release 台词。"""
+        """放弃当前手势（失焦）：动画归位，不发 release 台词。"""
         kind, self._v3_gesture = self._v3_gesture, None
         a = self._v3_animator
-        if kind == "cheek" and self._v3_cheek_started:
+        if self._v3_lifting:
+            self._v3_lift_dizzy = self._v3_lift_dizzy or a.lift.dizzy
+            a.release_lift()
+            self._v3_lifting = False
+        elif kind == "cheek" and self._v3_cheek_started:
             a.release()
         elif kind == "crown":
             self._v3_head_gesture.clear()
@@ -513,8 +610,22 @@ class V3PetWindow(PetWindow):
         super().advance_to(now)
 
     # ---- 遮罩 ----
+    def _v3_mask_stale(self, f) -> bool:
+        """V2 帧（压扁/倾斜/跳）自上次建遮罩以来，轮廓估计漂了多少像素；超过 MASK_DRIFT_PX 就重建。"""
+        ref = self._v3_mask_frame
+        if ref is None:
+            return True
+        sx, sy, angle, jump = ref
+        h = self.height()
+        drift = (h * (abs(f.sx - sx) + abs(f.sy - sy))
+                 + 0.5 * h * math.radians(abs(f.angle - angle)) + abs(self._jump_offset - jump))
+        return drift > MASK_DRIFT_PX
+
     def _update_mask(self, now: float) -> None:
         self._v3_mask_at = now
+        f = getattr(self, "_frame", None)
+        if f is not None:
+            self._v3_mask_frame = (f.sx, f.sy, f.angle, self._jump_offset)
         self._v3_mask_force = False
         img = QImage(self.size(), QImage.Format_ARGB32_Premultiplied)
         img.fill(0)

@@ -74,6 +74,11 @@ CONTINUE_SEND_TIMEOUT_MS = 10_000
 
 class PetController(QObject):
     quit_requested = Signal()
+    # V3 拎脸颊的提示：首次启动约 10 秒后说一次（挡住就 30 秒后再试）；
+    # 在脸颊以外按住拖动时再提示，自己的冷却 60 秒。
+    LIFT_HINT_DELAY_MS = 10_000
+    LIFT_HINT_RETRY_MS = 30_000
+    LIFT_HINT_COOLDOWN = 60.0
 
     def __init__(
         self,
@@ -118,6 +123,7 @@ class PetController(QObject):
         self._weekly_previous = False
         self._weekly_offer = None
         self._weekly_started = False
+        self._lift_hint_at = -1e9  # 上次说“捏着脸往上提”的窗口单调时间
         self._work_timer = WorkTimer()
         self.limits = Limits(state.save.stamina_announced)
         self._seven_saved_at = 0.0  # 上次因 7 天额度最后已知值写盘的时间
@@ -164,8 +170,9 @@ class PetController(QObject):
         w.gesture.connect(self._on_gesture)
         w.clicked.connect(self._on_click)
         w.double_clicked.connect(self._on_double_click)
-        if hasattr(w, "knocked"):  # 只有 V3 窗口有敲头
+        if hasattr(w, "knocked"):  # 只有 V3 窗口有敲头、拎脸颊
             w.knocked.connect(self._on_knock)
+            w.drag_ignored.connect(self._on_drag_ignored)
         w.drag_started.connect(self._on_drag_started)
         w.drag_finished.connect(self._on_drag_finished)
         w.menu_requested.connect(self.show_menu)
@@ -337,6 +344,7 @@ class PetController(QObject):
             self.say_key("intro" if first_start else "startup")
         self.react(self.state.gain_affection("open", self._now()))
         self._try_time_speech()
+        self.arm_lift_hint()
         if self.state.save.connection_prompt is None:
             self.state.save.connection_prompt = "pending" if first_start else "skipped"
             self.scheduler.mark_dirty(self._now())
@@ -432,11 +440,40 @@ class PetController(QObject):
         self._status_timer.start(self.status_delay_ms)
         self.sync()
 
+    def _on_drag_ignored(self) -> None:
+        """V3：在脸颊以外按住拖动（窗口不动）。提示怎么挪它，自己 60 秒冷却。"""
+        self._say_lift_hint(self.LIFT_HINT_COOLDOWN)
+
+    def _say_lift_hint(self, cooldown: float) -> bool:
+        now = self.window.monotonic_time()
+        if now - self._lift_hint_at < cooldown:
+            return False
+        if not self.say_key("v3_lift_hint"):
+            return False
+        self._lift_hint_at = now
+        return True
+
+    def arm_lift_hint(self) -> None:
+        """V3 窗口首次启动的提示：约 10 秒后说一次；被气泡门控挡住就 30 秒后再试，说成功才记住。"""
+        if not hasattr(self.window, "knocked") or self.state.save.v3_lift_hint_shown:
+            return
+        QTimer.singleShot(self.LIFT_HINT_DELAY_MS, self._first_lift_hint)
+
+    def _first_lift_hint(self) -> None:
+        if self.state.save.v3_lift_hint_shown:
+            return
+        if self._say_lift_hint(0.0):
+            self.state.save.v3_lift_hint_shown = True
+            self.scheduler.mark_dirty(self._now())
+        else:
+            QTimer.singleShot(self.LIFT_HINT_RETRY_MS, self._first_lift_hint)
+
     def _on_drag_started(self) -> None:
         self.window.stop_motion()
         self._on_pressed()
         self._status_timer.stop()
-        self.react(self.state.drag_start(self._now()), category="drag")
+        line = "cheek_lift" if getattr(self.window, "lifting", False) else "drag"
+        self.react(self.state.drag_start(self._now(), line), category="drag")
         self.sync()
         self._try_time_speech()
 

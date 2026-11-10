@@ -105,6 +105,14 @@
       "Put me down!",
       "Waaah—!"
     ],
+    "cheek_lift": [
+      "My cheek is NOT a handle!",
+      "Put me down… my face is stretching!",
+      "Keep lifting me and I'll get dizzy…"
+    ],
+    "v3_lift_hint": [
+      "Pinch my cheek and lift up to move me."
+    ],
     "intro": [
       "Nice to meet you! I'm Shion — I live on your desktop now.",
       "I'm Shion~ Let's get along!"

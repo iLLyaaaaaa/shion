@@ -102,10 +102,13 @@ def begin_lift(state, now, expression, pivot, pose):
                      leg=Spring(pose.leg_degrees))
 
 
-def move_lift(state, offset, logical_x, now):
+def move_lift(state, offset, logical_x, now, clamp=True):
+    """clamp=False：宿主在移动真实窗口时用，位移不受实验台的 ±240 rig 像素限制，
+    否则速度（倾斜）会在限幅处变成 0。"""
     if not state.held:
         return state
-    offset = clamp_offset(offset)
+    if clamp:
+        offset = clamp_offset(offset)
     dt = now-state.moved_at
     velocity = state.velocity
     if dt > 1e-6:
