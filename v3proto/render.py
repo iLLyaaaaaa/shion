@@ -165,7 +165,9 @@ class Rig:
                 brow=brows_image(self,expression)
                 if brow:canvas.alpha_composite(*brow)
         if expression=='smug' and not underlays_only and not original and self.pink_cleanup is not None:
-            canvas.alpha_composite(self.pink_cleanup)
+            # 窗口版会把它换成只存有内容一块的 SparseCanvas（shion/v3_memory.py），带位置叠加
+            cleanup = self.pink_cleanup
+            canvas.alpha_composite(getattr(cleanup, 'image', cleanup), getattr(cleanup, 'offset', (0, 0)))
         return canvas
 
 

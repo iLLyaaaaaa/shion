@@ -55,7 +55,8 @@ PREWARM_EXECUTOR = None
 def load_rig(side: str):
     """加载一侧的 rig 并算好可见范围、脚底（约 0.3 秒；不碰全局缓存，后台线程可用）。"""
     from v3proto.render import Rig
-    rig = Rig(cheek_side=side)
+    from shion.v3_memory import compact_rig
+    rig = compact_rig(Rig(cheek_side=side))
     alpha = np.asarray(rig.rest("neutral"))[..., 3]
     ys, xs = np.nonzero(alpha)
     hips = (rig.pivots["hip_l"][0] + rig.pivots["hip_r"][0]) / 2

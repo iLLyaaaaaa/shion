@@ -100,7 +100,8 @@ class HeadSurface:
                         length=max(1,p['y']+p['size'][1]-root[1])
                         u=np.clip((sy-root[1])/length,0,1)
                         sx=sx-np.tan(np.deg2rad(angle))*length*u*u
-                cache[key]=((sx-x)*self.weights[n],(sy-y)*self.weights[n])
+                # float32: half the memory of this 6×24-entry cache (S7); sub-1e-4 px difference
+                cache[key]=(((sx-x)*self.weights[n]).astype(np.float32),((sy-y)*self.weights[n]).astype(np.float32))
                 if len(cache)>24:cache.popitem(last=False)
             cache.move_to_end(key)
             x,y=cache[key];dx+=x;dy+=y

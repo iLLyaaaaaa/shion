@@ -5,6 +5,7 @@
 python -m tools.v3_perf                      # whole matrix, ~1 hour, results in build/v3/integrate/perf/
 python -m tools.v3_perf --round2             # idle/working everywhere (60 s) + 320@1.5 pinch/lift spot check
 python -m tools.v3_perf --only v3 320 1.5 pinch 10   # one run, prints one JSON line
+python -m tools.v3_perf --warmup 20 --only v3 320 1.5 idle 30   # S7：等后台预热做完再测（默认 3 秒）
 python -m tools.v3_perf --only v3 320 1.5 state:slump 30   # 只切状态不互动
 
 Every run is a separate process with a real (non-offscreen) window. Nothing is
@@ -41,7 +42,7 @@ def percentile(values, q):
     return values[lo] + (values[hi] - values[lo]) * (k - lo)
 
 
-def run_one(renderer, height, dpr, scenario, seconds):
+def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
     from PySide6.QtCore import QTimer
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication
@@ -141,8 +142,8 @@ def run_one(renderer, height, dpr, scenario, seconds):
         win.close()
         app.quit()
 
-    QTimer.singleShot(int(WARMUP * 1000), begin)
-    QTimer.singleShot(int((WARMUP + seconds) * 1000), finish)
+    QTimer.singleShot(int(warmup * 1000), begin)
+    QTimer.singleShot(int((warmup + seconds) * 1000), finish)
     app.exec()
 
 
@@ -215,10 +216,10 @@ def matrix(args):
                     env.pop('QT_QPA_PLATFORM', None)
                     if dpr == 1.0:
                         env['QT_ENABLE_HIGHDPI_SCALING'] = '0'
-                    cmd = [sys.executable, '-m', 'tools.v3_perf', '--only', renderer, str(height),
-                           str(dpr), scenario, str(seconds)]
+                    cmd = [sys.executable, '-m', 'tools.v3_perf', '--warmup', str(args.warmup), '--only', renderer,
+                           str(height), str(dpr), scenario, str(seconds)]
                     proc = subprocess.run(cmd, env=env, capture_output=True, text=True,
-                                          timeout=seconds + 60)
+                                          timeout=seconds + args.warmup + 60)
                     line = next((l for l in proc.stdout.splitlines() if l.startswith('{')), None)
                     if line is None:
                         line = json.dumps({'renderer': renderer, 'height': height, 'dpr_requested': dpr,
@@ -299,6 +300,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--only', nargs=5, metavar=('RENDERER', 'HEIGHT', 'DPR', 'SCENARIO', 'SECONDS'))
     parser.add_argument('--fresh', action='store_true', help='discard previous results')
+    parser.add_argument('--warmup', type=float, default=WARMUP,
+                        help='seconds before measuring; startup prewarm takes ~10 s, use 20 to exclude it')
     parser.add_argument('--summary', action='store_true', help='only rebuild summary.md')
     parser.add_argument('--round2', action='store_true',
                         help='idle/working everywhere (60 s) + 320@1.5 pinch/lift for v3/v3o')
@@ -307,7 +310,7 @@ def main(argv=None):
         summarize(OUT / 'results.jsonl')
     elif args.only:
         renderer, height, dpr, scenario, seconds = args.only
-        run_one(renderer, int(height), float(dpr), scenario, float(seconds))
+        run_one(renderer, int(height), float(dpr), scenario, float(seconds), args.warmup)
     else:
         matrix(args)
 

@@ -6,6 +6,8 @@ from scipy import ndimage as nd
 
 from .face import plate_face, complete_eye
 
+MASK_CACHE = 8
+
 
 class ReactionFace:
     def __init__(self, surface):
@@ -44,7 +46,8 @@ class ReactionFace:
         a |= nd.binary_dilation(np.asarray(mouth_mask)>2,iterations=2)
         result = Image.fromarray(a.astype(np.uint8) * 255)
         self.masks[key] = result
-        if len(self.masks) > 64:self.masks.pop(next(iter(self.masks)))
+        # Masks are only inputs to cached patches (S7: 64 -> 8 entries, ~0.2MB each).
+        if len(self.masks) > MASK_CACHE:self.masks.pop(next(iter(self.masks)))
         return result
 
     def erasure_mask(self, face):
@@ -80,7 +83,10 @@ class ReactionFace:
             yy,xx=np.indices(a.shape);xx+=origin[0];yy+=origin[1]
             orange=(source[...,0]>230)&(source[...,0]-source[...,1]>65)&(source[...,1]>90)&(source[...,1]<200)&(source[...,2]<160)
             a &= ~(orange&(xx<390)&(yy<490))
-            self.masks[key] = Image.fromarray(a.astype(np.uint8)*255)
+            result = Image.fromarray(a.astype(np.uint8)*255)
+            self.masks[key] = result
+            if len(self.masks) > MASK_CACHE:self.masks.pop(next(iter(self.masks)))
+            return result
         return self.masks[key]
 
     def patch(self, face, eye_scale=1., erase=False):

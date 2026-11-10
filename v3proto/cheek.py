@@ -16,7 +16,6 @@ class Cheek:
         self.protection={}
         self.eye_windows={}
         self.blink_protection=OrderedDict()
-        self.textures={}
         self.texture_planes={}
         self.grids=OrderedDict()
         self.last_deformation = None  # One immutable material frame, not an animation cache.
@@ -81,8 +80,8 @@ class Cheek:
         self.backgrounds[face]=(bounds,difference[y0:y1,x0:x1])
         reference=Image.new('RGBA',surface.reference_size)
         reference.alpha_composite(self.assets[face]['texture'],(self.x-surface.x,self.y-surface.y))
-        self.textures[face]=premultiplied(qimage(reference.resize(size,Image.Resampling.LANCZOS)))
-        self.texture_planes[face]=np.ascontiguousarray(np.moveaxis(self.textures[face],-1,0))
+        # Only the planar copy is sampled; keeping the interleaved one too doubled this memory (S7).
+        self.texture_planes[face]=np.ascontiguousarray(np.moveaxis(premultiplied(qimage(reference.resize(size,Image.Resampling.LANCZOS))),-1,0))
         mask=self.assets[face]['protect'].crop((surface.x,surface.y,surface.x+surface.reference_size[0],surface.y+surface.reference_size[1]))
         mask=np.asarray(mask.resize(size,Image.Resampling.NEAREST))>0
         yy,xx=np.indices(mask.shape,dtype=np.float32)
