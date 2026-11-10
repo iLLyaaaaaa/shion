@@ -91,12 +91,19 @@ def _locked(surface):
     def prepare(*args, **kwargs):
         # 主线程每帧都会调一次。该表情的素材已经有了（或没有捏脸配置）时原函数什么都不做，
         # 这时不能去抢锁——后台正在合成眨眼帧时，抢锁会让这一帧白等最多 45ms。
+        # 判断用“整段做完”的集合，不能看 cheek.backgrounds：后台做到一半时它已经有了，
+        # 但 protection 等还没写，主线程跳过锁直接用会 KeyError。
         cheek = surface.cheek
         settings = args[1] if len(args) > 1 else kwargs.get("settings")
-        if settings is not None and (not cheek.config or settings.expression in cheek.backgrounds):
+        if settings is not None and (not cheek.config or settings.expression in done):
             return None
         with lock:
-            return original_prepare(*args, **kwargs)
+            result = original_prepare(*args, **kwargs)
+            if settings is not None:
+                done.add(settings.expression)
+            return result
+    done: set = set()
+    surface._v3_cheek_done = done
     surface.cheek.prepare = prepare
     # 反应脸补丁（每张约 50ms，第一次捏脸/摸头/敲头/挠痒时才会建）同样整段持锁。
     original_patch = surface.reaction_face.patch
@@ -176,6 +183,13 @@ class Prewarmer:
             return
         self.blink_requested.add(expression)
         self.request(expression, BLINK_LEVELS)
+
+    def side_ready(self, expression: str) -> bool:
+        """换边用：该表情的睁眼帧、闭眼档、捏脸素材都已就绪（主线程换过去不会现算）。"""
+        frames = self.surface.frames
+        cheek = self.surface.cheek
+        return ((expression, 1.0) in frames and (expression, BLINK_LEVELS[0]) in frames
+                and (not cheek.config or expression in self.surface._v3_cheek_done))
 
     def cancel_blinks(self) -> None:
         """互动时不让后台继续合成眨眼帧（它们会占着锁，主线程渲染要等）。排队中的取消，

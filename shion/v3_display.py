@@ -144,3 +144,20 @@ def draw_key(expression: str, pose, texture_scale: float, frame_key: tuple):
         _q(pose.body_roll, _ANGLE_STEP), _q(pose.root_roll, _ANGLE_STEP),
         tuple(_q(v, position) for v in pose.root_offset),
     )
+
+
+# ---- 换边（S5）----
+SIDE_DEAD_FRACTION = 0.05  # 中线两侧死区：可用宽度的 5%
+SIDE_DEAD_MIN = 40         # 至少 40 逻辑像素
+
+
+def desired_side(center_x: float, avail_left: float, avail_width: float, current: str) -> str:
+    """窗口中心在可用区域右半边 → 鼓左脸颊（"left"，朝屏幕中间）；左半边 → 鼓右脸颊（"right"）。
+    中线两侧死区内保持当前侧。"""
+    middle = avail_left + avail_width / 2
+    dead = max(SIDE_DEAD_FRACTION * avail_width, SIDE_DEAD_MIN)
+    if center_x > middle + dead:
+        return "left"
+    if center_x < middle - dead:
+        return "right"
+    return current

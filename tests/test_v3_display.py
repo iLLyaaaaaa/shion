@@ -21,6 +21,7 @@ def make(qapp, height=200, dpr=1.0, clock=None):
     t = clock if clock is not None else [100.0]
     w = V3PetWindow(height=height, clock=lambda: t[0], autostart=False, debug=False, pixel_ratio=dpr)
     w.setAttribute(Qt.WA_DontShowOnScreen)
+    w.auto_side = False  # 换边另有测试（test_v3_side.py）；其余测试固定左侧
     return w, t
 
 

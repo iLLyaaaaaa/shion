@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+import os
 from collections import OrderedDict
 from dataclasses import replace
 
@@ -21,12 +22,17 @@ from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREAT
 from shion.behavior import BELLY_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS, TICKLE_STOP_SECONDS
 from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX,
                               MASK_GROW, PetWindow)
-from shion.v3_display import (STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, draw_key,
+from shion.v3_display import (STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, desired_side, draw_key,
                               expression_for, frame_interval, hair_moving, logical_scale)
 from shion.v3_layers import SwayEnvelope, affine_ok, render_affine
-from shion.v3_prewarm import Prewarmer, quantize_eye
+from shion.v3_prewarm import BLINK_LEVELS, Prewarmer, quantize_eye
 
-RENDERER_CACHE = 2
+RENDERER_CACHE = 2  # 每侧最多两份（换屏 DPR 来回不重建）
+AUTO_SIDE_ENV = "SHION_V3_AUTO_SIDE"  # 换边默认关闭；设为 1 才按屏幕位置换边
+SIDE_STABLE_SECONDS = 0.5   # 位置/尺寸/屏幕连续这么久不变、也没在互动，才算“停稳”
+SIDE_IDLE_RELEASE = 300.0   # 换走后旧侧闲置这么久就释放（rig、渲染器、预热缓存）
+SIDE_SWAP_AT = 0.05         # 眨眼开始后这么久（闭眼最深在 0.06 秒）换边
+SIDE_POP = 0.3              # 换边后新侧鼓脸颊“啵”：先按捏脸最大值的 30% 外拉，再由松手弹簧弹回
 SIDE_PADDING = 48  # rig 像素：头发摆动、倾斜时不被裁掉
 BELLY_HINT_DISTANCE = BELLY_LIFT_DISTANCE  # 肚子上没在挠、拖出这么远：提示“要拎脸颊”
 LIFT_UP = 12.0     # 逻辑像素：脸颊上向上超过这么多，且竖向 > LIFT_RATIO × 横向，才算拎起
@@ -43,18 +49,32 @@ _RIGS: dict[str, object] = {}
 PREWARM_EXECUTOR = None
 
 
+def load_rig(side: str):
+    """加载一侧的 rig 并算好可见范围、脚底（约 0.3 秒；不碰全局缓存，后台线程可用）。"""
+    from v3proto.render import Rig
+    rig = Rig(cheek_side=side)
+    alpha = np.asarray(rig.rest("neutral"))[..., 3]
+    ys, xs = np.nonzero(alpha)
+    hips = (rig.pivots["hip_l"][0] + rig.pivots["hip_r"][0]) / 2
+    rig.v3_visible = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    rig.v3_foot = (float(hips), float(ys.max()) + 1)
+    rig.v3_side = side
+    return rig
+
+
 def shared_rig(side: str = "left"):
     """进程内每侧只加载一次 rig（约 0.3 秒）。"""
     if side not in _RIGS:
-        from v3proto.render import Rig
-        rig = Rig(cheek_side=side)
-        alpha = np.asarray(rig.rest("neutral"))[..., 3]
-        ys, xs = np.nonzero(alpha)
-        hips = (rig.pivots["hip_l"][0] + rig.pivots["hip_r"][0]) / 2
-        rig.v3_visible = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
-        rig.v3_foot = (float(hips), float(ys.max()) + 1)
-        _RIGS[side] = rig
+        _RIGS[side] = load_rig(side)
     return _RIGS[side]
+
+
+def _build_side(rig, side, scale):
+    """后台：没有 rig 就加载，再建渲染器（约 0.3 + 0.3 秒）。"""
+    from v3proto.render import Renderer
+    if rig is None:
+        rig = load_rig(side)
+    return rig, Renderer(rig, scale)
 
 
 def _premultiplied(image: QImage) -> np.ndarray:
@@ -75,7 +95,21 @@ class V3PetWindow(PetWindow):
         if getattr(self, "_v3_ready", False):
             return
         from v3proto.animation import Animator, Settings
+        self._v3_side = "left"
         self._v3_rig = shared_rig("left")
+        self._v3_geometry = None  # 窗口几何只按第一次加载的 rig 算，换边不改窗口
+        # 换边暂停（2026-11-10）：右鼓用的是 S5a 镜像脸部底板，桌面尺寸下刘海发丝断开、脸像歪了，
+        # 等新画右鼓版底板再打开。开发时可设环境变量 SHION_V3_AUTO_SIDE=1 试用。
+        self.auto_side = os.environ.get(AUTO_SIDE_ENV) == "1"
+        self._v3_side_started = False
+        self._v3_side_geom = None
+        self._v3_side_since = 0.0
+        self._v3_side_target: str | None = None
+        self._v3_side_job = None
+        self._v3_side_t0 = 0.0
+        self._v3_side_blink: float | None = None
+        self._v3_side_idle: dict[str, float] = {}
+        self.v3_side_log: list[dict] = []  # 每次换边：准备耗时等（报告用）
         self._v3_renderers: OrderedDict[tuple, object] = OrderedDict()
         self._v3_prewarmers: dict[tuple, Prewarmer] = {}
         # 捏脸、敲头、摸头、挠痒（S3）和拎脸颊（S4）都用 V3 手势。
@@ -110,7 +144,7 @@ class V3PetWindow(PetWindow):
         self._v3_mask_force = True
         self._v3_mask_state = None
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
-                          "affine": 0, "mesh": 0}
+                          "affine": 0, "mesh": 0, "side_switches": 0}
         self._v3_sway = None
         self._v3_screen_hooked = False
         self._v3_ready = True
@@ -122,9 +156,9 @@ class V3PetWindow(PetWindow):
         self._apply_scale(dpr)
 
     def _apply_scale(self, dpr: float) -> None:
-        rig = self._v3_rig
-        x0, y0, x1, y1 = rig.v3_visible
-        foot_x, _ = rig.v3_foot
+        if self._v3_geometry is None:
+            self._v3_geometry = (self._v3_rig.v3_visible, self._v3_rig.v3_foot)
+        (x0, y0, x1, y1), (foot_x, _) = self._v3_geometry
         self._v3_dpr = dpr
         self._v3_scale = logical_scale(self._height, y1 - y0)
         half = max(foot_x - x0, x1 - foot_x) + SIDE_PADDING
@@ -134,37 +168,188 @@ class V3PetWindow(PetWindow):
         self._pixmaps.clear()
         self._sequences.clear()
         self._v3_renderer = self._renderer_for(self._height, dpr)
-        self._v3_prewarmer = self._v3_prewarmers[(self._height, round(dpr, 4))]
+        self._v3_prewarmer = self._v3_prewarmers[self._v3_cache_key(self._v3_side, self._height, dpr)]
+        self._v3_side_target = None  # 尺寸/DPR 变了：正在准备的另一侧作废，停稳后重来
+        self._v3_side_job = None
+        self._v3_side_blink = None
         self._v3_image = None
         self._v3_key = None
         self._v3_mask_force = True
         if hasattr(self, "_mask_cache"):
             self._mask_cache.clear()
 
-    def _renderer_for(self, height: int, dpr: float):
-        key = (height, round(dpr, 4))
+    @staticmethod
+    def _v3_cache_key(side: str, height: int, dpr: float) -> tuple:
+        return (side, height, round(dpr, 4))
+
+    def _renderer_for(self, height: int, dpr: float, side: str | None = None):
+        side = side or self._v3_side
+        key = self._v3_cache_key(side, height, dpr)
         if key in self._v3_renderers:
             self._v3_renderers.move_to_end(key)
             return self._v3_renderers[key]
         from v3proto.render import Renderer
-        renderer = Renderer(self._v3_rig, self._v3_scale * dpr)
+        rig = shared_rig(side)
+        renderer = Renderer(rig, self._v3_scale * dpr)
+        self._v3_register(key, renderer)
+        return renderer
+
+    def _v3_register(self, key: tuple, renderer) -> None:
+        """登记渲染器并排预热：当前表情（睁眼、闭眼档、捏脸素材）最先，其余随后。"""
         self._v3_renderers[key] = renderer
         prewarmer = Prewarmer(renderer, self._v3_settings, PREWARM_EXECUTOR)
         self._v3_prewarmers[key] = prewarmer
-        # 当前表情先排，其余正式状态会用到的表情的睁眼帧随后
         current = self._v3_settings.expression
-        prewarmer.request(current)
+        prewarmer.request(current, (1.0, BLINK_LEVELS[0]))
+        prewarmer.request_cheek(current)
         for expression in dict.fromkeys(STATE_EXPRESSIONS.values()):
             prewarmer.request(expression)
-        prewarmer.request_cheek(current)
         for expression in dict.fromkeys(STATE_EXPRESSIONS.values()):
             prewarmer.request_cheek(expression)
         if renderer.head_surface.cheek.config:
-            prewarmer.request_reactions(dict.fromkeys(STATE_EXPRESSIONS.values()), self._v3_rig.faces)
-        while len(self._v3_renderers) > RENDERER_CACHE:
-            old, _ = self._v3_renderers.popitem(last=False)
+            prewarmer.request_reactions(dict.fromkeys(STATE_EXPRESSIONS.values()), renderer.rig.faces)
+        same = [k for k in self._v3_renderers if k[0] == key[0]]
+        while len(same) > RENDERER_CACHE:  # 每侧最多两份（两种尺寸/DPR）；另一侧靠闲置释放
+            old = same.pop(0)
+            self._v3_renderers.pop(old)
             self._v3_prewarmers.pop(old).close()
-        return renderer
+
+    # ---- 换边（S5）----
+    @property
+    def cheek_side(self) -> str:
+        return self._v3_side
+
+    def _v3_desired_side(self) -> str:
+        center = self.geometry().center()
+        avail = self._screen_avail(center)
+        return desired_side(center.x(), avail.left(), avail.width(), self._v3_side)
+
+    def _v3_drop_side(self, side: str) -> None:
+        """释放一侧：渲染器、预热器、预热缓存和 rig 本身。"""
+        for key in [k for k in self._v3_renderers if k[0] == side]:
+            self._v3_renderers.pop(key)
+            self._v3_prewarmers.pop(key).close()
+        self._v3_side_idle.pop(side, None)
+        _RIGS.pop(side, None)
+
+    def _v3_side_startup(self) -> None:
+        """第一次显示：按恢复后的位置直接设定侧，不播过渡。"""
+        self._v3_side_started = True
+        if not self.auto_side:
+            return
+        want = self._v3_desired_side()
+        if want == self._v3_side:
+            return
+        old = self._v3_side
+        self._v3_side = want
+        self._v3_rig = shared_rig(want)
+        self._apply_scale(self._v3_dpr)
+        self._v3_drop_side(old)
+
+    def _v3_busy(self) -> bool:
+        a = self._v3_animator
+        return (a.interaction_active or self.is_pressed or self._dragging or self._falling
+                or self._v3_lifting or self._jump_start is not None or self.motion_active
+                or self._drag_playback is not None)
+
+    def _v3_side_step(self, now: float) -> None:
+        """每帧调一次：停稳 0.5 秒后判断该在哪一侧；要换就后台准备，就绪后眨眼换。"""
+        for side, since in list(self._v3_side_idle.items()):
+            if side not in (self._v3_side, self._v3_side_target) and now - since >= SIDE_IDLE_RELEASE:
+                self._v3_drop_side(side)
+        if not self.auto_side or not self._v3_side_started:
+            return
+        geom = (self.x(), self.y(), self.width(), self.height(), round(self._v3_dpr, 4))
+        if self._v3_busy() or geom != self._v3_side_geom:
+            self._v3_side_geom = geom
+            self._v3_side_since = now
+            self._v3_side_blink = None  # 眨眼途中开始互动/拖动：这次不换
+            return
+        if now - self._v3_side_since < SIDE_STABLE_SECONDS:
+            return
+        want = self._v3_desired_side()
+        if want == self._v3_side:
+            if self._v3_side_target is not None:  # 准备途中又不需要了
+                self._v3_cancel_side()
+            return
+        if self._v3_side_target != want:
+            self._v3_cancel_side()
+            self._v3_start_side(want, now)
+        key = self._v3_cache_key(want, self._height, self._v3_dpr)
+        if key not in self._v3_prewarmers:
+            job = self._v3_side_job
+            if job is None or not job.done():
+                return
+            self._v3_side_job = None
+            try:
+                rig, renderer = job.result()
+            except Exception:  # 准备失败：保持当前侧，下次停稳再试
+                self._v3_side_target = None
+                return
+            _RIGS.setdefault(want, rig)
+            self._v3_register(key, renderer)
+        prewarmer = self._v3_prewarmers[key]
+        prewarmer.collect()
+        if not prewarmer.side_ready(self._v3_settings.expression):
+            return
+        a = self._v3_animator
+        if self._v3_side_blink is None:
+            a.blink_start = a.time          # 立刻眨一下
+            self._v3_side_blink = a.time
+            return
+        if a.time - self._v3_side_blink >= SIDE_SWAP_AT:
+            self._v3_swap_side(want, key, now)
+
+    def _v3_start_side(self, side: str, now: float) -> None:
+        self._v3_side_target = side
+        self._v3_side_t0 = now
+        self._v3_side_blink = None
+        key = self._v3_cache_key(side, self._height, self._v3_dpr)
+        if key in self._v3_prewarmers:
+            self._v3_side_idle.pop(side, None)
+            return
+        executor = PREWARM_EXECUTOR or Prewarmer._shared_pool()
+        self._v3_side_job = executor.submit(_build_side, _RIGS.get(side), side,
+                                            self._v3_scale * self._v3_dpr)
+
+    def _v3_cancel_side(self) -> None:
+        side, self._v3_side_target = self._v3_side_target, None
+        job, self._v3_side_job = self._v3_side_job, None
+        self._v3_side_blink = None
+        if job is not None:
+            job.cancel()
+        if side is not None and any(k[0] == side for k in self._v3_renderers):
+            self._v3_side_idle.setdefault(side, self._clock())
+
+    def _v3_swap_side(self, side: str, key: tuple, now: float) -> None:
+        """眨眼闭眼那一帧换成另一侧，并让新侧鼓脸颊“啵”一下、头发甩一下。"""
+        old = self._v3_side
+        blink_elapsed = self._v3_animator.time - (self._v3_side_blink or self._v3_animator.time)
+        self._v3_side = side
+        self._v3_rig = self._v3_renderers[key].rig
+        self._v3_renderers.move_to_end(key)
+        self._v3_renderer = self._v3_renderers[key]
+        self._v3_prewarmer = self._v3_prewarmers[key]
+        self._v3_side_target = None
+        self._v3_side_blink = None
+        self._v3_side_idle.pop(side, None)
+        self._v3_side_idle[old] = now
+        self._v3_image = None
+        self._v3_key = None
+        self._v3_mask_force = True
+        a = self._v3_animator
+        if not a.dragging and not a.lift.active:
+            a.delta = np.array([-SIDE_POP * a.settings.pinch_maximum, 0.0])  # 左侧语义：外拉为负
+            a.velocity[:] = 0
+        a.impulse(1 if side == "right" else -1)
+        self._v3_stats["side_switches"] += 1
+        self.v3_side_log.append({"from": old, "to": side, "prepare_s": round(now - self._v3_side_t0, 3),
+                                 "blink_elapsed": round(blink_elapsed, 3)})
+
+    def _v3_motion_point(self, local):
+        """捏脸的点换到动画器的“左侧语义”：右侧时 x 反射，往外拉在两侧都是外拉。"""
+        cheek = self._v3_renderer.head_surface.cheek
+        return (cheek.motion_x(local[0]), local[1])
 
     def set_device_pixel_ratio(self, dpr: float) -> None:
         """换到 DPR 不同的屏幕：重建（或取缓存的）渲染器，脚底不动。"""
@@ -178,6 +363,8 @@ class V3PetWindow(PetWindow):
             self.set_device_pixel_ratio(screen.devicePixelRatio())
 
     def showEvent(self, e) -> None:
+        if not self._v3_side_started:
+            self._v3_side_startup()
         if not self._v3_screen_hooked and self.windowHandle() is not None:
             self.windowHandle().screenChanged.connect(self._on_screen_changed)
             self._v3_screen_hooked = True
@@ -278,6 +465,9 @@ class V3PetWindow(PetWindow):
         pose = animator.advance(dt)
         if animator.lift.active:
             pose.root_offset = (0.0, 0.0)  # 窗口自己在动；root_roll / 身体 / 手臂照常
+        self._v3_side_step(now)
+        if any(animator.delta) and not any(pose.pinch_delta):
+            pose = replace(pose, pinch_delta=tuple(animator.delta))  # 换边“啵”的第一帧就带上拉伸
         prewarmer = self._v3_prewarmer
         prewarmer.collect()
         if animator.interaction_active or self.is_pressed or self._dragging:
@@ -296,7 +486,8 @@ class V3PetWindow(PetWindow):
         self._v3_angles = dict(pose.angles)
         program = self._program_active(f, dt)
         fast = (program or self._v3_animator.interaction_active
-                or moving_hair or pose.star_effects)
+                or moving_hair or pose.star_effects or self._v3_side_blink is not None
+                or any(pose.pinch_delta))
         still = affine_ok(pose)
         soon = (pose.eye_scale < 1 or 0 <= animator.blink_start - animator.time <= LEAD
                 or self._v3_sway.until_start(now) <= LEAD)
@@ -451,7 +642,7 @@ class V3PetWindow(PetWindow):
                 return
             if not self._v3_cheek_started:
                 self._v3_cheek_started = True
-                a.press(self._v3_cheek_local)
+                a.press(self._v3_motion_point(self._v3_cheek_local))
                 self.setCursor(Qt.ClosedHandCursor)
                 self.gesture.emit("cheek_pull")
             point = self._to_rig(e.position())
@@ -459,7 +650,7 @@ class V3PetWindow(PetWindow):
                 local = self._v3_renderer.head_surface.source_point(
                     self._v3_renderer.rig_point(point, a.pose), a.pose, allow_outside=True)
                 if local is not None:
-                    a.drag(local)
+                    a.drag(self._v3_motion_point(local))
         elif kind == "crown":
             delta = self._v3_head_gesture.move(pos, True)
             self._pat_step(gp)
