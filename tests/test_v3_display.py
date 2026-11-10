@@ -1,4 +1,5 @@
 """S1: --renderer v3 entry, state → V3 expression mapping and texture scale."""
+import time
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
@@ -196,9 +197,15 @@ def test_mask_rate_limited_and_follows_state(qapp):
     assert (w.v3_stats["masks"] - before) / 2.0 <= 10.5
     before = w.v3_stats["masks"]
     w.set_state("stop", animate=False)
-    t[0] += .001
-    w.advance_to(t[0])
-    assert w.v3_stats["masks"] > before  # state change updates at once
+    # 后台预热正占着锁时这一帧会被推迟（S7 审查第 6 条），所以看“第一张真正画出来的帧”
+    rendered = w.v3_stats["rendered"]
+    for _ in range(200):
+        t[0] += .001
+        w.advance_to(t[0])
+        if w.v3_stats["rendered"] > rendered:
+            break
+        time.sleep(.005)
+    assert w.v3_stats["masks"] > before  # state change updates on the first rendered frame
     region = w._v3_region
     from PySide6.QtCore import QPoint
     from PySide6.QtGui import QImage, QPainter

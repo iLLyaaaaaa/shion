@@ -90,3 +90,13 @@ def no_real_launch(monkeypatch):
     """任何测试都不能真的拉起诗音 GUI；要检查启动参数的测试自己再替换 _popen。"""
     from shion import launcher
     monkeypatch.setattr(launcher, "_popen", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def stop_v3_prewarm_thread():
+    """整个测试会话结束时关掉 V3 后台预热线程，不让它在解释器收尾时还在 PIL/numpy 里跑。"""
+    yield
+    import sys
+    module = sys.modules.get("shion.v3_prewarm")
+    if module is not None:
+        module.Prewarmer.shutdown_pool()

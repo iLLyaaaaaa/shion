@@ -13,12 +13,28 @@
   3. 换边在一次眨眼的闭眼帧完成，鼓脸颊用捏脸松手回弹弹簧“啵”一下并给头发冲量，不做水平压扁；死区、只在停稳时判断、拖动中不翻。
   4. 新台词键（三语）：`cheek_pull_combo`、`cheek_lift`；`head_knock` 系列现有文案确认前不启用。
   5. 需新画清单优先级：working 道具 > collapse/slump > desk/bed > stop > yawn > neglect1（S6 改为：working 道具 > 右鼓版脸部底板 > collapse/slump > desk/bed > stop > yawn > neglect1）。验收线：互动场景 DPR1.5 平均 ≥55 FPS、paint P95 ≤14ms；待机/工作 CPU ≤ 单核 3% 且不超过 V2 的 2 倍。**（此条已在 S2 改为新验收线，见下方 S2 记录。）**
-- **当前进度**：S1～S6 已验收（S5 换边已实现但**默认关闭**）；S7 全仓回归、CPU/内存评估、reviewer 审查、文档收尾已完成（2026-11-10），**待用户验收，并决定审查中级问题是否修**（见下方 S7 记录）。
+- **当前进度**：S1～S6 已验收（S5 换边已实现但**默认关闭**）；S7 全仓回归、CPU/内存评估、reviewer 审查、文档收尾已完成（2026-11-10），审查中级问题 1～6 已按用户要求修复（2026-11-10），**待用户真实窗口验收**（见下方“S7 审查修复”记录）。
 - **下一步候选**：
-  1. 按用户决定修审查中级问题（建议至少修 ① 大 dt 卡死、⑤ 右键打断拎起，并给测试默认换同步预热执行器，顺带验证 0xC0000409）。
+  1. 审查低级问题 7～14（未修，可按需挑）；全仓汇总后的退出崩溃是 V2.2 起点就有的问题，可单独排查。
   2. **S8：接入新画素材**（`assets/sprites/raw/v3/s6/`：右鼓底板 `head-right-plate.png` → 打开换边；抱电脑 `working-hold.png` → 切双臂+电脑整块替换 working 手臂）。
   3. 可选 CPU 优化：待机时遮罩重建约 7.6 次/秒、占主线程 CPU 约三分之一，可按姿态漂移判断少建。
   4. 合并到 master 的准备（另起计划）；`head_knock` 文案已启用，无待确认项。
+
+#### 2026-11-10：S7 审查修复（中级 1～6）
+
+- **做了什么**：
+  1. 大 dt：`_refresh` 每帧最多推进 `MAX_DT=0.25` 秒（`shion/v3_window.py`），隐藏 10 分钟后第一帧 <0.2 秒、动画只前进 0.25 秒。
+  2. 淘汰后重新预热（`shion/v3_prewarm.py`）：头部帧按“在缓存或在排队”判重，不再用“曾经请求过”；`request_blinks` 每帧只补当前表情缺的档；失败的记 `failed` 不重试；`collect` 淘汰时先不动当前表情的帧（`FRAME_LIMIT=64`）。去掉 `blink_requested`。
+  3. 仿射 QImage 缓存 64→8（`shion/v3_layers.py` `QFRAME_LIMIT`），仍是副本，不共享 numpy 内存。
+  4. 后台线程退出：`_BackgroundExecutor.shutdown()`（取消排队、哨兵、join 1 秒）、`Prewarmer.shutdown_pool()`，挂 `atexit` 和 `aboutToQuit`；`tests/conftest.py` 会话结束时调用。测试仍用真线程（S3/S4 卡顿回归要测真线程）。
+  5. 右键/中键按下或松开不再清 `_v3_gesture`，拎起中右键后左键松开照常 `release_lift()`。
+  6. 主线程不等后台锁：已缓存的反应脸补丁不抢锁直接取；新 `Prewarmer.would_block()`——要现算的东西没缓存且锁被后台占着时，本帧保留上一帧画面、下一 tick 再画（`v3_stats["deferred"]`）。
+- **测试**：新增 `tests/test_v3_prewarm_thread.py` 10 项（大 dt、拎起/捏脸中右键、淘汰后重预热与保留当前表情、失败不重试、QImage 缓存上限、线程关闭与重建、等锁时推迟一帧、已缓存补丁不抢锁）。`test_v3_display::test_mask_rate_limited_and_follows_state` 改为看“状态切换后第一张真正画出来的帧”更新遮罩（后台占锁时那一帧会被推迟，这是第 6 条的预期效果）；`test_v3_gestures` 去掉对已删除的 `blink_requested` 的断言。V3 全部 472 passed、1 skipped。
+- **全仓回归**（junction，`-X faulthandler`，`build/v3/integrate/s7/fix/all-tests.log`）：2756 passed、16 failed、9 skipped，16 项与 S7 第一次完全相同（chat_remote_boundary 15 + stamina 1，都与 V3 无关）。**汇总后进程以 abort 退出（退出码 3，faulthandler：`Fatal Python error: Aborted`，当时只剩一个线程、没有 Python 栈）**——预热线程已被关掉，不是它引起。**在未改动的 V2.2 起点 `45d87b3` 干净导出上跑全仓也一样 abort（退出码 3）**，所以这个退出崩溃（以及早先的 0xC0000409）是 V3 之前就有的问题，大概率是解释器收尾时 Qt 对象析构顺序，未进一步定位。
+- **对比**（`b1ff143` 导出 vs 修复后，6 轮，18:38～18:55，`fix/first-pinch*.txt`、`fix/cpu.jsonl`）：
+  - CPU（320@1.5，`--warmup 20`，2 轮）：待机 30.3/24.6 → 27.6/29.7，工作 26.9/24.0 → 20.4/23.9，没变高。
+  - 首次捏脸首帧均值 18.0→20.4ms（另一组 18.8→17.5ms）；切表情 0.3 秒后 25.9→30.0ms；切表情 4 秒后 11.9→15.3ms。cProfile 两版这一帧做的事相同，新加的判断不占时间；20ms 上下的帧是遮罩重建（`setMask` 7～8ms）恰好落在那一帧，两版都有，属于时序波动。切表情 0.3 秒后的帧仍常到 35～40ms，原因是那一帧本身要现算新表情的东西、而后台占锁时会推迟一帧再算，最终还是要算一次；第 6 条只保证“等锁时界面不卡住”，没有减少这次计算。
+- **待用户验收**（隔离启动 V3，`SHION_DATA_DIR=build3\integrate\s7\data`、`SHION_PORT=47699`）：① 拎着脸颊时按一下右键（会弹菜单），再松左键能正常放下；② 隐藏诗音几分钟（或电脑睡眠）后恢复不卡；③ 切表情后马上捏脸/摸头不卡；④ 眨眼正常、待机/工作看着同之前。
 
 #### 2026-11-10：S7 全仓回归、CPU/内存评估、reviewer 审查、文档收尾
 
@@ -49,7 +65,7 @@
   4. 后台预热守护线程退出时仍可能在跑，多数 V3 测试用真线程（可能与 0xC0000409 有关）。
   5. 拎着脸颊时按一下右键会清掉手势，左键松开不走 `release_lift()`，拎起状态卡住。
   6. 低优先级后台线程持锁，主线程首次切表情等锁卡顿。
-  低级：prepare 中途异常留半成品、rig 级懒缓存双渲染器并发、换边失败每帧重试、悬停每次移动都做完整命中、失焦未复位 V2 按下状态、两次隐藏覆盖恢复标记、`cheek_pull_combo` 对 V2 也生效（待确认）、若干漏测。**均未修，等用户决定。**
+  低级：prepare 中途异常留半成品、rig 级懒缓存双渲染器并发、换边失败每帧重试、悬停每次移动都做完整命中、失焦未复位 V2 按下状态、两次隐藏覆盖恢复标记、`cheek_pull_combo` 对 V2 也生效（待确认）、若干漏测。中级 1～6 已修（见下条），低级未修。
 - **文档**：`docs/spec.md` 新增“V3 正式接入”章节；`docs/v3-integration-plan.md` 分步表标注各步状态；V3 第 0/1 步的长记录原样搬到 `docs/progress-archive/2026-11.md`。
 - **junction**：任务结束前已单独解除 `.venv`、`assets/sprites/raw` 两个链接（只删链接），目标目录仍在。
 - **待用户验收**：① 隔离启动 V3（`SHION_DATA_DIR=build3\integrate\s7\data`、`SHION_PORT=47699`）切表情后立即捏脸/摸头不卡、眨眼正常、待机/工作看着和之前一样；② 看审查报告，决定中/低级问题修哪些。

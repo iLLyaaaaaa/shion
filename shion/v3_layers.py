@@ -64,6 +64,10 @@ def _render_rotated(renderer, settings, pose):
     return body
 
 
+# 仿射路径用的 QImage 副本：只是转换结果，未命中时转一次约 0.1ms；64 份会让头部帧内存翻倍（S7）
+QFRAME_LIMIT = 8
+
+
 def _head_image(surface, settings, pose):
     """头部缓存帧（预乘数组）对应的 QImage；数组换了就重建。"""
     from v3proto.render import from_premultiplied
@@ -74,7 +78,7 @@ def _head_image(surface, settings, pose):
     if entry is None or entry[0] is not pixels:
         entry = (pixels, from_premultiplied(pixels))
         cache[key] = entry
-        while len(cache) > 64:
+        while len(cache) > QFRAME_LIMIT:
             cache.popitem(last=False)
     cache.move_to_end(key)
     return entry[1]

@@ -39,6 +39,7 @@ BELLY_HINT_DISTANCE = BELLY_LIFT_DISTANCE  # 肚子上没在挠、拖出这么�
 LIFT_UP = 12.0     # 逻辑像素：脸颊上向上超过这么多，且竖向 > LIFT_RATIO × 横向，才算拎起
 LIFT_RATIO = 1.2
 MASK_INTERVAL = 0.1  # 秒：遮罩最多 10 次/秒
+MAX_DT = 0.25  # 秒：一帧最多推进这么久（隐藏/睡眠恢复后不按几分钟的 dt 逐子步追赶）
 MASK_DRIFT_PX = 3.0  # 轮廓自上次遮罩漂过这么多像素就提前重建（遮罩外扩 MASK_GROW=4px）
 PROGRAM_FAST_DEGREES_PER_SECOND = 8.0  # V2 程序动作：倾斜变化快于此用 60 FPS
 PROGRAM_FAST_SCALE_PER_SECOND = 0.2    # 压扁/拉伸变化快于此用 60 FPS
@@ -79,6 +80,19 @@ def _build_side(rig, side, scale):
     if rig is None:
         rig = load_rig(side)
     return rig, Renderer(rig, scale)
+
+
+_QUIT_HOOKED = False
+
+
+def _hook_quit() -> None:
+    """应用退出时关掉后台预热线程（atexit 之外再保险一次，进程收尾前就停）。"""
+    global _QUIT_HOOKED
+    app = QGuiApplication.instance()
+    if _QUIT_HOOKED or app is None:
+        return
+    app.aboutToQuit.connect(Prewarmer.shutdown_pool)
+    _QUIT_HOOKED = True
 
 
 def _premultiplied(image: QImage) -> np.ndarray:
@@ -148,7 +162,7 @@ class V3PetWindow(PetWindow):
         self._v3_mask_force = True
         self._v3_mask_state = None
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
-                          "affine": 0, "mesh": 0, "side_switches": 0}
+                          "affine": 0, "mesh": 0, "side_switches": 0, "deferred": 0}
         self._v3_sway = None
         # 状态姿态（S6）：静态部分缓动；周期动作（点头/哈欠/画圈/咀嚼）直接叠加；
         # 换状态时把上一状态的周期动作余量交给 carry 衰减掉，不跳。
@@ -160,6 +174,7 @@ class V3PetWindow(PetWindow):
         self._v3_pose_weight = 1.0
         self._v3_pose = None
         self._v3_screen_hooked = False
+        _hook_quit()
         self._v3_ready = True
 
     def _load_sprites(self) -> None:
@@ -467,7 +482,7 @@ class V3PetWindow(PetWindow):
             self._v3_mask_force = True
             self._v3_mask_state = self.sprite_name
         self._v3_settings.expression = expression
-        dt = 0.0 if self._v3_clock is None else max(0.0, now - self._v3_clock)
+        dt = 0.0 if self._v3_clock is None else min(MAX_DT, max(0.0, now - self._v3_clock))
         self._v3_clock = now
         animator = self._v3_animator
         if self._v3_sway is None:
@@ -515,6 +530,10 @@ class V3PetWindow(PetWindow):
         self._frame = f
         self._v3_pose = pose
         if key is not None and key == self._v3_key and self._v3_image is not None:
+            return
+        if self._v3_image is not None and prewarmer.would_block(self._v3_settings, pose):
+            # 这一帧要现算的东西正被后台占着锁：先留着上一帧，下一 tick 再画，不让界面等锁。
+            stats["deferred"] += 1
             return
         self._v3_key = key
         if still:
@@ -632,6 +651,8 @@ class V3PetWindow(PetWindow):
 
     def mousePressEvent(self, e) -> None:
         super().mousePressEvent(e)
+        if e.button() != Qt.LeftButton:
+            return  # 右键/中键不打断正在进行的左键手势（拎起、捏脸、摸头、挠痒）
         self._v3_gesture = None
         self._v3_idle_moved = False
         self._v3_ignored_sent = False
@@ -769,7 +790,10 @@ class V3PetWindow(PetWindow):
 
     def mouseReleaseEvent(self, e) -> None:
         kind = self._v3_gesture
-        if kind is None or e.button() != Qt.LeftButton or self._press_global is None:
+        if e.button() != Qt.LeftButton:
+            super().mouseReleaseEvent(e)
+            return  # 非左键松开：左键手势照常继续
+        if kind is None or self._press_global is None:
             super().mouseReleaseEvent(e)
             self._v3_gesture = None
             return

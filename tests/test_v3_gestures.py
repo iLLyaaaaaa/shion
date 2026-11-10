@@ -875,7 +875,6 @@ def test_interaction_cancels_queued_blink_prewarm_and_idle_requests_it_again():
     assert queued == len(BLINK_LEVELS)                  # 睁眼 1.0 已在 BLINK_LEVELS 里，去重后一样多
     prewarmer.cancel_blinks()
     assert all(key[1] == 1.0 for key in prewarmer.pending) and len(prewarmer.pending) == 1
-    assert "happy" not in prewarmer.blink_requested
     prewarmer.request_blinks("happy")                   # 互动结束：补回来
     assert len(prewarmer.pending) == queued
 
