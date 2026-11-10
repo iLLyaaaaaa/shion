@@ -897,7 +897,7 @@ V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer 
 - 帧间隔：互动/程序动作/头发大幅摆动 16ms；睡眠类 66ms；头发静止的待机 66ms、工作 50ms；眨眼和轻摆开始前后、状态周期动作进行中 33ms；画面量化键不变时跳过重画。
 
 ### 手势（只用 V3 命中：cheek/crown/face/head/belly/body）
-- **捏脸**：脸颊左右拉，`gesture("cheek_pull")` 只发一次、松手 `cheek_release`；10 秒内第 3 次起说 `cheek_pull_combo`。
+- **捏脸**：脸颊左右拉，`gesture("cheek_pull")` 只发一次、松手 `cheek_release`；10 秒内第 3 次起说 `cheek_pull_combo`。计数在 `shion/state.py` 状态机里，V2 窗口的捏脸同样适用（S7 验收确认保留）。
 - **拎起（唯一挪窗口的方式）**：脸颊上相对按下点向上 >12 逻辑像素且竖向 >1.2×横向 → 真实移动窗口，复用 PetWindow 拖动/慢放停留/快甩或放到任务栏下落/落地压扁；台词 `cheek_lift`；来回 ≥24px 三次/2 秒晃晕。在脸颊以外拖动超过点击容差时窗口不动，发 `drag_ignored`，控制器 LOW 优先级说 `v3_lift_hint`（冷却 60 秒）；首次以 V3 启动约 10 秒后提示一次，说出后写存档 `v3_lift_hint_shown`（旧存档默认 False）。
 - **摸头**：crown 区域来回摸，每 40px 发 `patted`（好感/统计照旧）。
 - **敲头**：crown 单击，只播 V3 敲头动画，发 `knocked(bool)`（1.5 秒内第 3 下为抗议），**不算戳**、无好感/统计；台词 `head_knock` / `head_knock_stop`（LOW，4 秒类别冷却）。
