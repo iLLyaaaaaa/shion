@@ -4,6 +4,15 @@
 
 ## 当前状态总览
 
+### 2026-11-11 全仓测试汇总后进程崩溃：已定位并修复（分支 fix/test-exit-crash）
+
+- **现象**：全仓 pytest 打印汇总后，进程偶发以 0xC0000409、`Fatal Python error: Aborted`（退出码 3）或 access violation（139）退出。三者是同一个退出期原生崩溃，只是有没有开 faulthandler 的区别。V2.2 起点 `45d87b3` 上就有，和 V3 无关；修复前全仓 3 次崩 2 次。
+- **原因**：测试把**显示过的顶层 Qt 窗口**留到了解释器退出，PySide6 退出时的析构顺序不定，偶发崩溃。窗口留下来是因为按钮信号连着捕获 `self` 的 lambda，引用挂在 C++ 连接上，gc 回收不了，只 `close()` 不会释放它。主犯是 `test_permission.py::test_panel_title_is_plain_text`（只跑它 24 次崩 3 次；整个文件去掉它 16 次 0 次）。另外 `PetController.dispose()` 漏清检查点面板 `_checkpoint`，`test_per_session_remote` 3 项、`test_session_labels` 1 项各留下一整套控制器和窗口；`test_weekly` 的 `deleteLater()` 没处理延迟删除。
+- **修复**：上述测试改为真正销毁窗口（`deleteLater()` + `sendPostedEvents(DeferredDelete)`）；`dispose()` 也清 `_checkpoint`；`tests/conftest.py` 加会话级兜底（结束时停掉定时器、销毁剩余顶层窗口）。
+- **验证**：单个主犯测试并行 24 次、相关 5 个文件组合并行 12 次，全部正常退出（修复前分别崩 3 次、4 次）。全仓并行 3 次：都是 16 failed、2285 passed、8 skipped，退出码 1，无崩溃输出。16 项与修复前基线相同：`test_chat_remote_boundary` 15 项，加 `test_stamina::test_chain_preserves_exact_stdin_and_stdout`（在这个 worktree 里单独跑也稳定失败，修复前基线也一样，与本次无关，未查）。
+- **踩坑**：①测试里显示过的窗口必须销毁，不能只 `close()`；②Windows 上没有控制台时 Qt 消息不写 stderr，排查时要设 `QT_FORCE_STDERR_LOGGING=1`（这次确认了不是 qFatal）；③崩溃是概率性的，单次全仓不崩不能说明没问题，要并行多跑几次。
+- **待做**：真实程序退出时（`app.exec()` 返回后）也有显示过的面板活到解释器退出，可能同样在退出时静默崩溃，没查。
+
 ### V3 第 2 步：接入诗音本体（S1～S7 完成，已验收）
 
 - 分支 `feature/v3-integrate`，worktree `D:\desktop\work\shion-v3integrate`。起点 `feature/v2.2-chat-mcp` 的 `45d87b3`，已合入 `feature/v3-rig`（检查点 `3ec5578`）。本地提交，不 push。
@@ -15,7 +24,7 @@
   5. 需新画清单优先级：working 道具 > collapse/slump > desk/bed > stop > yawn > neglect1（S6 改为：working 道具 > 右鼓版脸部底板 > collapse/slump > desk/bed > stop > yawn > neglect1）。验收线：互动场景 DPR1.5 平均 ≥55 FPS、paint P95 ≤14ms；待机/工作 CPU ≤ 单核 3% 且不超过 V2 的 2 倍。**（此条已在 S2 改为新验收线，见下方 S2 记录。）**
 - **当前进度**：S1～S6 已验收（S5 换边已实现但**默认关闭**）；S7 全仓回归、CPU/内存评估、reviewer 审查、文档收尾已完成（2026-11-10），审查中级问题 1～6 已按用户要求修复（2026-11-10）；**S7 真实窗口验收通过（2026-11-11），V3 第 2 步收工**。仍在 `feature/v3-integrate`，未合并 master、未 push。
 - **下一步候选**：
-  1. 审查低级问题 7～12、14（未修，用户决定暂不修，可按需挑）；第 13 条 `cheek_pull_combo` 对 V2 也生效，用户确认保留并已写入 spec。全仓汇总后的退出崩溃是 V2.2 起点就有的问题，已另开任务排查，不在 V3 内处理。
+  1. 审查低级问题 7～12、14（未修，用户决定暂不修，可按需挑）；第 13 条 `cheek_pull_combo` 对 V2 也生效，用户确认保留并已写入 spec。全仓汇总后的退出崩溃是 V2.2 起点就有的问题，已在 `fix/test-exit-crash` 修复并合入本分支（见上方 2026-11-11 记录）。
   2. **S8：接入新画素材**（`assets/sprites/raw/v3/s6/`：右鼓底板 `head-right-plate.png` → 打开换边；抱电脑 `working-hold.png` → 切双臂+电脑整块替换 working 手臂）。
   3. 可选 CPU 优化：待机时遮罩重建约 7.6 次/秒、占主线程 CPU 约三分之一，可按姿态漂移判断少建。
   4. 合并到 master 的准备（另起计划）；`head_knock` 文案已启用，无待确认项。
