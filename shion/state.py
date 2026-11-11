@@ -513,7 +513,10 @@ class PetState:
     # ------------------------------------------------------------ 查询
 
     def current(self, now: datetime) -> str:
-        """优先级：drag > 固定/手动表情 > 临时反应 > 暂停 > working > sleep > 待机/底层。"""
+        """优先级：drag > 固定/手动表情 > 临时反应 > 聊天工作中 > 暂停 > CC 工作中 > sleep > 待机/底层。
+
+        暂停只作用于 Claude Code；Claude 聊天还在工作时本体仍显示工作中（spec“聊天与 CC 同时工作时”）。
+        """
         if self._dragging:
             return "drag"
         if self.save.fixed_expression:
@@ -524,9 +527,11 @@ class PetState:
             return "happy"
         if self._temp and now < self._temp[1]:
             return self._temp[0]
+        if self.observed_working:
+            return "working"
         if self.paused:
             return "stop"
-        if self.is_working(now) or self.observed_working:
+        if self.is_working(now):
             return "working"
         if self.stamina_standing:
             return "idle"
