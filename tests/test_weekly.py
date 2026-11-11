@@ -299,6 +299,12 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+def flush_deletes():
+    """测试里没有事件循环，deleteLater() 要手动处理，否则窗口会活到解释器退出。"""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 @pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
 def test_card_and_window_are_exportable_without_focus(qapp, lang, tmp_path):
     card = preview(lang)
@@ -310,7 +316,7 @@ def test_card_and_window_are_exportable_without_focus(qapp, lang, tmp_path):
     assert window.testAttribute(__import__('PySide6.QtCore', fromlist=['Qt']).Qt.WA_ShowWithoutActivating)
     window.update_report(preview(lang, enabled=False))
     assert not window.data['enabled']
-    window.close(); window.deleteLater()
+    window.close(); window.deleteLater(); flush_deletes()
     assert number(200000000, lang) in ('2.00亿', '200M', '2.00億')
 
 
@@ -336,7 +342,7 @@ def test_window_escape_save_and_clipboard_under_mocked_ui(qapp, tmp_path, monkey
     assert output.is_file() and copied[0] == window.image
     QTest.keyClick(window, Qt.Key_Escape)
     assert not window.isVisible()
-    window.deleteLater()
+    window.deleteLater(); flush_deletes()
 
 
 
@@ -478,7 +484,7 @@ def test_window_repaints_at_real_size_and_fills_85_percent(qapp, monkeypatch):
     assert window.view.width() in painted  # painted straight onto the widget, at its own size
     assert window.image.width() == 1200 and window.image.height() == 1500
     assert '#1A1212' in window.styleSheet() and '#F4772E' in window.styleSheet()
-    window.close(); window.deleteLater()
+    window.close(); window.deleteLater(); flush_deletes()
 
 
 EXPECTED_TITLES = {
