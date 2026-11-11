@@ -4,6 +4,14 @@
 
 ## 当前状态总览
 
+### 2026-11-11 v2.2.0 打包并替换 Shion-dev，待剩余真机验收
+
+- **打包**：从 `74ddb24` 运行 `tools/build.py`，依赖版本一致（PyInstaller 6.22.3 / hooks-contrib 2026.9 / PySide6 6.12.0 / numpy 2.2.6），230 文件，bundle_smoke **110 项通过**，exe 版本 2.2.0，SHA-256 `9d79dc04…9014ac`。`dist/Shion-2.2.0-win64.zip` 46,380,724 字节，SHA-256 `c8fe82adf7cafedce9ac10566b49852a277f1c9ee7ae547c53de64cc44ca7a62`；2.0.0 / 2.1.0 两个 ZIP 哈希未变。
+- **烟测**（隔离目录，`build/v220-release-20261111/smoke.py`）：Observer stdio 响应与 11-08 替换完全一致；聊天 MCP initialize、tools/list（三个工具）、working / need_input / done 均正常，stderr 为空，未写任何文件。
+- **替换**：沿用 11-08 替换器，只改目录名。北京时间 19:36:22 完成，两次改名各一次成功，没有强制结束进程。新旧各 230 文件逐个哈希核对一致（替换后另行只读复核一次）；旧包保留为 `D:\desktop\tools\Shion-dev-before-2.2.0-20261111`。配置哈希未变，`v2_scheduler_enabled=false`、`claude_link_enabled=true`，三个 ZIP 未变。证据在 `build/v220-release-20261111/`。
+- **踩坑**：①占用旧目录的是 Claude 桌面版拉起的两个聊天 MCP，只关窗口不行，要从托盘退出 Claude。②从本会话（运行在 Claude 里）后台启动的替换器会随 Claude 退出一起被结束：第一次在确认“无进程”的 3 秒内被结束，没有改名，只留下暂存副本（核对与 dist 一致后删除）。改为用户从资源管理器双击 `start_replacer.cmd` 在 Claude 外运行后成功。以后替换都按这个方式。
+- 下一步：用户做剩余真机验收（英/日自然触发各一长一短、英日聊天气泡、断开后配置恢复与重新连接），通过后进入发布第三部分（推送前审查）。
+
 ### 2026-11-11 v2.2.0 发布准备第二部分：版本号、README、发布说明（本地提交，不 push）
 
 - 版本号改为 2.2.0（exe 版本资源 2.2.0.0），`test_release` / `test_windowing` 的版本断言同步；spec V2.2 标题改为“v2.2.0 发布”。
