@@ -4,6 +4,7 @@
 """
 import json
 import math
+import time
 from dataclasses import replace
 
 import numpy as np
@@ -797,10 +798,14 @@ def test_mouse_moves_never_render_a_frame_each_the_timer_does(qapp):  # noqa: F8
             t[0] += .001
             gmove(w, g0, move_to(i), 0)
         assert w.v3_stats["rendered"] == before, kind
-        for _ in range(10):                            # 定时器照常把动画画出来
+        # 定时器照常把动画画出来。后台预热占锁时这一帧会先推迟（S7 第 6 条），
+        # 所以按真实帧间隔推进；机器满载时后台更慢，最多等 3 秒。
+        deadline = time.perf_counter() + 3.0
+        while w.v3_stats["rendered"] == before and time.perf_counter() < deadline:
+            time.sleep(.016)
             t[0] += .016
             w.advance_to(t[0])
-        assert w.v3_stats["rendered"] > before
+        assert w.v3_stats["rendered"] > before, f"{kind} {dict(w.v3_stats)} {w._v3_settings.expression} key={w._v3_key!r:.200}"
         grelease(w, g0, 0, 0)
         w.close()
 

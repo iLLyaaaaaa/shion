@@ -13,14 +13,26 @@
 - **踩坑**：①测试里显示过的窗口必须销毁，不能只 `close()`；②Windows 上没有控制台时 Qt 消息不写 stderr，排查时要设 `QT_FORCE_STDERR_LOGGING=1`（这次确认了不是 qFatal）；③崩溃是概率性的，单次全仓不崩不能说明没问题，要并行多跑几次。
 - **待做**：真实程序退出时（`app.exec()` 返回后）也有显示过的面板活到解释器退出，可能同样在退出时静默崩溃，没查。
 
+### 2026-11-11 S7 第 6 条“先显示上一帧”的回归修复（用户批准）
+
+- **问题**：后台排着上百个预热任务时（例如启动头几秒），这一帧要的素材（如某表情的捏脸素材）排在队尾，后台每做完一项马上又拿锁，主线程每帧都判断“会等锁”而一直显示旧图：子集测试里连续推迟 102 帧（约 3 秒）。改第 6 条之前最坏只卡一个后台任务 + 一次现算（约 0.1 秒）。
+- **修法**（`shion/v3_window.py`）：
+  1. `MAX_DEFERRED = 3`：连续推迟 3 帧（约 50ms）后不再推迟，主线程直接等锁现算；画出新帧后计数清零。
+  2. 推迟的那一帧不再直接 `return`：V2 变换照常更新，后面的遮罩重建和 `update()` 照常走（遮罩按“旧图 + 新变换”画，和屏幕一致）。原来直接返回会让旧图按新变换画、伸出遮罩（`test_lift_shake_and_landing_never_clip_visible_pixels[320]` 抓到 1 个像素）。
+  - 中间试过“推迟时 `_frame` 也留在上一帧”，不行：父类 V2 窗口拖动时自己也写 `_frame`，会把 V2 倾斜带回来，状态姿态测试读到的姿态也会跳。已放弃。
+- **测试**：`tests/test_v3_prewarm_thread.py` 新增“后台一直占锁时最多推迟 MAX_DEFERRED 帧、第 4 帧等锁画出”；`test_mouse_moves_never_render_a_frame_each_the_timer_does` 改为按真实 16ms 间隔推进、最多等 3 秒，失败时打印统计。
+- **回归**（junction，`-X faulthandler`，日志 `build/v3/integrate/defer3/`）：display+gestures 子集 96 passed；V3 473 passed、1 skipped；全仓 2772 passed、1 failed（`test_stamina` 满载偶发）、9 skipped。**正常退出，无崩溃**。
+- **首次捏脸**（改前 `498d456` 导出 vs 改后，交替 6 轮，捏脸 20 帧里最长一帧的均值，`defer3/first-pinch.txt`）：启动后首次 23.1 / 24.1ms，切表情 0.3 秒后 29.1 / 28.8ms，切表情 4 秒后 28.9 / 24.6ms，另一组首次 26.6 / 25.2ms，均在波动内。
+- `test_v3_side::test_switch_frame_does_not_compose_on_the_main_thread` 在前一轮全仓里以 41.2ms 超过 40ms 线失败过一次（换边默认关闭，满载波动），本轮通过。
+
 ### 2026-11-11 合入 fix/test-exit-crash（合并提交 0abf44a）
 
 - 冲突 2 处（`tests/conftest.py` 两个会话级收尾 fixture、本页两段新记录），按用户决定两边都保留；`shion/controller.py` 自动合并。
 - **测试**（junction，`-X faulthandler`，日志 `build/v3/integrate/merge/`）：V3 `-k v3` 471 passed、1 failed、1 skipped；全仓 2755 passed、17 failed、9 skipped，26 分钟。**两次都正常退出（退出码 1 = 有失败），没有崩溃输出。**
 - 17 项失败：`test_chat_remote_boundary` 15（见下条）、`test_stamina` 1（满载偶发，同前）、**新增 `test_v3_gestures.py::test_mouse_moves_never_render_a_frame_each_the_timer_does`**。
-- **新增那项不是合并引入**：`35751a3`（S7 审查修复）导出上单独跑也失败，`b1ff143` 上通过。原因是第 6 条“后台占锁时先显示上一帧”：测试在同一瞬间连推 10 帧、不给后台留真实时间，10 帧全被推迟（`deferred=10`）。按真实 16ms 间隔推进时只推迟 1 帧就画出来了，界面行为符合第 6 条的设计。修法（改测试等真实时间）待用户批准。
+- **新增那项不是合并引入**：`35751a3`（S7 审查修复）导出上单独跑也失败，`b1ff143` 上通过。原因是第 6 条“后台占锁时先显示上一帧”：测试在同一瞬间连推 10 帧、不给后台留真实时间，10 帧全被推迟（`deferred=10`）。按真实 16ms 间隔推进时只推迟 1 帧就画出来了，界面行为符合第 6 条的设计。修复见下条。
 
-### 2026-11-11 `test_chat_remote_boundary` 15 项失败：查明，修复待批准
+### 2026-11-11 `test_chat_remote_boundary` 15 项失败：查明并修复
 
 - **结论：不是环境、时间或测试互相污染，是 `45d87b3` 提交漏了要测的代码。** 11-08 那次 `2344 passed、10 skipped`（`build/v22-acceptance-full-20261108.log`，17:28，比提交早 1 分钟）跑的是**当时的工作区**（progress 原文“全量测试当前工作区”，控制器是分片暂存的），不是提交本身：那次共 2354 项，`45d87b3` 干净导出只收集到 2309 项。
 - **证据**：
@@ -30,7 +42,7 @@
   4. 只在导出副本里把 `observed_working` 提到 `paused` 前面：该文件 + stop_work / continue_after_stop / chatgpt_ui / controller / per_session_remote / state 共 310 passed。
 - **最小复现**：在 `45d87b3` 导出目录运行 `python -m pytest -q tests/test_chat_remote_boundary.py::test_chat_started_after_cc_pause_never_inherits_pause_display`（CC prompt → `stop_work()` → 聊天开始 → 仍显示 stop）。
 - **顺带发现**：主目录 `feature/v2.2-chat-mcp` 本次会话开始时有 8 个未提交改动（含 `shion/state.py`、`controller.py`）和未跟踪的 `tests/test_head_touch.py`，11-11 调查中途被清空，没有 stash/reflog 记录（不是本会话操作）。是否就是 11-08 漏提交的那部分，无法再核对。
-- **修复方案**：见当次会话汇报，待用户批准后再改。
+- **修复**（用户批准）：分支 `fix/chat-pause-display`（从 `45d87b3`，提交 `c2f44ee`），`State.current()` 改为 聊天工作中 → 暂停 → CC 工作中；相关 9 个文件 391 passed。已合入本分支（`498d456`）。
 
 ### V3 第 2 步：接入诗音本体（S1～S7 完成，已验收）
 

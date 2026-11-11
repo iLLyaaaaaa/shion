@@ -235,3 +235,37 @@ def test_cached_reaction_patch_does_not_take_the_lock(qapp):  # noqa: F811
         release_lock.set()
         holder.join(2)
     w.close()
+
+
+def test_deferral_is_capped_so_a_long_background_queue_cannot_freeze_the_display(qapp, monkeypatch):  # noqa: F811
+    """后台一直占着锁（排着很多预热）时，最多推迟 MAX_DEFERRED 帧，之后主线程等锁现算。"""
+    import shion.v3_window as vw
+    monkeypatch.setattr(vw, "PREWARM_EXECUTOR", IdleExecutor())
+    w, t = make(qapp, 200, 1.0)
+    w.set_state("stop", animate=False)
+    run_for(w, t, .3)
+    surface = w._v3_renderer.head_surface
+    for key in [k for k in surface.frames if k[0] == "angry"]:
+        del surface.frames[key]
+    w._v3_key = None
+    old_image = w._v3_image
+    ready, release_lock = threading.Event(), threading.Event()
+    holder = threading.Thread(target=_hold_lock, args=(surface._v3_lock, ready, release_lock))
+    holder.start()
+    ready.wait(2)
+    threading.Timer(.2, release_lock.set).start()   # 后台手上这一项 0.2 秒后做完
+    try:
+        before = w.v3_stats["deferred"]
+        for _ in range(vw.MAX_DEFERRED):
+            t[0] += .016
+            w.advance_to(t[0])
+        assert w._v3_image is old_image
+        assert w.v3_stats["deferred"] - before == vw.MAX_DEFERRED
+        t[0] += .016
+        w.advance_to(t[0])                          # 第 MAX_DEFERRED+1 帧：等锁、现算
+        assert w._v3_image is not old_image and ("angry", 1.0) in surface.frames
+        assert w.v3_stats["deferred"] - before == vw.MAX_DEFERRED
+    finally:
+        release_lock.set()
+        holder.join(2)
+    w.close()

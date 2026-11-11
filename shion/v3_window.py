@@ -40,6 +40,9 @@ LIFT_UP = 12.0     # 逻辑像素：脸颊上向上超过这么多，且竖向 >
 LIFT_RATIO = 1.2
 MASK_INTERVAL = 0.1  # 秒：遮罩最多 10 次/秒
 MAX_DT = 0.25  # 秒：一帧最多推进这么久（隐藏/睡眠恢复后不按几分钟的 dt 逐子步追赶）
+# 后台占锁时最多连续推迟这么多帧（约 50ms），之后主线程直接等锁现算。
+# 不设上限的话，后台排着上百个预热任务时，要的素材排在队尾，界面会停在旧帧好几秒。
+MAX_DEFERRED = 3
 MASK_DRIFT_PX = 3.0  # 轮廓自上次遮罩漂过这么多像素就提前重建（遮罩外扩 MASK_GROW=4px）
 PROGRAM_FAST_DEGREES_PER_SECOND = 8.0  # V2 程序动作：倾斜变化快于此用 60 FPS
 PROGRAM_FAST_SCALE_PER_SECOND = 0.2    # 压扁/拉伸变化快于此用 60 FPS
@@ -163,6 +166,7 @@ class V3PetWindow(PetWindow):
         self._v3_mask_state = None
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
                           "affine": 0, "mesh": 0, "side_switches": 0, "deferred": 0}
+        self._v3_deferred_run = 0  # 当前连续推迟了几帧
         self._v3_sway = None
         # 状态姿态（S6）：静态部分缓动；周期动作（点头/哈欠/画圈/咀嚼）直接叠加；
         # 换状态时把上一状态的周期动作余量交给 carry 衰减掉，不跳。
@@ -531,20 +535,24 @@ class V3PetWindow(PetWindow):
         self._v3_pose = pose
         if key is not None and key == self._v3_key and self._v3_image is not None:
             return
-        if self._v3_image is not None and prewarmer.would_block(self._v3_settings, pose):
-            # 这一帧要现算的东西正被后台占着锁：先留着上一帧，下一 tick 再画，不让界面等锁。
+        if (self._v3_image is not None and self._v3_deferred_run < MAX_DEFERRED
+                and prewarmer.would_block(self._v3_settings, pose)):
+            # 这一帧要现算的东西正被后台占着锁：先留着上一张图，下一 tick 再画，不让界面等锁。
+            # V2 变换（_frame）照常更新，下面的遮罩也照常按“旧图 + 新变换”重建，和屏幕上一致。
             stats["deferred"] += 1
-            return
-        self._v3_key = key
-        if still:
-            image = render_affine(self._v3_renderer, self._v3_settings, pose)
-            stats["affine"] += 1
+            self._v3_deferred_run += 1
         else:
-            image = self._v3_renderer.render(self._v3_settings, pose)
-            stats["mesh"] += 1
-        image.setDevicePixelRatio(self._v3_dpr)
-        self._v3_image = image
-        stats["rendered"] += 1
+            self._v3_deferred_run = 0
+            self._v3_key = key
+            if still:
+                image = render_affine(self._v3_renderer, self._v3_settings, pose)
+                stats["affine"] += 1
+            else:
+                image = self._v3_renderer.render(self._v3_settings, pose)
+                stats["mesh"] += 1
+            image.setDevicePixelRatio(self._v3_dpr)
+            self._v3_image = image
+            stats["rendered"] += 1
         # 遮罩最多 10 次/秒；但 V2 帧（倾斜/压扁/跳）快速变化时轮廓每帧都在动，遮罩滞后会
         # 把落地回弹时伸出遮罩的头发尖裁掉（看起来闪一下），这时才每帧重建。
         # 判据是“轮廓相对上次遮罩漂了多少像素”，不是“有没有按着鼠标”：setMask 是原生调用，
