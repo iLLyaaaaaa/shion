@@ -4,6 +4,14 @@
 
 ## 当前状态总览
 
+### 2026-11-11 v2.2.0 已发布
+
+- **推送**（用户同意后）：`git push origin master`（`cf58821..e974526`，快进）、`git push origin v2.2.0`（附注标签 `f105f74` → `e974526`，标签作者 noreply）。没有推 backup，没用 --all / --mirror / --tags。第一次推送因 GitHub 登录过期、会话里不能弹出 Git Credential Manager 登录而失败（远端未变）；用户在自己的终端重新登录 gh 后推送成功。
+- **推送前审查**（范围 12 个提交 `d4dee9e`…`e974526`）：邮箱全部 noreply，提交信息里只有 `noreply@anthropic.com`；逐提交 `check_private --ref` 12/12 无命中；USERNAME / COMPUTERNAME 对完整补丁（UTF-8 与 UTF-16）、提交信息、路径 0 命中；密钥 / 令牌 / 手机号 / 证件号正则 0 命中（未装 gitleaks）；出现过的 34 个文件均为代码、测试、文档、台词；无 >5 MB 文件，无 build/dist/.venv/raw/音频/字体；`ls-files -ci` 为空；与 `feature/v3-integrate` 共有的 6 个提交都是 V2.2 自身提交，没有 V3 专属提交。审查中发现一个本地提交信息带 BOM（PowerShell `Out-File utf8`），未推送前已 amend 修正；以后提交信息用 Write 工具或 `git commit -m` 写。
+- **Release**「Shion 2.2.0」：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.2.0 ，Latest、非草稿、非预发布，发布时间 2026-11-11T11:50:46Z；正文与 `build/release-notes-2.2.0.md` 一致；附件 `Shion-2.2.0-win64.zip` 46,380,724 字节，重新下载后 SHA-256 `c8fe82ad…ca7a62` 与本地一致，公开下载地址返回 200。
+- **远端核对**：`ls-remote` 的 master 与标签和本地一致；仓库 Public、默认分支 master；远端文件 268 个，与本地 `ls-tree` 逐个路径和 blob 哈希一致。
+- 下一步由用户决定：审查建议 6～13 与“连接前检测 Claude 是否在运行”留作后续候选；V3（`feature/v3-integrate`）另行推进。
+
 ### 2026-11-11 v2.2.0 剩余真机验收通过
 
 - 用户在已替换的 Shion-dev 2.2.0 上确认通过：英/日自然触发各一长一短、英日聊天气泡、断开后配置恢复与重新连接。连同 11-08 已通过的项目，V2.2 发布前人工验收全部完成。多 CC 逐个继续仍按日常使用验证（自动化回归已覆盖）。
@@ -133,7 +141,7 @@
 - 2026-11-01 本机 Shion-dev 先替换为 `4ecaaaa` 的开发包（旧包 `Shion-dev-before-session-labels-20261101`），同日再替换为 `b016547` 的安全修复开发包（220 文件），旧包保留为 `Shion-dev-before-security-20261101`。
 - 分支 `feature/v2-security-fixes`（从 `1500086` 派生）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题和复审第二轮（hook ↔ 服务端令牌、令牌绑定诗音进程、独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。2026-11-01 已快进合并到当前分支（`f8ec0a6`），之后追加 bundle_smoke 修正 `b016547`；worktree 已移除，分支保留、未 push，详见下方 2026-11-01 记录。
 - 2026-11-01 v2.0.0 发布准备（2026-11-02 已快进合并到本地 `master`、打包、打本地标签；未 push、未发布）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。2026-11-02 追加：ChatGPT 未安装时顶层只显示“ChatGPT：未安装”、子菜单活动显示“—”；6 张菜单图改为原生 Windows 11 风格重新渲染。详见下方 2026-11-02 记录。
-- 公开稳定版为 **v2.1.0**（2026-11-04 发布，标签指向 `ca9df3f`）：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.1.0 ；上一版 v2.0.0（2026-11-02，标签指向 `0034dbb`）、v1.0.0；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
+- 公开稳定版为 **v2.2.0**（2026-11-11 发布，标签指向 `e974526`）：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.2.0 ；上一版 v2.1.0（2026-11-04，标签指向 `ca9df3f`）；更早 v2.0.0（2026-11-02，标签指向 `0034dbb`）、v1.0.0；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 - **2026-11-04 V2.1 发布前收尾**（`master`，本地提交、未 push）：①周报 token 标签三语改为 Claude Code 口径（en 输出格缩成 `CC OUTPUT`，否则被截断），有 7 天额度时额度行旁加小字“含聊天等全部用量”（`weekly_quota_note`）；`test_lines` 把 `weekly_total/weekly_output` 列为允许出现 Claude Code 的文案。②statusLine 串联：原命令成功（返回码 0 且有输出）后把输出原子写入 `%APPDATA%\Shion\statusline-last.bin`，超时/失败/异常时输出这份缓存；断开连接时删除缓存和内容为 `{}` 的记录文件。这也缓解了“没有 Git Bash 的机器首次刷新丢状态栏”的边界。③`UsageScanner.scan` 扫描后移除缓存里已不存在的 jsonl 条目。④`tools/make_media.py` 输出路径 relpath 跨盘抛 ValueError 时退回绝对路径。⑤周报统计格默认高度 124→118，柱状图高度上限 320→520，多出的空白归柱状图（预览数据里没有富余，版面不变）。全量 pytest：首轮 `3 failed, 2207 passed`（失败均为上述文案规则测试，已改），改后 `test_lines` 全过。下一步：从新提交打包到暂存目录并挂等待替换（见下方记录）。
 
 - **2026-11-04 V2.1.0 发布准备第 0 步：7 天额度最后已知值**（本地提交、未 push）：存档可选字段 `seven_day_last = {value, resets_at, at}`（无会话标识），收到未过期 seven_day 即更新，数值/重置时间变化或满 10 分钟才写盘；双击状态的 7 天行改用它，超过 5 分钟附“（N 分钟/小时/天前）”，过 resets_at 隐藏；5 小时额度仍只用内存新鲜值，不按 token 推算（spec 已写原因）。原测试“7 天值 73→70 不写盘”改为写盘但不重绘周报。全量 `2214 passed, 8 skipped`，日志 `build/v210-step0-full.log`。下一步：版本号 2.1.0、配图、三语 README、发布说明、审查。
