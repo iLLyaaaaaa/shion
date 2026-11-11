@@ -4,6 +4,15 @@
 
 ## 当前状态总览
 
+### 2026-11-11 全仓测试汇总后进程崩溃：已定位并修复（分支 fix/test-exit-crash）
+
+- **现象**：全仓 pytest 打印汇总后，进程偶发以 0xC0000409、`Fatal Python error: Aborted`（退出码 3）或 access violation（139）退出。三者是同一个退出期原生崩溃，只是有没有开 faulthandler 的区别。V2.2 起点 `45d87b3` 上就有，和 V3 无关；修复前全仓 3 次崩 2 次。
+- **原因**：测试把**显示过的顶层 Qt 窗口**留到了解释器退出，PySide6 退出时的析构顺序不定，偶发崩溃。窗口留下来是因为按钮信号连着捕获 `self` 的 lambda，引用挂在 C++ 连接上，gc 回收不了，只 `close()` 不会释放它。主犯是 `test_permission.py::test_panel_title_is_plain_text`（只跑它 24 次崩 3 次；整个文件去掉它 16 次 0 次）。另外 `PetController.dispose()` 漏清检查点面板 `_checkpoint`，`test_per_session_remote` 3 项、`test_session_labels` 1 项各留下一整套控制器和窗口；`test_weekly` 的 `deleteLater()` 没处理延迟删除。
+- **修复**：上述测试改为真正销毁窗口（`deleteLater()` + `sendPostedEvents(DeferredDelete)`）；`dispose()` 也清 `_checkpoint`；`tests/conftest.py` 加会话级兜底（结束时停掉定时器、销毁剩余顶层窗口）。
+- **验证**：单个主犯测试并行 24 次、相关 5 个文件组合并行 12 次，全部正常退出（修复前分别崩 3 次、4 次）。全仓并行 3 次：都是 16 failed、2285 passed、8 skipped，退出码 1，无崩溃输出。16 项与修复前基线相同：`test_chat_remote_boundary` 15 项，加 `test_stamina::test_chain_preserves_exact_stdin_and_stdout`（在这个 worktree 里单独跑也稳定失败，修复前基线也一样，与本次无关，未查）。
+- **踩坑**：①测试里显示过的窗口必须销毁，不能只 `close()`；②Windows 上没有控制台时 Qt 消息不写 stderr，排查时要设 `QT_FORCE_STDERR_LOGGING=1`（这次确认了不是 qFatal）；③崩溃是概率性的，单次全仓不崩不能说明没问题，要并行多跑几次。
+- **待做**：真实程序退出时（`app.exec()` 返回后）也有显示过的面板活到解释器退出，可能同样在退出时静默崩溃，没查。
+
 ### 2026-11-08 V2.2 真机验收与本地提交
 
 - 用户确认通过：仅 Claude 聊天工作时，工作遥控整组置灰、tooltip 正确、无暂停标记；Claude 聊天与 Claude Code 同时工作时只暂停 CC，聊天仍显示工作中，气泡说明作用范围。

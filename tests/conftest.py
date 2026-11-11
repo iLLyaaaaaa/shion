@@ -90,3 +90,33 @@ def no_real_launch(monkeypatch):
     """任何测试都不能真的拉起诗音 GUI；要检查启动参数的测试自己再替换 _popen。"""
     from shion import launcher
     monkeypatch.setattr(launcher, "_popen", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def destroy_leftover_windows():
+    """整轮测试结束时销毁还活着的 Qt 窗口和定时器。
+
+    显示过的顶层窗口如果活到解释器退出（例如信号连着捕获 self 的 lambda，gc 回收不了），
+    PySide6 退出时的析构顺序不定，进程会在打印汇总后偶发崩溃（0xC0000409 / abort / access violation）。
+    各测试仍应自己清理；这里只是兜底，保证整轮的退出码可信。
+    """
+    yield
+    import gc
+    import sys
+    if "PySide6.QtWidgets" not in sys.modules:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent, QTimer
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        return
+    for obj in gc.get_objects():
+        try:
+            if isinstance(obj, QTimer):
+                obj.stop()
+        except RuntimeError:  # C++ 对象已删除
+            pass
+    for widget in app.topLevelWidgets():
+        widget.hide()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)

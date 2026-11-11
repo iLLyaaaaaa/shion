@@ -1262,7 +1262,8 @@ class PetController(QObject):
             self._weekly_window = None
         self._foreground.stop()
         self.state.cancel_snack()
-        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel, self._observation_hint):
+        for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel,
+                      self._observation_hint, self._checkpoint):
             if panel is not None:
                 panel.hide()
                 panel.setParent(None)
@@ -1271,6 +1272,7 @@ class PetController(QObject):
         self._dialogue = self._crumbs = None
         self._connection_panel = None
         self._observation_hint = None
+        self._checkpoint = None
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:

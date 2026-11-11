@@ -11,7 +11,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtTest import QTest
 
 import shion
@@ -773,7 +773,10 @@ def test_panel_title_is_plain_text(qapp):  # noqa: F811
     panel.show_request("r1", "<b>x</b>", "ls", 0, texts, (0, 0, 100, 100))
     assert panel._title.textFormat() == Qt.PlainText
     assert "<b>x</b>" in panel._title.text()
+    # 显示过的窗口要真正销毁：按钮连着捕获 self 的 lambda，只 close() 会让它活到解释器退出，退出时偶发崩溃。
     panel.close()
+    panel.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 # ---------------------------------------------------------------- 冒充者占着端口
