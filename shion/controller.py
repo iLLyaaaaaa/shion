@@ -47,6 +47,7 @@ from shion.limits import Limits, clean_last
 log = logging.getLogger("shion.controller")
 
 SIZES = (160, 200, 260, 320)
+STALE_PAUSE_GRACE = timedelta(minutes=30)  # 和工具最长保持时间一致：这么久没有 CC 活动才清遗留暂停
 
 
 def pick_screen_rect(rects, x, y, w, h):
@@ -107,6 +108,7 @@ class PetController(QObject):
         self._end_pending: set[str] = set()  # 这一轮被诗音结束了（中断 / 停下拿到 stop / 停太久）：紧接着的 Stop 不算完成
         # 最近一个被诗音结束了这一轮（立即中断 / 停太久）的会话：(会话, CC 进程或 None)，菜单上可以“继续”
         self._ended: Optional[tuple[str, Optional[interrupt.CCProcess]]] = None
+        self._cc_active_at: Optional[datetime] = None  # 最近一次看到 CC 活动（判断遗留暂停用）
         self._continue_sending = False
         self.session_names = SessionNames()  # 工作遥控菜单 / 检查点面板里的会话显示名
         self._bad_targets: Optional[list[str]] = None  # “有问题……”选了哪些会话（None = 无归属）
@@ -798,8 +800,12 @@ class PetController(QObject):
 
     def _has_active_cc(self) -> bool:
         # 没带 session 的旧 hook 也有效；聊天的 observed_working 永远不算遥控对象。
-        return bool(self.state.is_working(self._now()) or self.hub.is_holding
-                    or self.hub.permissions.pending())
+        now = self._now()
+        active = bool(self.state.is_working(now) or self.hub.is_holding
+                      or self.hub.permissions.pending())
+        if active:
+            self._cc_active_at = now  # 每个暂停入口都先问这里，遗留暂停的宽限从这里算
+        return active
 
     def _pause_text(self, key: str) -> str:
         text = self.lines.ui(key)
@@ -892,8 +898,11 @@ class PetController(QObject):
     def _sync_pause(self) -> None:
         """hub 在服务线程里被解除停下（用户在 CC 里说话，或这一轮没碰到检查点就结束了）后，把界面状态同步过来；
         hook 第一次真的在检查点等着时说一次“已经停下啦～”。"""
-        if self.hub.is_paused and not self._has_active_cc():
-            self.hub.resume()  # 无 CC 活动的遗留标记不能卡住后来的检查点。
+        if not self._has_active_cc() and self.hub.is_paused and (
+                self._cc_active_at is None or self._now() - self._cc_active_at > STALE_PAUSE_GRACE):
+            # 无 CC 活动的遗留标记不能卡住后来的检查点。但 CC 长时间思考时可以几分钟没有 hook 事件，
+            # is_working 5 分钟就过期，所以要等一段宽限再清，免得把用户的暂停悄悄解除。
+            self.hub.resume()
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
         first_hold = self.state.paused and not self._held_seen and self.hub.is_holding
@@ -1474,7 +1483,16 @@ class PetController(QObject):
                 if QMessageBox.question(self.window, title, ui("desktop_confirm_remove"),
                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
                     return
-                self.desktop_connection.disconnect()
+                try:
+                    self.desktop_connection.disconnect()
+                except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
+                    # 只记异常类型，不记配置内容。回执留着会让菜单永远停在“断开”，所以给一个放弃回执的出口。
+                    log.warning("断开聊天连接失败：%s", type(exc).__name__)
+                    if QMessageBox.question(self.window, title, ui("desktop_forget"),
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+                        self.desktop_connection.forget()
+                        QMessageBox.information(self.window, title, ui("desktop_forgotten"))
+                    return
             else:
                 paths = candidates()
                 QMessageBox.information(self.window, title, ui("desktop_choose"))
@@ -1483,7 +1501,8 @@ class PetController(QObject):
                 if not selected:
                     return
                 self.desktop_connection.connect(Path(selected))
-        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
+            log.warning("聊天连接配置未能更新：%s", type(exc).__name__)  # 只记类型，不记配置内容
             QMessageBox.warning(self.window, title, ui("desktop_error"))
             return
         QMessageBox.information(self.window, title, ui("desktop_restart"))

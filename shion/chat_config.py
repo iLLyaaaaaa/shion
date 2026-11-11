@@ -67,7 +67,8 @@ def insert(raw, entry):
     offset = len(text[:start + 1].encode('utf-8'))
     payload = addition.encode('utf-8')
     result = raw[:offset] + payload + raw[offset:]
-    assert result[:offset] + result[offset + len(payload):] == raw
+    if result[:offset] + result[offset + len(payload):] != raw:
+        raise ValueError('Insertion changed surrounding bytes')
     return result
 
 
@@ -162,3 +163,8 @@ class ChatConnection:
         elif "shion" in parse(current)[2].get("mcpServers", {}):
             write_checked(target, current, remove(current, entry))
         self.receipt.unlink()
+
+    def forget(self):
+        """Drop the receipt without touching the client config, after a disconnect that cannot finish
+        (config gone, damaged, or our entry edited). The user then checks the file by hand."""
+        self.receipt.unlink(missing_ok=True)

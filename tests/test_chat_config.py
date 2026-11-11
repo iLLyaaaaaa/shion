@@ -47,6 +47,30 @@ def test_disconnect_preserves_other_edits_and_refuses_changed_entry(tmp_path, ch
         assert target.read_bytes() == remove(raw, config["mcpServers"]["shion"])
 
 
+@pytest.mark.parametrize("damage", ["deleted", "broken", "entry_changed"])
+def test_forget_drops_receipt_without_touching_config(tmp_path, damage):
+    target = tmp_path / CONFIG_NAME
+    target.write_bytes(b'{}')
+    connection = ChatConnection(tmp_path / "data")
+    connection.connect(target)
+    if damage == "deleted":
+        target.unlink()
+    elif damage == "broken":
+        target.write_bytes(b'{broken')
+    else:
+        config = json.loads(target.read_bytes())
+        config["mcpServers"]["shion"]["command"] = "mine"
+        target.write_bytes(json.dumps(config).encode())
+    before = target.read_bytes() if target.exists() else None
+    with pytest.raises((OSError, ValueError)):
+        connection.disconnect()
+    assert connection.receipt.exists()  # 失败时回执仍在，可以重试
+    connection.forget()
+    assert not connection.receipt.exists()
+    assert (target.read_bytes() if target.exists() else None) == before
+    connection.forget()  # 再次放弃也不报错
+
+
 @pytest.mark.parametrize("raw", [
     b'{"mcpServers":{"shion":{}}}', b'{"mcpServers":[]}',
     b'{"x":1,"x":2}', b'{broken', b'[]', b'',

@@ -310,6 +310,8 @@
     "desktop_choose": "请先在 Claude 桌面版的开发者设置中点「编辑配置」，从托盘完全退出 Claude，再选择刚打开的配置文件。",
     "desktop_restart": "已更新配置。请从托盘完全退出并重启 Claude 桌面版。",
     "desktop_error": "配置未能更新。请核对配置文件、备份和 shion 条目。",
+    "desktop_forget": "没能自动恢复配置（文件可能已删除、损坏，或 shion 条目被改过）。要清除诗音这边的连接记录吗？清除后请自己打开配置文件，检查是否还留有 shion 条目。",
+    "desktop_forgotten": "已清除连接记录，可以重新连接聊天了。",
     "desktop_copied": "个人偏好已复制～",
     "weekly_peak": "最拼的一天",
     "weekly_report": "诗音周报",

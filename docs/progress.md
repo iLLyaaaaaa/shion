@@ -4,6 +4,19 @@
 
 ## 当前状态总览
 
+### 2026-11-11 v2.2.0 发布准备第一部分：合并修复、查清失败、审查修复（本地提交，不 push）
+
+- **合并**：`fix/chat-pause-display`（`c2f44ee`）本来就是本分支 HEAD，无需再合；`fix/test-exit-crash`（`8e16027`）普通合并为 `af0672e`，无冲突。`feature/v3-*` 未合入。
+- **stamina 失败的原因（已复现）**：不是超时。`test_chain_preserves_exact_stdin_and_stdout` 用 `list2cmdline`（cmd 引号规则）拼命令，实际却交给 Git Bash 执行。路径带空格时会加引号，bash 保留反斜线，测试通过；worktree 路径（如 `shion-exitfix`）没有空格就不加引号，bash 把 `\` 当转义，命令找不到（返回码 127）→ 输出为空 → 断言失败。用临时 junction 复现 3/3，之后只解除链接。修复只改测试：按 `statusline_shell()` 实际用的 shell 拼命令（bash 用正斜线 + `shlex.join`，PowerShell 回退用 `& '…'`），与 spec「路径使用正斜线并按对应 shell 引用」一致；junction 路径 3/3、PowerShell 回退各验证通过。产品行为不变。
+- **reviewer 审查 `master..HEAD`**：无严重问题（BOM/CRLF/非 ASCII 等配置 insert→remove 均逐字节还原）。用户选择修 1、3、5：
+  - ①断开失败（配置已删除/损坏/shion 条目被改）时回执永远删不掉、菜单卡在“断开”：新增 `ChatConnection.forget()`，失败时询问“清除连接记录”，确认后只删回执、不改配置，提示用户自己检查 shion 条目（三语 `desktop_forget` / `desktop_forgotten`）。
+  - ③CC 长时间思考超过 5 分钟没有 hook 事件时，遗留暂停清理会把用户的暂停悄悄解除：`_has_active_cc()` 记录最近一次 CC 活动时间，遗留暂停要在超过 30 分钟（`STALE_PAUSE_GRACE`）无 CC 活动后才清；从未见过 CC 活动仍立即清。
+  - ⑤连接/断开失败只弹同一句、没有日志：改为 `log.warning` 只记异常类型（测试确认不记配置内容）；`insert` 里的 `assert` 改为 `raise ValueError`。
+  - 第 2 条（轮次结束后“继续”也置灰）是 11-06/11-08 用户已认可的规则，不改。第 4 条（连接前检测 Claude 进程）及建议 6～13 留到以后：回执含整份配置的 base64 且无形状校验；非精确还原留下空 `mcpServers`；MCP 单行超 8192 字节直接退出；未知方法应回 -32601；通知锁非阻塞会丢 working/done；`read_link` 缺 KeyError；暂停时 ChatGPT 工作也会显示 working；重复 working 每次都出气泡。
+- **测试**：合并后第 1 次全量 3 failed（`test_stop_work` 三项，均为 V2.2 未改动的老测试：0.3 秒定时器 `hub.end()` 与请求/子进程到达检查点的竞态；当时另有计时脚本和 reviewer 同时运行，单独跑该文件 2 次 30/30 通过）；无负载复跑全量 2301 passed、8 skipped，退出码 0。修复后全量 **2308 passed、8 skipped、2 条既有 Pillow 弃用警告，退出码 0，无退出期崩溃**，日志 `build/v220-full-{1,2,3}.log`。
+- spec V2.2 章节同步了 30 分钟宽限和“清除连接记录”规则。
+- 下一步：发布准备第二部分（版本号 2.2.0、README 三语核对补齐、发布说明草稿给用户看）。
+
 ### 2026-11-11 全仓测试汇总后进程崩溃：已定位并修复（分支 fix/test-exit-crash）
 
 - **现象**：全仓 pytest 打印汇总后，进程偶发以 0xC0000409、`Fatal Python error: Aborted`（退出码 3）或 access violation（139）退出。三者是同一个退出期原生崩溃，只是有没有开 faulthandler 的区别。V2.2 起点 `45d87b3` 上就有，和 V3 无关；修复前全仓 3 次崩 2 次。
