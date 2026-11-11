@@ -120,11 +120,21 @@ def test_hook_signals_have_no_content_or_side_effects(monkeypatch,event,kind,exp
     assert sent==([('/event',{'type':expected,'session':'s'})] if expected else [])
 
 
+def _shell_command(args):
+    """Quote args for the shell chain() actually uses (Git Bash or the PowerShell fallback), not for cmd."""
+    shell=hc.statusline_shell()
+    if 'powershell' in Path(shell[0]).name.lower():
+        return '& '+' '.join("'"+a.replace("'","''")+"'" for a in args)
+    import shlex
+    # Unquoted backslashes are escapes in bash, so pass Windows paths with forward slashes.
+    return shlex.join([Path(a).as_posix() if os.name=='nt' else a for a in args])
+
+
 def test_chain_preserves_exact_stdin_and_stdout(tmp_path):
     script=tmp_path/'original with spaces.py'
     script.write_text('import sys; sys.stdout.buffer.write(b"prefix\\x00"+sys.stdin.buffer.read()+b"\\r\\n")',encoding='utf-8')
     # Write escapes literally in the subprocess source.
-    command=subprocess.list2cmdline([sys.executable,str(script)]) if os.name=='nt' else __import__('shlex').join([sys.executable,str(script)])
+    command=_shell_command([sys.executable,str(script)])
     record=tmp_path/'record.json'
     record.write_text(json.dumps({'version':1,'original_raw':json.dumps({'type':'command','command':command})}),encoding='utf-8')
     raw=b'{"private":"untouched"}\r\n'

@@ -4,6 +4,47 @@
 
 ## 当前状态总览
 
+### 2026-11-11 v2.2.0 已发布
+
+- **推送**（用户同意后）：`git push origin master`（`cf58821..e974526`，快进）、`git push origin v2.2.0`（附注标签 `f105f74` → `e974526`，标签作者 noreply）。没有推 backup，没用 --all / --mirror / --tags。第一次推送因 GitHub 登录过期、会话里不能弹出 Git Credential Manager 登录而失败（远端未变）；用户在自己的终端重新登录 gh 后推送成功。
+- **推送前审查**（范围 12 个提交 `d4dee9e`…`e974526`）：邮箱全部 noreply，提交信息里只有 `noreply@anthropic.com`；逐提交 `check_private --ref` 12/12 无命中；USERNAME / COMPUTERNAME 对完整补丁（UTF-8 与 UTF-16）、提交信息、路径 0 命中；密钥 / 令牌 / 手机号 / 证件号正则 0 命中（未装 gitleaks）；出现过的 34 个文件均为代码、测试、文档、台词；无 >5 MB 文件，无 build/dist/.venv/raw/音频/字体；`ls-files -ci` 为空；与 `feature/v3-integrate` 共有的 6 个提交都是 V2.2 自身提交，没有 V3 专属提交。审查中发现一个本地提交信息带 BOM（PowerShell `Out-File utf8`），未推送前已 amend 修正；以后提交信息用 Write 工具或 `git commit -m` 写。
+- **Release**「Shion 2.2.0」：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.2.0 ，Latest、非草稿、非预发布，发布时间 2026-11-11T11:50:46Z；正文与 `build/release-notes-2.2.0.md` 一致；附件 `Shion-2.2.0-win64.zip` 46,380,724 字节，重新下载后 SHA-256 `c8fe82ad…ca7a62` 与本地一致，公开下载地址返回 200。
+- **远端核对**：`ls-remote` 的 master 与标签和本地一致；仓库 Public、默认分支 master；远端文件 268 个，与本地 `ls-tree` 逐个路径和 blob 哈希一致。
+- 下一步由用户决定：审查建议 6～13 与“连接前检测 Claude 是否在运行”留作后续候选；V3（`feature/v3-integrate`）另行推进。
+
+### 2026-11-11 v2.2.0 剩余真机验收通过
+
+- 用户在已替换的 Shion-dev 2.2.0 上确认通过：英/日自然触发各一长一短、英日聊天气泡、断开后配置恢复与重新连接。连同 11-08 已通过的项目，V2.2 发布前人工验收全部完成。多 CC 逐个继续仍按日常使用验证（自动化回归已覆盖）。
+- 下一步：发布第三部分第 1 步，推送前审查。
+
+### 2026-11-11 v2.2.0 打包并替换 Shion-dev，待剩余真机验收
+
+- **打包**：从 `74ddb24` 运行 `tools/build.py`，依赖版本一致（PyInstaller 6.22.3 / hooks-contrib 2026.9 / PySide6 6.12.0 / numpy 2.2.6），230 文件，bundle_smoke **110 项通过**，exe 版本 2.2.0，SHA-256 `9d79dc04…9014ac`。`dist/Shion-2.2.0-win64.zip` 46,380,724 字节，SHA-256 `c8fe82adf7cafedce9ac10566b49852a277f1c9ee7ae547c53de64cc44ca7a62`；2.0.0 / 2.1.0 两个 ZIP 哈希未变。
+- **烟测**（隔离目录，`build/v220-release-20261111/smoke.py`）：Observer stdio 响应与 11-08 替换完全一致；聊天 MCP initialize、tools/list（三个工具）、working / need_input / done 均正常，stderr 为空，未写任何文件。
+- **替换**：沿用 11-08 替换器，只改目录名。北京时间 19:36:22 完成，两次改名各一次成功，没有强制结束进程。新旧各 230 文件逐个哈希核对一致（替换后另行只读复核一次）；旧包保留为 `D:\desktop\tools\Shion-dev-before-2.2.0-20261111`。配置哈希未变，`v2_scheduler_enabled=false`、`claude_link_enabled=true`，三个 ZIP 未变。证据在 `build/v220-release-20261111/`。
+- **踩坑**：①占用旧目录的是 Claude 桌面版拉起的两个聊天 MCP，只关窗口不行，要从托盘退出 Claude。②从本会话（运行在 Claude 里）后台启动的替换器会随 Claude 退出一起被结束：第一次在确认“无进程”的 3 秒内被结束，没有改名，只留下暂存副本（核对与 dist 一致后删除）。改为用户从资源管理器双击 `start_replacer.cmd` 在 Claude 外运行后成功。以后替换都按这个方式。
+- 下一步：用户做剩余真机验收（英/日自然触发各一长一短、英日聊天气泡、断开后配置恢复与重新连接），通过后进入发布第三部分（推送前审查）。
+
+### 2026-11-11 v2.2.0 发布准备第二部分：版本号、README、发布说明（本地提交，不 push）
+
+- 版本号改为 2.2.0（exe 版本资源 2.2.0.0），`test_release` / `test_windowing` 的版本断言同步；spec V2.2 标题改为“v2.2.0 发布”。
+- 三语 README 结构对齐：「功能」新增 Claude 桌面版聊天联动小节；连接步骤改为编号步骤并逐字引用个人偏好原句（与 `desktop_preference` 一致）、补断开与“清除连接记录”；补隐私（只收工具名和最多 20 字任务名，不写日志；备份含原配置全文）、常见问题、卸载、已知限制（漏调、15 分钟回空闲、须完全退出 Claude、聊天 token 不计）。ja 原先放在「機能」里的连接说明移到独立的「Claude デスクトップ版チャットとの接続」节，菜单名“AI 接続”更正为实际的“AI 連携”。按用户要求补一条已知限制：没有 Git Bash 时原 statusLine 命令经 PowerShell 冷启动可能超过 1 秒，首次刷新可能丢失原状态栏输出（v2.1.0 起已有）。
+- 发布说明 `build/release-notes-2.2.0.md`（忽略目录）用户已认可：新功能 / 隐私 / 已知限制 / 从 2.1.0 升级（V2.2 未改 CC hooks，不需重连 CC；聊天连接存的是 exe 绝对路径，挪文件夹要断开再连）/ 结尾预告下一个大版本改用纸偶立绘。
+- 下一步：从本提交打包、bundle_smoke、烟测，替换 Shion-dev（等用户退出诗音，不强制结束进程），然后用户做剩余真机验收。
+
+### 2026-11-11 v2.2.0 发布准备第一部分：合并修复、查清失败、审查修复（本地提交，不 push）
+
+- **合并**：`fix/chat-pause-display`（`c2f44ee`）本来就是本分支 HEAD，无需再合；`fix/test-exit-crash`（`8e16027`）普通合并为 `af0672e`，无冲突。`feature/v3-*` 未合入。
+- **stamina 失败的原因（已复现）**：不是超时。`test_chain_preserves_exact_stdin_and_stdout` 用 `list2cmdline`（cmd 引号规则）拼命令，实际却交给 Git Bash 执行。路径带空格时会加引号，bash 保留反斜线，测试通过；worktree 路径（如 `shion-exitfix`）没有空格就不加引号，bash 把 `\` 当转义，命令找不到（返回码 127）→ 输出为空 → 断言失败。用临时 junction 复现 3/3，之后只解除链接。修复只改测试：按 `statusline_shell()` 实际用的 shell 拼命令（bash 用正斜线 + `shlex.join`，PowerShell 回退用 `& '…'`），与 spec「路径使用正斜线并按对应 shell 引用」一致；junction 路径 3/3、PowerShell 回退各验证通过。产品行为不变。
+- **reviewer 审查 `master..HEAD`**：无严重问题（BOM/CRLF/非 ASCII 等配置 insert→remove 均逐字节还原）。用户选择修 1、3、5：
+  - ①断开失败（配置已删除/损坏/shion 条目被改）时回执永远删不掉、菜单卡在“断开”：新增 `ChatConnection.forget()`，失败时询问“清除连接记录”，确认后只删回执、不改配置，提示用户自己检查 shion 条目（三语 `desktop_forget` / `desktop_forgotten`）。
+  - ③CC 长时间思考超过 5 分钟没有 hook 事件时，遗留暂停清理会把用户的暂停悄悄解除：`_has_active_cc()` 记录最近一次 CC 活动时间，遗留暂停要在超过 30 分钟（`STALE_PAUSE_GRACE`）无 CC 活动后才清；从未见过 CC 活动仍立即清。
+  - ⑤连接/断开失败只弹同一句、没有日志：改为 `log.warning` 只记异常类型（测试确认不记配置内容）；`insert` 里的 `assert` 改为 `raise ValueError`。
+  - 第 2 条（轮次结束后“继续”也置灰）是 11-06/11-08 用户已认可的规则，不改。第 4 条（连接前检测 Claude 进程）及建议 6～13 留到以后：回执含整份配置的 base64 且无形状校验；非精确还原留下空 `mcpServers`；MCP 单行超 8192 字节直接退出；未知方法应回 -32601；通知锁非阻塞会丢 working/done；`read_link` 缺 KeyError；暂停时 ChatGPT 工作也会显示 working；重复 working 每次都出气泡。
+- **测试**：合并后第 1 次全量 3 failed（`test_stop_work` 三项，均为 V2.2 未改动的老测试：0.3 秒定时器 `hub.end()` 与请求/子进程到达检查点的竞态；当时另有计时脚本和 reviewer 同时运行，单独跑该文件 2 次 30/30 通过）；无负载复跑全量 2301 passed、8 skipped，退出码 0。修复后全量 **2308 passed、8 skipped、2 条既有 Pillow 弃用警告，退出码 0，无退出期崩溃**，日志 `build/v220-full-{1,2,3}.log`。
+- spec V2.2 章节同步了 30 分钟宽限和“清除连接记录”规则。
+- 下一步：发布准备第二部分（版本号 2.2.0、README 三语核对补齐、发布说明草稿给用户看）。
+
 ### 2026-11-11 全仓测试汇总后进程崩溃：已定位并修复（分支 fix/test-exit-crash）
 
 - **现象**：全仓 pytest 打印汇总后，进程偶发以 0xC0000409、`Fatal Python error: Aborted`（退出码 3）或 access violation（139）退出。三者是同一个退出期原生崩溃，只是有没有开 faulthandler 的区别。V2.2 起点 `45d87b3` 上就有，和 V3 无关；修复前全仓 3 次崩 2 次。
@@ -293,7 +334,7 @@
 - 2026-11-01 本机 Shion-dev 先替换为 `4ecaaaa` 的开发包（旧包 `Shion-dev-before-session-labels-20261101`），同日再替换为 `b016547` 的安全修复开发包（220 文件），旧包保留为 `Shion-dev-before-security-20261101`。
 - 分支 `feature/v2-security-fixes`（从 `1500086` 派生）：v2.0.0 发布前审查的 3 条应修 + 2 条小问题和复审第二轮（hook ↔ 服务端令牌、令牌绑定诗音进程、独占绑定、ChatGPT 状态显示时效、按会话中断共用进程保护、prompt_head 读不到存档不发）。2026-11-01 已快进合并到当前分支（`f8ec0a6`），之后追加 bundle_smoke 修正 `b016547`；worktree 已移除，分支保留、未 push，详见下方 2026-11-01 记录。
 - 2026-11-01 v2.0.0 发布准备（2026-11-02 已快进合并到本地 `master`、打包、打本地标签；未 push、未发布）：版本号改为 2.0.0；三语 README 补 ChatGPT 只读观察、临时关闭联动、AI 连接菜单新结构、工作遥控选会话、同项目第一句话区分、诗音没开时不拖慢 CC、已知限制和隐私说明；新增 6 张菜单截图；发布说明在忽略目录 `build/release-notes-2.0.0.md`。详见下方 2026-11-01 记录。2026-11-02 追加：ChatGPT 未安装时顶层只显示“ChatGPT：未安装”、子菜单活动显示“—”；6 张菜单图改为原生 Windows 11 风格重新渲染。详见下方 2026-11-02 记录。
-- 公开稳定版为 **v2.1.0**（2026-11-04 发布，标签指向 `ca9df3f`）：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.1.0 ；上一版 v2.0.0（2026-11-02，标签指向 `0034dbb`）、v1.0.0；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
+- 公开稳定版为 **v2.2.0**（2026-11-11 发布，标签指向 `e974526`）：https://github.com/iLLyaaaaaa/shion/releases/tag/v2.2.0 ；上一版 v2.1.0（2026-11-04，标签指向 `ca9df3f`）；更早 v2.0.0（2026-11-02，标签指向 `0034dbb`）、v1.0.0；私有备份仍含旧历史。历史改写后的哈希以当前 Git 为准，旧报告的失效哈希仅作决策记录。
 - **2026-11-04 V2.1 发布前收尾**（`master`，本地提交、未 push）：①周报 token 标签三语改为 Claude Code 口径（en 输出格缩成 `CC OUTPUT`，否则被截断），有 7 天额度时额度行旁加小字“含聊天等全部用量”（`weekly_quota_note`）；`test_lines` 把 `weekly_total/weekly_output` 列为允许出现 Claude Code 的文案。②statusLine 串联：原命令成功（返回码 0 且有输出）后把输出原子写入 `%APPDATA%\Shion\statusline-last.bin`，超时/失败/异常时输出这份缓存；断开连接时删除缓存和内容为 `{}` 的记录文件。这也缓解了“没有 Git Bash 的机器首次刷新丢状态栏”的边界。③`UsageScanner.scan` 扫描后移除缓存里已不存在的 jsonl 条目。④`tools/make_media.py` 输出路径 relpath 跨盘抛 ValueError 时退回绝对路径。⑤周报统计格默认高度 124→118，柱状图高度上限 320→520，多出的空白归柱状图（预览数据里没有富余，版面不变）。全量 pytest：首轮 `3 failed, 2207 passed`（失败均为上述文案规则测试，已改），改后 `test_lines` 全过。下一步：从新提交打包到暂存目录并挂等待替换（见下方记录）。
 
 - **2026-11-04 V2.1.0 发布准备第 0 步：7 天额度最后已知值**（本地提交、未 push）：存档可选字段 `seven_day_last = {value, resets_at, at}`（无会话标识），收到未过期 seven_day 即更新，数值/重置时间变化或满 10 分钟才写盘；双击状态的 7 天行改用它，超过 5 分钟附“（N 分钟/小时/天前）”，过 resets_at 隐藏；5 小时额度仍只用内存新鲜值，不按 token 推算（spec 已写原因）。原测试“7 天值 73→70 不写盘”改为写盘但不重绘周报。全量 `2214 passed, 8 skipped`，日志 `build/v210-step0-full.log`。下一步：版本号 2.1.0、配图、三语 README、发布说明、审查。
@@ -387,6 +428,7 @@ V2 进入日常试用阶段，人工验收以日常使用中的反馈为主；�
 - [x] hook 耗时：诗音没开时的等待已在 v1.0.1 热修里去掉（见当前状态）。诗音运行时 PreToolUse 仍约 354 ms（源码）/ 435 ms（exe）：主要是进程启动，`find_cc_process` 只占约 26 ms；是否继续降另议
 - [x] V2.1 第 0 步 statusLine 探测：桌面版不运行（现有/新会话均无记录），终端 rate_limits 在首条回复后出现；四档体力仅终端可用，桌面采用 hook 两档，真实触发见人工验收项。
 - [ ] 接入 GPT / Codex
+- [ ] 后续候选：Claude 桌面版聊天连接/断开前检测 Claude 桌面版是否在运行并提醒（v2.2.0 审查第 4 条，本次不做；目前只靠弹窗、README 和发布说明提示先完全退出 Claude）
 - [ ] V2.1 候选：Codex 控制能力。实验结论：授权可行（异常时交回 Codex 自己处理，桌面端未测）；停下只能做到"检查点暂停 → 继续"；中断目前不可行。详见 docs/experiments/shion-v2-codex-control.md。
 
 - [ ] **开关对用户开放之前**：缺身份、来源冲突或容量耗尽导致的全局 `ledger.uncertain` 也要加恢复条件或时效（审查遗留）。ChatGPT 菜单显示已在 `feature/v2-security-fixes` 加 600 秒时效（`TaskLedger.uncertain_at`）；调度器 `scheduler.py` 仍读粘滞标志，这一条仍未完成。

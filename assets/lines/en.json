@@ -318,6 +318,8 @@
     "desktop_choose": "In Claude Desktop’s developer settings, choose Edit Config. Fully quit Claude from the tray, then select the configuration file it opened.",
     "desktop_restart": "Configuration updated. Fully quit Claude Desktop from the tray and restart it.",
     "desktop_error": "Could not update the configuration. Check the selected file, backup and shion entry.",
+    "desktop_forget": "Couldn't restore the configuration automatically (the file may be missing or damaged, or the shion entry was edited). Clear Shion's connection record? Afterwards, open the configuration file yourself and check whether a shion entry is left.",
+    "desktop_forgotten": "Connection record cleared. You can connect chat again.",
     "desktop_copied": "Preference copied~",
     "weekly_peak": "HARDEST DAY",
     "weekly_report": "Shion Weekly",

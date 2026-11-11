@@ -175,3 +175,72 @@ def test_legacy_cc_without_session_still_controls_cc_alongside_chat(env):
     assert env.ctl.hub.wait_gate(0) == (True, False)
     assert env.win.sprite_name == "working" and env.ctl.chat_activity.phase == "working"
     env.ctl.resume_work()
+
+
+# ---------------------------------------------------------------- 审查修复（v2.2.0 发布前）
+def test_pause_survives_quiet_cc_thinking_and_clears_only_after_grace(env):
+    """CC 长时间思考没有 hook 事件时，is_working 5 分钟就过期；用户的暂停不能因此被悄悄解除。"""
+    ctl = env.ctl
+    ctl.handle_event("prompt", meta={"session": "cc"})
+    ctl.stop_work()
+    assert ctl.hub.is_paused and env.state.paused
+    env.advance(6 * 60)
+    assert not env.state.is_working(env.now)
+    assert ctl.hub.is_paused and env.state.paused  # 不在这里 wait_gate：hook 正在等也算 CC 活动
+    env.advance(25 * 60)  # 距最后一次 CC 活动已超过 30 分钟宽限
+    assert not ctl.hub.is_paused and not env.state.paused
+    assert ctl.hub.wait_gate(0, "later-cc") == (False, False)
+
+
+@pytest.mark.parametrize("answer", [True, False])
+def test_failed_disconnect_offers_to_forget_receipt(env, monkeypatch, caplog, answer):
+    from PySide6.QtWidgets import QMessageBox
+    from shion import controller as controller_module
+    from shion.chat_config import CONFIG_NAME
+
+    ctl = env.ctl
+    target = env.path.parent / "client" / CONFIG_NAME
+    target.parent.mkdir()
+    target.write_bytes(b'{"private":"do-not-log"}')
+    ctl.desktop_connection.connect(target)
+    target.unlink()  # 断开前配置已被删掉
+    asked, informed = [], []
+
+    def question(parent, title, text, *args):
+        asked.append(text)
+        if text == ctl.lines.ui("desktop_confirm_remove"):
+            return QMessageBox.Yes
+        return QMessageBox.Yes if answer else QMessageBox.No
+
+    monkeypatch.setattr(controller_module.QMessageBox, "question", question)
+    monkeypatch.setattr(controller_module.QMessageBox, "information",
+                        lambda parent, title, text, *a: informed.append(text))
+    monkeypatch.setattr(controller_module.QMessageBox, "warning",
+                        lambda parent, title, text, *a: informed.append(text))
+    with caplog.at_level("WARNING", logger="shion.controller"):
+        ctl.manage_desktop_chat(remove=True)
+    assert asked == [ctl.lines.ui("desktop_confirm_remove"), ctl.lines.ui("desktop_forget")]
+    assert "FileNotFoundError" in caplog.text and "do-not-log" not in caplog.text
+    assert ctl.desktop_connection.receipt.exists() is not answer
+    assert informed == ([ctl.lines.ui("desktop_forgotten")] if answer else [])
+    assert not target.exists()  # 放弃回执不会替用户重建或改写配置
+
+
+def test_failed_connect_logs_only_exception_type(env, monkeypatch, caplog):
+    from shion import controller as controller_module
+    from shion.chat_config import CONFIG_NAME
+
+    ctl = env.ctl
+    target = env.path.parent / "client" / CONFIG_NAME
+    target.parent.mkdir()
+    target.write_bytes(b'{"secret":"do-not-log","x":1,"x":2}')
+    warned = []
+    monkeypatch.setattr(controller_module, "candidates", lambda: [])
+    monkeypatch.setattr(controller_module.QMessageBox, "information", lambda *a: None)
+    monkeypatch.setattr(controller_module.QMessageBox, "warning", lambda parent, title, text, *a: warned.append(text))
+    monkeypatch.setattr(controller_module.QFileDialog, "getOpenFileName", lambda *a: (str(target), ""))
+    with caplog.at_level("WARNING", logger="shion.controller"):
+        ctl.manage_desktop_chat()
+    assert warned == [ctl.lines.ui("desktop_error")]
+    assert "ValueError" in caplog.text and "do-not-log" not in caplog.text
+    assert not ctl.desktop_connection.receipt.exists()
