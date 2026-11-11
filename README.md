@@ -18,7 +18,7 @@ English · [中文](README.zh.md) · [日本語](README.ja.md)
 ## Who is she?
 
 Shion is a little girl who lives on your desktop. She blinks, breathes, idles, and sometimes talks to herself.
-While you work with Claude Code (or ChatGPT's Codex), she **keeps you company**: she gets serious when it starts working, lets you know when it's done, and brings permission requests right to you.
+While you work with Claude Code, Claude Desktop chat (or ChatGPT's Codex), she **keeps you company**: she gets serious when it starts working, lets you know when it's done, and brings permission requests right to you.
 
 She doesn't read your code, doesn't go online, and doesn't chat with the AI on your behalf. She's just there with you.
 
@@ -34,6 +34,11 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 - **Several sessions at once**: when more than one Claude Code session is working, Stop, Interrupt now, Nice work and Something's wrong... in **Work remote** open a submenu so you can pick one session (or **All**). Sessions are named after their project folder; two sessions in the same project also show the first few characters of their first message
 - **Disable integration temporarily**: right-click → **AI connections** → **Claude Code** → **Disable integration temporarily**. While it's off, Shion shows no panels and Claude Code handles permission requests itself; turn it back on at any time
 - **No slowdown when Shion isn't running**: hooks notice right away and hand control straight back to Claude Code, with no waiting
+
+### Claude Desktop chat
+- **Chat status reminders**: once connected, Claude tells Shion when a chat task that needs tools or takes a while starts, when it needs your reply, and when it's done; she gets serious, nudges you, or tells you to go look (her lines vary)
+- **Observation only**: Shion can't pause or interrupt a chat. When only a chat is working, the whole **Work remote** group is greyed out; click Stop in Claude instead. When a chat and Claude Code work at the same time, **Stop** pauses Claude Code only and Shion keeps showing "Working"
+- **Triggered by a personal preference**: Claude decides when to notify her, so you paste one sentence Shion provides into Claude's personal preferences (see "Connecting Claude Desktop chat" below)
 
 ### ChatGPT (Codex) observation
 - Works with the Codex CLI and the Codex desktop app: Shion changes expression and speaks up when work starts, tools run, approval is needed, or the work is done
@@ -92,11 +97,11 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 ## Requirements
 
 - Windows 10 / 11 (macOS / Linux not supported yet)
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) (the CLI or Code in the desktop app) and/or Codex (the CLI or the desktop app). Shion also works as a plain desktop pet without either
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) (the CLI or Code in the desktop app), Claude Desktop (for chat) and/or Codex (the CLI or the desktop app). Shion also works as a plain desktop pet without either
 
 ## Install
 
-1. Download `Shion-2.1.0-win64.zip` from [Releases](../../releases)
+1. Download `Shion-2.2.0-win64.zip` from [Releases](../../releases)
 2. Extract it to a **permanent location**, e.g. `D:\Apps\Shion` (if you move it later, reconnect via right-click → **AI connections** → **Claude Code** → **Connect / inspect configuration**)
 3. Run `Shion.exe`
 4. On first launch Shion asks whether to connect to Claude Code — click **Connect**
@@ -121,13 +126,19 @@ Only **newly started** Claude Code sessions pick up the change.
 
 ## Connecting Claude Desktop chat
 
-Choose AI connections → Claude Desktop → Connect chat. In Claude’s developer settings, choose Edit Config and note the file it opens. Fully quit Claude from the tray, then select that file in Shion. Detected configuration locations are hints. Confirm the active file using Edit Config.
+Right-click → **AI connections** → **Claude Desktop** → **Connect chat**:
 
-Shion saves a local backup and inserts its own MCP entry. An existing shion entry, invalid JSON or a detected concurrent change stops the update. Disconnect removes only the unchanged entry registered by Shion and preserves other additions. Fully quit and restart Claude after either operation.
+1. In Claude's developer settings, choose **Edit Config** and note which configuration file it opens
+2. **Fully quit** Claude from the tray (closing the window isn't enough)
+3. Select that file in the dialog Shion opens. Shion suggests common locations as hints, but the file Edit Config opened is the one that counts
+4. Restart Claude and check that `shion_working`, `shion_done` and `shion_need_input` appear in the client's tool list. The connection is live only once Shion receives the MCP online message; writing the configuration alone doesn't prove it
+5. Choose **Copy personal preference** and paste it into Claude's personal preferences. It copies this sentence:
 
-Choose Copy personal preference and paste it into Claude’s personal preferences. After restarting, verify that shion_working, shion_done and shion_need_input appear in the client’s tool list. Receiving the MCP online message establishes the live channel. Saving configuration alone does not establish it.
+   > For tasks that require tools or take a while, call shion_working before starting and shion_done when finished. Skip these calls for simple questions.
 
-This supports local Claude Desktop. Claude initiates calls and may miss them. Shion shows status and a short task name, hidden in privacy mode. After 15 minutes without a follow-up, it returns quietly to idle. Chat tokens cannot be counted locally. Keep the backup on your computer, as it contains the original configuration.
+- A local backup is saved first, and only Shion's own MCP entry is merged in. An existing shion entry, a damaged file, duplicate keys or a change during the write stops the update
+- **Disconnecting**: fully quit Claude, choose **Disconnect chat**, then restart Claude. If nothing else changed, the original file is restored byte for byte; otherwise only the unchanged entry Shion registered is removed and your other additions stay
+- If the configuration file was deleted, damaged or its shion entry was edited, Shion asks whether to **clear the connection record**: only Shion's own record is removed and the configuration is left alone, so open the file yourself afterwards and check whether a shion entry is left
 
 ## Connecting to ChatGPT (Codex)
 
@@ -157,6 +168,7 @@ The ChatGPT integration is installed separately: right-click → **AI connection
 - **Status only (hide details)** hides activity details and omits them from new event log entries; existing logs remain. Permission panels still show the action you need to approve
 - Hooks and Shion authenticate each other with a one-time token (a new one every time Shion starts), and the local port is bound exclusively, to stop other programs on your PC from pretending to be Shion or a hook
 - When several Claude Code sessions run in the same project, Shion keeps the first few characters of each session's first message in memory, only to tell them apart in the menu. They are not logged or saved and are gone when she quits; with **Status only (hide details)** on, hooks don't send them at all
+- **Claude Desktop chat**: Shion receives only which tool Claude called (started / needs your reply / done) and the task name Claude fills in (at most 20 characters); **conversation content is never received**. The task name only appears in the bubble, is not logged, and is hidden with **Status only (hide details)** on. The backup made when connecting, `%APPDATA%\Shion\desktop-chat-backup.json`, contains the full original configuration (possibly including other MCP servers' environment variables) and is deleted after a successful disconnect or when you clear the connection record
 - ChatGPT (Codex) observation also stays on your machine, and Shion cannot operate Codex
 - **Weekly usage statistics** read only the `usage` field, model name and timestamp from Claude Code's local transcripts (`.jsonl` files under `%USERPROFILE%\.claude\projects`); **conversation content is never read**. Only daily totals are stored, in `%APPDATA%\Shion\usage.json` (kept for 8 weeks). Turn off **Usage statistics** under **Settings** to stop it
 - **statusLine**: Shion takes only the 5-hour / 7-day quota percentages and reset times (plus the session ID) and sends them to the local address; nothing else is forwarded. Connecting takes over `statusLine` and runs your original command in a chain; its last successful output is cached in `%APPDATA%\Shion\statusline-last.bin` (shown if the original command times out). Disconnecting restores the original value and deletes the cache and record files
@@ -173,6 +185,9 @@ Claude Code sessions can launch Shion for you, but Codex sessions don't. If you 
 **ChatGPT (Codex) started working but Shion doesn't react.**
 The Codex desktop app doesn't send a "work started" event, so Shion shows "Working" only after its first tool call. If she never reacts, check in Codex with `/hooks` that Shion's hooks are approved, then restart Codex.
 
+**Claude Desktop chat is working but Shion doesn't react.**
+Make sure you fully quit and restarted Claude after connecting, that the client's tool list shows `shion_working` and the other two tools, and that Shion's sentence is in your personal preferences. Claude decides when to notify her and occasionally misses a call; simple questions don't notify at all.
+
 **"Port already in use".**
 Shion uses local port `47613`. Make sure only one Shion is running.
 
@@ -180,7 +195,7 @@ Shion uses local port `47613`. Make sure only one Shion is running.
 Apps packaged with PyInstaller are occasionally misdetected. You can review the source and build it yourself (see below), or whitelist the folder.
 
 **How do I uninstall?**
-1. Right-click → **AI connections** → **Claude Code** → **Disconnect and remove configuration** (removes Shion's hooks from your Claude Code config and restores your original statusLine); if you installed the ChatGPT integration, do the same under **ChatGPT**
+1. Right-click → **AI connections** → **Claude Code** → **Disconnect and remove configuration** (removes Shion's hooks from your Claude Code config and restores your original statusLine); if you installed the ChatGPT integration, do the same under **ChatGPT**; if you connected Claude Desktop chat, fully quit Claude first, then choose **Disconnect chat** under **Claude Desktop**
 2. Right-click → turn off "Start with Windows" if enabled
 3. Right-click → **Quit**, then delete the app folder and `%APPDATA%\Shion` (save data and logs)
 
@@ -188,8 +203,10 @@ Apps packaged with PyInstaller are occasionally misdetected. You can review the 
 
 - The four stamina tiers (5-hour quota) work in terminal Claude Code only. The desktop app gets the two-state hook path (collapse at the limit, recover on auto-resume), and the 7-day quota can only show the last value received from a terminal. Desktop collapse / recovery hasn't been verified against a real limit hit yet
 - Weekly tokens count Claude Code only (regular chats aren't included); the API price is an estimate for reference
-- Your original status line command gets at most 1 second per refresh; if it times out, its previous output is shown
-- ChatGPT (Codex) is observation only: Shion can't approve, stop or interrupt it, and **Work remote** applies to Claude Code only
+- Your original status line command gets at most 1 second per refresh; if it times out, its previous output is shown. Without Git Bash it runs through PowerShell, whose cold start can exceed 1 second, so the first refresh may drop your original status line output
+- Claude Desktop chat works with the local Claude Desktop app only. Claude starts the calls and may miss some; after 15 minutes without a follow-up, Shion quietly returns to idle. Quit Claude fully before connecting or disconnecting: Shion doesn't check whether Claude is still running, and a running Claude may overwrite the change with its in-memory configuration
+- Chat tokens can't be counted locally and aren't included in the weekly card
+- ChatGPT (Codex) and Claude Desktop chat are observation only: Shion can't approve, stop or interrupt them, and **Work remote** applies to Claude Code only
 - The Codex desktop app sends no "start" event, so "Working" appears only after its first tool call
 - Codex doesn't launch Shion automatically (see the FAQ above; turning on **Start with Windows** helps)
 - Real-world testing with the Codex desktop app is still limited, so its status may occasionally be off
