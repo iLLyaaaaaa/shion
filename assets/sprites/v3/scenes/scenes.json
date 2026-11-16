@@ -1,0 +1,228 @@
+{
+ "version": 1,
+ "states": {
+  "collapse": "collapse",
+  "bed": "bed",
+  "desk": "desk"
+ },
+ "standing_head_width": 884,
+ "scenes": {
+  "collapse": {
+   "file": "collapse.png",
+   "mask": "collapse_char.png",
+   "size": [
+    915,
+    1366
+   ],
+   "anchor_x": 457.5,
+   "ground_y": 1366.0,
+   "char_box": [
+    0,
+    0,
+    915,
+    1366
+   ],
+   "head_scale": 0.995,
+   "head_scale_measured": 0.995,
+   "head_box": [
+    15.1,
+    145.7,
+    899.5,
+    834.2
+   ],
+   "head_top": [
+    432.2,
+    155.8
+   ],
+   "mouth": [
+    477.4,
+    660.3
+   ],
+   "zones": {
+    "cheek": [
+     [
+      301.5,
+      671.4,
+      85.4,
+      55.3
+     ],
+     [
+      577.9,
+      657.3,
+      85.4,
+      55.3
+     ]
+    ],
+    "crown": [
+     [
+      417.1,
+      256.3,
+      196.0,
+      95.5
+     ]
+    ]
+   },
+   "breath_gain": 1.0,
+   "char_pixels": 812602,
+   "furniture_pixels": 102,
+   "source": "collapse-pose.png",
+   "source_sha256": "507a0893734e01fb8f46df0f696db701b60211a2c511f7674416074fb2af4ecc",
+   "source_size": [
+    1086,
+    1448
+   ],
+   "source_crop": [
+    90,
+    50,
+    1000,
+    1409
+   ]
+  },
+  "bed": {
+   "file": "bed.png",
+   "mask": "bed_char.png",
+   "size": [
+    1293,
+    1124
+   ],
+   "anchor_x": 646.5,
+   "ground_y": 1124.0,
+   "char_box": [
+    74,
+    0,
+    1196,
+    959
+   ],
+   "head_scale": 0.877,
+   "head_scale_measured": 0.877,
+   "head_box": [
+    92.4,
+    124.3,
+    976.1,
+    732.0
+   ],
+   "head_top": [
+    427.6,
+    127.7
+   ],
+   "mouth": [
+    530.2,
+    581.5
+   ],
+   "zones": {
+    "cheek": [
+     [
+      418.5,
+      622.6,
+      74.1,
+      54.7
+     ],
+     [
+      640.8,
+      550.7,
+      74.1,
+      54.7
+     ]
+    ],
+    "crown": [
+     [
+      421.9,
+      264.5,
+      216.6,
+      108.3
+     ]
+    ]
+   },
+   "breath_gain": 1.0,
+   "char_pixels": 753552,
+   "furniture_pixels": 216701,
+   "source": "bed-scene.png",
+   "source_sha256": "babf8d6e680ff5f34d4fbbe368046c760a446006865e9be28e6371230b26fff7",
+   "source_size": [
+    1536,
+    1024
+   ],
+   "source_crop": [
+    200,
+    18,
+    1334,
+    1004
+   ],
+   "z_anchor": [
+    638.5,
+    99.2
+   ]
+  },
+  "desk": {
+   "file": "desk.png",
+   "mask": "desk_char.png",
+   "size": [
+    955,
+    1373
+   ],
+   "anchor_x": 477.5,
+   "ground_y": 1373.0,
+   "char_box": [
+    14,
+    0,
+    919,
+    1373
+   ],
+   "head_scale": 0.727,
+   "head_scale_measured": 0.727,
+   "head_box": [
+    17.9,
+    126.5,
+    902.3,
+    752.4
+   ],
+   "head_top": [
+    383.8,
+    130.7
+   ],
+   "mouth": [
+    447.0,
+    608.0
+   ],
+   "zones": {
+    "cheek": [
+     [
+      258.6,
+      598.3,
+      82.5,
+      57.8
+     ],
+     [
+      569.5,
+      576.3,
+      82.5,
+      57.8
+     ]
+    ],
+    "crown": [
+     [
+      335.6,
+      284.7,
+      275.1,
+      123.8
+     ]
+    ]
+   },
+   "breath_gain": 1.0,
+   "char_pixels": 679734,
+   "furniture_pixels": 307641,
+   "source": "desk-scene.png",
+   "source_sha256": "806cbb6a328e74ec150ab2e4ff6c4e12284f09e0dc9cb2f756f691bf4e75b165",
+   "source_size": [
+    1536,
+    1024
+   ],
+   "source_crop": [
+    421,
+    13,
+    1115,
+    1011
+   ]
+  }
+ }
+}

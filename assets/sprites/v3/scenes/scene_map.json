@@ -1,0 +1,37 @@
+{
+  "_comment": "S9 姿势变体的人工输入。坐标一律是原图（raw/v3/s6/*.png）像素坐标，build 时换算到站姿 rig 比例。flip/force_* 是分区修正（停点 A，用户确认全部预猜无误）；head_box 是头发整团（不含呆毛、花饰、飘带）的包围盒，head_scale = 该宽度 / 站姿头发整团宽度（884），可用 head_scale 字段手动覆盖；zones 是 [中心x, 中心y, 半径x, 半径y] 的椭圆列表：cheek = 拎起把手（脸颊腮红），crown = 摸头/敲头。",
+  "collapse": {
+    "flip": [], "force_char": [], "force_furniture": [],
+    "head_box": [105, 195, 985, 880],
+    "head_top": [520, 205],
+    "mouth": [565, 707],
+    "zones": {
+      "cheek": [[390, 718, 85, 55], [665, 704, 85, 55]],
+      "crown": [[505, 305, 195, 95]]
+    },
+    "breath_gain": 1.0
+  },
+  "bed": {
+    "flip": [], "force_char": [], "force_furniture": [],
+    "head_box": [281, 127, 1056, 660],
+    "head_top": [575, 130],
+    "mouth": [665, 528],
+    "z_anchor": [760, 105],
+    "zones": {
+      "cheek": [[567, 564, 65, 48], [762, 501, 65, 48]],
+      "crown": [[570, 250, 190, 95]]
+    },
+    "breath_gain": 1.0
+  },
+  "desk": {
+    "flip": [], "force_char": [], "force_furniture": [],
+    "head_box": [434, 105, 1077, 560],
+    "head_top": [700, 108],
+    "mouth": [746, 455],
+    "zones": {
+      "cheek": [[609, 448, 60, 42], [835, 432, 60, 42]],
+      "crown": [[665, 220, 200, 90]]
+    },
+    "breath_gain": 1.0
+  }
+}
