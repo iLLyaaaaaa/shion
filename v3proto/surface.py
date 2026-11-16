@@ -132,15 +132,22 @@ class HeadSurface:
         rig=self.r.rig
         full=Image.new('RGBA',self.reference_size)
         mirror=self.cheek.mirror
-        if mirror is not None:
-            # The old left cheek was removed from the hair slices for good;
-            # show the hidden hair there instead of an empty hole.
+        if mirror is not None and not rig.painted_right:
+            # Mirrored fallback: the old left cheek was removed from the hair
+            # slices; show the hidden hair there instead of an empty hole.
+            # (Painted right side: side_hair_l already carries the painted hair.)
             left=rig.left_cheek_images[settings.expression]['mask']
             full.alpha_composite(self._hidden_hair(left,rig.cheek_config['box'][:2]))
         if cut_cheek and self.cheek.config:
-            # Reveal the existing hidden hair only where the cheek was removed.
-            full.alpha_composite(self._hidden_hair(self.cheek.assets[settings.expression]['mask'],
-                                                   (self.cheek.x,self.cheek.y),mirrored=mirror is not None))
+            mask=self.cheek.assets[settings.expression]['mask']
+            if rig.painted_right:
+                # Behind the painted bulge: the original ordinary cheek and hair.
+                backing=Image.new('RGBA',self.reference_size)
+                backing.paste(rig.cheek_under,(self.cheek.x-self.x,self.cheek.y-self.y),mask)
+                full.alpha_composite(backing)
+            else:
+                # Reveal the existing hidden hair only where the cheek was removed.
+                full.alpha_composite(self._hidden_hair(mask,(self.cheek.x,self.cheek.y),mirrored=mirror is not None))
         first_side_hair=next(n for n in self.names if n in ('side_hair_l','side_hair_r'))
         for n in self.names:
             if n==first_side_hair:

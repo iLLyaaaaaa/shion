@@ -7007,5 +7007,156 @@
     }
    }
   }
+ },
+ "right_side": {
+  "source": "assets/sprites/raw/v3/s6/head-right-plate.png",
+  "mirror_sum": 1058,
+  "head_skin": {
+   "file": "right/head_skin.png",
+   "x": 309,
+   "y": 350
+  },
+  "face_clean_base": "right/face_clean_base.png",
+  "face_plate": {
+   "file": "right/face_plate.png",
+   "x": 238,
+   "y": 347
+  },
+  "expression_face_plates": {
+   "smug": {
+    "open": "right/plate_smug_open.png",
+    "x": 238,
+    "y": 347
+   },
+   "neutral": {
+    "open": "right/plate_neutral_open.png",
+    "x": 238,
+    "y": 347
+   },
+   "teary": {
+    "open": "right/plate_teary_open.png",
+    "x": 238,
+    "y": 347
+   },
+   "angry": {
+    "open": "right/plate_angry_open.png",
+    "x": 238,
+    "y": 347
+   }
+  },
+  "layers": {
+   "back_hair": {
+    "file": "right/back_hair.png",
+    "x": 689,
+    "y": 176
+   },
+   "side_hair_l": {
+    "file": "right/side_hair_l.png",
+    "x": 105,
+    "y": 396
+   },
+   "side_hair_r": {
+    "file": "right/side_hair_r.png",
+    "x": 627,
+    "y": 466
+   },
+   "hair_top": {
+    "file": "right/hair_top.png",
+    "x": 187,
+    "y": 81
+   },
+   "bangs": {
+    "file": "right/bangs.png",
+    "x": 178,
+    "y": 305
+   },
+   "head_under": {
+    "file": "right/head_under.png",
+    "x": 268,
+    "y": 220
+   },
+   "back_hair_under": {
+    "file": "right/back_hair_under.png",
+    "x": 237,
+    "y": 121
+   }
+  },
+  "face_hair_clean": {
+   "bangs": "right/bangs_face_clean.png"
+  },
+  "cheek": {
+   "box": [
+    270,
+    502,
+    445,
+    642
+   ],
+   "vertical": [
+    502.0,
+    550.0,
+    594.0,
+    642.0
+   ],
+   "cap_x": 375.0,
+   "root_x": 445.0,
+   "faces": {
+    "smug": {
+     "mask": "right/cheek_smug_mask.png",
+     "texture": "right/cheek_smug.png",
+     "hit": "right/cheek_smug_hit.png"
+    },
+    "neutral": {
+     "mask": "right/cheek_neutral_mask.png",
+     "texture": "right/cheek_neutral.png",
+     "hit": "right/cheek_neutral_hit.png"
+    },
+    "happy": {
+     "mask": "right/cheek_happy_mask.png",
+     "texture": "right/cheek_happy.png",
+     "hit": "right/cheek_happy_hit.png"
+    },
+    "surprised": {
+     "mask": "right/cheek_surprised_mask.png",
+     "texture": "right/cheek_surprised.png",
+     "hit": "right/cheek_surprised_hit.png"
+    },
+    "teary": {
+     "mask": "right/cheek_teary_mask.png",
+     "texture": "right/cheek_teary.png",
+     "hit": "right/cheek_teary_hit.png"
+    },
+    "angry": {
+     "mask": "right/cheek_angry_mask.png",
+     "texture": "right/cheek_angry.png",
+     "hit": "right/cheek_angry_hit.png"
+    },
+    "sleep": {
+     "mask": "right/cheek_sleep_mask.png",
+     "texture": "right/cheek_sleep.png",
+     "hit": "right/cheek_sleep_hit.png"
+    },
+    "dizzy": {
+     "mask": "right/cheek_dizzy_mask.png",
+     "texture": "right/cheek_dizzy.png",
+     "hit": "right/cheek_dizzy_hit.png"
+    },
+    "tired": {
+     "mask": "right/cheek_tired_mask.png",
+     "texture": "right/cheek_tired.png",
+     "hit": "right/cheek_tired_hit.png"
+    },
+    "bored": {
+     "mask": "right/cheek_bored_mask.png",
+     "texture": "right/cheek_bored.png",
+     "hit": "right/cheek_bored_hit.png"
+    },
+    "yawn": {
+     "mask": "right/cheek_yawn_mask.png",
+     "texture": "right/cheek_yawn.png",
+     "hit": "right/cheek_yawn_hit.png"
+    }
+   },
+   "under": "right/cheek_under.png"
+  }
  }
 }

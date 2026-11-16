@@ -216,20 +216,20 @@ def test_switch_frame_does_not_compose_on_the_main_thread(qapp):  # noqa: F811
     w.close()
 
 
-def test_auto_side_is_off_by_default_and_env_turns_it_on(qapp, monkeypatch):  # noqa: F811
+def test_auto_side_is_on_by_default_and_env_turns_it_off(qapp, monkeypatch):  # noqa: F811
     from shion.v3_window import AUTO_SIDE_ENV, V3PetWindow
     monkeypatch.delenv(AUTO_SIDE_ENV, raising=False)
     t = [100.0]
     w = V3PetWindow(height=200, clock=lambda: t[0], autostart=False, debug=False, pixel_ratio=1.0)
-    assert w.auto_side is False
-    w.move(150 - w.width() // 2, 200)
-    w.show()
+    assert w.auto_side is True
+    w.close()
+    monkeypatch.setenv(AUTO_SIDE_ENV, "0")
+    w2 = V3PetWindow(height=200, clock=lambda: t[0], autostart=False, debug=False, pixel_ratio=1.0)
+    assert w2.auto_side is False
+    w2.move(150 - w2.width() // 2, 200)
+    w2.show()
     for _ in range(100):
         t[0] += .05
-        w.advance_to(t[0])
-    assert w.cheek_side == "left" and w._v3_side_target is None    # 左半边也保持左鼓
-    w.close()
-    monkeypatch.setenv(AUTO_SIDE_ENV, "1")
-    w2 = V3PetWindow(height=200, clock=lambda: t[0], autostart=False, debug=False, pixel_ratio=1.0)
-    assert w2.auto_side is True
+        w2.advance_to(t[0])
+    assert w2.cheek_side == "left" and w2._v3_side_target is None    # 关掉后左半边也保持左鼓
     w2.close()

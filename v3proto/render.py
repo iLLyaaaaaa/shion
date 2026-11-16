@@ -61,7 +61,9 @@ def sample(a: np.ndarray, x, y) -> QImage:
 class Rig:
     def __init__(self, path=DEFAULT_RIG, cheek_side='left'):
         path = Path(path)
+        self.path = path
         self.mirror_sum = None
+        self.painted_right = False
         self.data = json.loads(path.read_text(encoding="utf-8"))
         if self.data.get("version") != 2:
             raise ValueError("V3 prototype requires rig version 2")

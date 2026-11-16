@@ -1,4 +1,13 @@
-"""Right-side cheek: mirror the face skin about the eye midline.
+"""Right-side cheek.
+
+With ``rig.json right_side`` (S8) the right bulge is painted artwork: the skin
+slices, the clean face plate, the hair revealed where the left bulge used to be
+and the cheek interaction assets are loaded from ``assets/sprites/v3/right``
+(built by ``tools/v3_right_plate.py``). Only the cheek *motion* is still
+reflected: ``mirror_sum`` maps the painted bulge onto left-cheek coordinates.
+
+Without that section the older fallback applies: mirror the face skin about
+the eye midline.
 
 Only the skin plates (head_skin, the clean face plate) and the cheek interaction
 assets are flipped. Hair, bangs, flower, ribbon, eyes, mouth and body keep their
@@ -55,6 +64,8 @@ def apply_cheek_side(rig, side, mirror_sum=EYE_MIDLINE_SUM):
         raise ValueError('cheek side must be left or right')
     if not rig.cheek_config:
         raise ValueError('rig has no cheek interaction to mirror')
+    if rig.data.get('right_side'):
+        return apply_painted_right(rig, rig.data['right_side'])
     config = rig.cheek_config
     rig.mirror_sum = mirror_sum
     # Keep the pristine left-side assets: they still define what the old cheek
@@ -94,12 +105,73 @@ def apply_cheek_side(rig, side, mirror_sum=EYE_MIDLINE_SUM):
         a[~keep] = 0
         assets['texture'] = Image.fromarray(a)
     rig.cheek_images = mirrored
+    _swap_side_hair(rig)
+    rig._blink_regions = {}
+    rig._mirror_opened = {}
+    return rig
+
+
+def _swap_side_hair(rig):
     # Draw order: the bulge covers the hair on its own side.
     layers = list(rig.data['layers'])
     i, j = layers.index('side_hair_l'), layers.index('side_hair_r')
     layers[i], layers[j] = layers[j], layers[i]
     rig.data['layers'] = layers
     rig.order = sorted(rig.parts, key=lambda n: layers.index(rig.parts[n]['layer']))
+
+
+def apply_painted_right(rig, spec):
+    """Load the painted right-bulge assets over a freshly loaded left rig."""
+    folder = rig.path.parent
+
+    def load(file, mode='RGBA'):
+        with Image.open(folder / file) as im:
+            return im.convert(mode)
+
+    rig.mirror_sum = spec['mirror_sum']
+    rig.painted_right = True
+    for name, entry in spec.get('layers', {}).items():
+        q = rig.parts[name]
+        rig.images[name] = load(entry['file'])
+        q['x'], q['y'], q['size'] = entry['x'], entry['y'], list(rig.images[name].size)
+    for name, file in spec.get('face_hair_clean', {}).items():
+        rig.face_hair_images[name] = load(file)
+    skin = spec['head_skin']
+    p = rig.parts['head_skin']
+    rig.images['head_skin'] = load(skin['file'])
+    p['x'], p['y'], p['size'] = skin['x'], skin['y'], list(rig.images['head_skin'].size)
+    rig.face_base = load(spec['face_clean_base'])
+    if rig.face_base.size != rig.images['head_skin'].size:
+        raise ValueError('right-side clean base must share the head_skin box')
+    plate = spec['face_plate']
+    rig.face_plate = (load(plate['file']), (plate['x'], plate['y']))
+    for name, file in spec.get('features', {}).items():
+        # Smug eye slices with the part the old bulge used to hide.
+        rig.images[name] = rig.feature_images[name] = load(file)
+        rig.__dict__.pop('_complete_eyes', None)
+    for name, entry in spec.get('expression_face_plates', {}).items():
+        rig.expression_plates[name] = (load(entry['open']), (entry['x'], entry['y']))
+    if 'fringe_mask' in spec:
+        rig.fringe_mask = load(spec['fringe_mask'], 'L')
+    cheek = spec['cheek']
+    left_images = rig.cheek_images
+    rig.cheek_config = {**rig.cheek_config, 'box': list(cheek['box']), 'vertical': list(cheek['vertical']),
+                        'cap_x': cheek['cap_x'], 'root_x': cheek['root_x']}
+    box = cheek['box']
+    images = {}
+    # ``faces`` is absent only while tools/v3_right_plate.py is still building them.
+    for face, entry in cheek.get('faces', {}).items():
+        # Eyes are not mirrored, so the protect windows are the left rig's own.
+        images[face] = {'mask': load(entry['mask'], 'L'), 'texture': load(entry['texture']),
+                        'hit': load(entry['hit'], 'L'), 'protect': left_images[face]['protect']}
+        for key in ('mask', 'texture', 'hit'):
+            if images[face][key].size != (box[2] - box[0], box[3] - box[1]):
+                raise ValueError('invalid right cheek asset: ' + face + '/' + key)
+    if images and set(images) != set(rig.faces):
+        raise ValueError('right cheek assets must cover every expression')
+    rig.cheek_images = images
+    rig.cheek_under = load(cheek['under']) if 'under' in cheek else None
+    _swap_side_hair(rig)
     rig._blink_regions = {}
     rig._mirror_opened = {}
     return rig

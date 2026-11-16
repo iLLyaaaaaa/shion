@@ -29,7 +29,7 @@ from shion.v3_layers import SwayEnvelope, affine_ok, render_affine
 from shion.v3_prewarm import BLINK_LEVELS, Prewarmer, quantize_eye
 
 RENDERER_CACHE = 2  # 每侧最多两份（换屏 DPR 来回不重建）
-AUTO_SIDE_ENV = "SHION_V3_AUTO_SIDE"  # 换边默认关闭；设为 1 才按屏幕位置换边
+AUTO_SIDE_ENV = "SHION_V3_AUTO_SIDE"  # 换边默认打开（S8 起用画好的右鼓素材）；设为 0 固定左鼓
 SIDE_STABLE_SECONDS = 0.5   # 位置/尺寸/屏幕连续这么久不变、也没在互动，才算“停稳”
 SIDE_IDLE_RELEASE = 300.0   # 换走后旧侧闲置这么久就释放（rig、渲染器、预热缓存）
 SIDE_SWAP_AT = 0.05         # 眨眼开始后这么久（闭眼最深在 0.06 秒）换边
@@ -119,9 +119,9 @@ class V3PetWindow(PetWindow):
         self._v3_side = "left"
         self._v3_rig = shared_rig("left")
         self._v3_geometry = None  # 窗口几何只按第一次加载的 rig 算，换边不改窗口
-        # 换边暂停（2026-11-10）：右鼓用的是 S5a 镜像脸部底板，桌面尺寸下刘海发丝断开、脸像歪了，
-        # 等新画右鼓版底板再打开。开发时可设环境变量 SHION_V3_AUTO_SIDE=1 试用。
-        self.auto_side = os.environ.get(AUTO_SIDE_ENV) == "1"
+        # 按屏幕位置换边：右鼓用 S8 画好的素材（assets/sprites/v3/right）。
+        # 设环境变量 SHION_V3_AUTO_SIDE=0 可固定左鼓。
+        self.auto_side = os.environ.get(AUTO_SIDE_ENV) != "0"
         self._v3_side_started = False
         self._v3_side_geom = None
         self._v3_side_since = 0.0

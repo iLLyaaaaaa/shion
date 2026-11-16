@@ -222,7 +222,7 @@ class StaticCheekSurface:
         if cut_cheek:
             head=self.renderer.head_surface
             background=head._compose_image(settings,pose,True)
-            box=self.cheek.config['box']
+            box=(self.cheek.x,self.cheek.y,self.cheek.right,self.cheek.bottom)
             local=tuple(v-(head.x if i%2==0 else head.y) for i,v in enumerate(box))
             background=background.crop(local)
             mask=self.cheek.assets[settings.expression]['mask'].point(lambda a:255 if a else 0)
