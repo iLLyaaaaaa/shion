@@ -874,7 +874,7 @@ V3 立绘改成“零件 + 转轴”，为以后的呼吸、眨眼、头发摆�
 - 肚子取消 40px 转拎起；120px 内可继续揉动，超出暂停并清空反转采样，回来重新揉动。身体、手臂和腿不提供拎起入口，敲头/摸头保留原手势。
 - 预览提示、基准及拎起快照同步改为脸颊抓取；挠痒转拎起的演示表示松开肚子后重新抓脸颊。本次仍仅 V3 独立预览，不接入 shion。
 
-## V3 正式接入（V3 第 2 步 S1–S7，2026-11-09～11-10，开发预览）
+## V3 正式接入（V3 第 2 步 S1–S9，2026-11-09～11-16，开发预览）
 
 V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer v3`（运行与 `--snapshot` 都支持），**默认仍是 V2**，不写存档里的渲染器选择。分支 `feature/v3-integrate`，未合并 master。
 
@@ -906,9 +906,19 @@ V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer 
 
 ### 状态表现
 - 表情：idle/working→neutral，neglect1→bored，slump→tired，happy/done/cheer→happy，proud→smug，stop→angry，dizzy→dizzy，neglect2→teary，yawn→yawn，collapse/sleep/bed/desk→sleep，drag→surprised。bored/tired/yawn 由 `tools/v3_s0_faces.py` 用 S0 部件拼成。
-- 姿态（只用 Pose 已有字段）：working 头略低、每 4～6 秒轻点头，并抱着笔记本电脑（`Settings.arms='hold'`：`arms_hold` 整块代替两条手臂；手臂不动，捏脸挣扎/挠痒躲闪/拎起抬手都被忽略，身体、头、脸颊照常反应）；neglect1/2 低头；slump/collapse 下压低头；desk 低头；yawn 每 6～8 秒上抻；dizzy 头部画圈；喂零食点头咀嚼；stop 双臂略外抬（占位）。静态姿态 0.35 秒缓动，换状态不跳，互动期间整体淡出。V3 下关掉 V2 整图点头（`Animator.whole_nod`）。
+- 姿态（只用 Pose 已有字段；collapse / bed / desk 不走这里，见“姿势变体”）：working 头略低、每 4～6 秒轻点头，并抱着笔记本电脑（`Settings.arms='hold'`：`arms_hold` 整块代替两条手臂；手臂不动，捏脸挣扎/挠痒躲闪/拎起抬手都被忽略，身体、头、脸颊照常反应）；neglect1/2 低头；slump/collapse 下压低头；desk 低头；yawn 每 6～8 秒上抻；dizzy 头部画圈；喂零食点头咀嚼；stop 双臂略外抬（占位）。静态姿态 0.35 秒缓动，换状态不跳，互动期间整体淡出。V3 下关掉 V2 整图点头（`Animator.whole_nod`）。
 - 抱电脑（S8）：`tools/v3_hold.py` 把 `assets/sprites/raw/v3/s6/working-hold.png` 按身体和腿拟合仿射对位，切出双臂加电脑整块为 `rig.json` 的 `arms_hold`（层级同手臂层，父级 body）。命中测试里它算 body：可戳、不触发挠痒；肚子挠痒只对电脑以外露出的肚子生效。
 - 需新画素材清单与优先级见 `docs/v3-integration-plan.md`“需新画清单”。
+
+### 姿势变体 scene（S9，2026-11-16）
+- **做法**：collapse / bed / desk 三个状态各用一张画好的整图，不拆零件。`tools/v3_scene.py` 把图切成编号块、分出角色与家具像素，头部按站姿实测比例（`head_scale`：collapse 0.995、bed 0.877、desk 0.727）归一，写出 `assets/sprites/v3/scenes/`（图、角色遮罩、`scenes.json` 的尺寸、脚底线 `ground_y`、水平中心 `anchor_x`、头顶 / 嘴 / 睡觉 Z 锚点、摸头与拎起分区、呼吸增益）。scene 像素 ≈ rig 像素，脚底线对齐站姿脚底线，窗口 ← rig 换算原样可用。逻辑在 `shion/v3_scene.py`（纯逻辑，不依赖 Qt）、`shion/v3_scene_view.py`（图像与家具覆盖窗）、`shion/v3_window.py`（接入）。
+- **分层**：under（垫底，只有家具颜色：角色像素里离家具不远的换成最近家具底色，即家具往角色底下延伸一圈，带宽 `seam_reach` 随离地高度变宽）→ char（只有角色，绕脚底支点做呼吸、摸头、敲头仿射）→ 家具层（点穿覆盖窗，盖在角色前面，去掉角色周围 `FURNITURE_GAP=2` 像素）。诗音窗口遮罩 = 变形后的角色 ∪ under 轮廓，家具不进遮罩所以点得穿。collapse 家具像素 <500，算没有家具，不建垫底和覆盖窗。
+- **切换**：scene 之间、scene 与站姿之间**直接切换 + 小弹跳**（0.24 秒压到 0.97 再回弹），不做交叉淡化——两张轮廓不同的图淡化必然叠影（S9 真机验收改掉了原先 0.3 秒淡化的方案）。目标 scene 还在后台载入时先保持现在的画面，不卡界面；载入失败则丢掉该 scene，状态回到站姿回退。
+- **互动**：拎起（拖动、下落、跳跃）立刻切回站姿；摸头整图倾斜 = 头部倾斜 ×0.4（≤1°）；敲头整图最多下压 2% 并带金星；V2 点击压扁只取 25%（最多压 2%）；捏脸、挠痒无反应（拖远了只提示“捏着脸往上提”）；家具点穿。头顶气泡锚点、嘴部碎屑锚点、bed 的睡觉 Z 都取 scene 自己的锚点。
+- **窗口**：scene 比站姿宽时窗口临时加宽（脚不动），回站姿恢复；scene 显示期间冻结换边，回站姿停稳后再按原规则补换。
+- **回退**：`SHION_V3_SCENES=0` 或 `scenes.json` 不存在时不用 scene，三个状态回到站姿 + 对应表情 / 姿态（collapse 下压低头、desk 低头、bed 睡）。
+- **缓存**：后台线程按当前高度 × DPR 载入三个 scene 的数组（读图、缩放、预乘、垫底），主线程每帧最多收一个并转 QImage；缓存上限 `SCENE_CACHE=6`（三个 scene × 两种尺寸 / DPR）；没有后台任务时（缓存被挤掉）才同步载入单个。
+- 右鼓脸型（S9 附带修复，`2f6d84d`）：下巴描线与新画鼓包描线衔接、清理眼睛用平滑填充而不是最近皮肤色、鼓包上缘描线保留。
 
 ### 换边（已实现，默认打开）
 - 窗口中心在可用区域右半 → 左鼓，左半 → 右鼓，中线死区 max(5% 宽, 40px)；只在停稳 0.5 秒且无互动时判断，后台准备另一侧，在一次眨眼的闭眼帧切换并“啵”一下；旧侧闲置 5 分钟释放。`SHION_V3_AUTO_SIDE=0` 可固定左鼓。
@@ -921,9 +931,10 @@ V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer 
 - 每帧动画推进最多 0.25 秒（`MAX_DT`），隐藏或睡眠恢复后不逐子步追赶。右键/中键不打断进行中的左键手势。
 - 缓存上限：头部帧 64、仿射用 QImage 8、头发位移场每缕 24（float32）、反应脸补丁 40、反应脸遮罩 8、捏脸眨眼保护 32。
 - 窗口用 rig 经 `compact_rig`：整画布稀疏遮罩（各表情捏脸保护遮罩、两张刘海遮罩、pink_cleanup）只存有内容的一块（`SparseCanvas`，crop 结果逐像素相同），有 face_plate 时释放用不到的 face_contour。
-- 工具：`python -m tools.v3_mem`（离屏或真实窗口的分项字节数与进程工作集）；`python -m tools.v3_perf`（真实窗口 FPS/CPU，`--warmup 20` 排除启动预热）。
+- 工具：`python -m tools.v3_mem`（离屏或真实窗口的分项字节数与进程工作集；S9 起含 `scenes` 一节，`--load-bench N` 测同步载入单个 scene 的耗时，`SHION_V3_SCENES=0` 时文件名带 `-noscene`）；`python -m tools.v3_perf`（真实窗口 FPS/CPU，`--warmup 20` 排除启动预热；S9 起支持 `state:<名>+knock|pat` 与 `switch` 场景，结果含 `refresh_max_ms`、`scene_load_ms`）。
 
 ### 性能与内存验收线
 - 互动场景 DPR1.5：160/200 平均 ≥55 FPS、计算+绘制 P95 ≤14ms；260/320 ≥50 FPS、P95 ≤20ms。
 - 待机：总 CPU ≤3% 且单核不超过 V2 同档待机的 2 倍；工作：总 CPU ≤3% 且单核不超过 V2 同尺寸同 DPR 的待机单核。CPU 需与 V2 在同一时段测，并等预热做完（`--warmup 20`）。
 - 内存（S7）：真实应用总工作集（260 高、启动后 25 秒）≤230MB。
+- S9 实测（2026-11-16，DPR1.5，数据在 `build/v3/integrate/s9/`，不入库）：三个 scene 的图像合计 260@1.5 约 3.5MB；scene 静置总 CPU 0.26–0.38%，单核低于站姿回退；scene 内敲头 / 摸头 P95 ≤18.8ms；idle/bed/desk/collapse 每秒轮换最长一帧 ≤35ms。**已知限制（用户决定记录不处理）**：①真实应用总工作集约 254MB（3 轮平均，scene 开 253MB / 关 255MB，V2 约 185MB），超过 230MB 线，与 scene 无关，S7 之后涨起来的；②缓存被挤掉后同步载入单个 scene 约 250～280ms（目标 ≤80ms），真实运行中三个 scene 启动后由后台载入、从未触发同步载入；③desk 摸头在量化键不变时少画帧，合成测试 28.5 FPS（P95 11.6ms），未在真实窗口逐帧确认。

@@ -79,6 +79,8 @@
 | S5 | 换边判断与眨眼过渡；拎起倾斜随侧取反；窗口命中与拉伸方向 | 已实现；S8 接入右鼓版底板后**默认打开**（`SHION_V3_AUTO_SIDE=0` 固定左鼓）2026-11-12 |
 | S6 | 其余状态动作与需新画清单 | 已验收 2026-11-10 |
 | S7 | 全仓回归、CPU/内存评估、reviewer 审查、文档收尾 | 已完成，待用户验收与审查中级问题决定 2026-11-10 |
+| S8 | 接入新画素材：右鼓版底板（打开换边）、working 抱电脑 | 已验收 2026-11-16 |
+| S9 | collapse / bed / desk 整图姿势变体（scene）：素材、显示、互动、测量 | 第 1～4 步已验收，第 5 步测量与文档完成（见 progress）2026-11-16 |
 
 **S3、S4 已完成**：S3 启用 `head_knock` / `head_knock_stop` 与 `cheek_pull_combo`；S4 把窗口移动限定为“只能拎脸颊”，S3 过渡的“拖身体挪窗口”“捏脸拖过 80px 转整窗拖动”“肚子拖出 40px 转整窗拖动”均已删除。按错地方拖动时提示 `v3_lift_hint`（60 秒冷却）。
 
@@ -136,7 +138,7 @@
 - **切片/对位**：**需新写** `tools/v3_right_plate.py`：先把 ×2 图缩回 rig 坐标；用 `tools/v3_replace_expressions.py` 的 `align_head` 对位到原图；用现有 `face_fringe_mask` / `face_contour`（翻到右侧）切出 `head_skin` 与干净底板；再跑 `tools/v3_cheek.py` 生成右侧捏脸素材。
 - **接入改动**：`v3proto/mirror.py` `apply_cheek_side('right')` 改为加载画好的底板；`rig.json mirror` 段；`shion/v3_window.py` `auto_side` 默认改 True；`tests/test_v3_side.py` 默认开启；重出 `tools/v3_mirror_check.py` 对比快照。
 
-### 3. collapse / slump
+### 3. collapse / slump——collapse 已于 S9 接入（整图姿势变体 scene，不是下面写的分零件做法）
 
 - **用途**：体力 3 档瘫倒、2 档疲惫。现回退：站姿下压 + 低头 + 手臂收拢 + 呼吸眨眼放慢。
 - **GPT 输入**：collapse 用 `pose-full.png`；slump 表情用 `face-smug-ref.png`（同画布同姿势只改五官）+ `face-neutral.png`（风格）。
@@ -145,7 +147,7 @@
 - **切片/对位**：表情复用 `tools/v3_replace_expressions.py`（需小改：允许新表情名）+ `tools/v3_face_features.py REGIONS` 补区域 + `tools/v3_cheek.py` 生成捏脸素材；姿势零件 `v3_extract` 切 + 新对位工具（同 #1）。
 - **接入改动**：表情：`rig.json faces`、`STATE_EXPRESSIONS`、预热表情列表、`tests/test_v3_display.py` 的表情集合；姿势：rig 加姿势变体、`load_rig` 的脚底/可见范围按姿势算、`STATE_POSES` 改用新姿势。整身新姿势需扩 rig，接入时另开计划。
 
-### 4. desk / bed
+### 4. desk / bed——已于 S9 接入（整图姿势变体 scene，家具点穿，不是下面写的分零件做法）
 
 - **用途**：书桌趴睡、床上躺睡。现回退：站着睡 / 站着睡 + 低头。
 - **GPT 输入**：`scene-wide.png`（家具位置与比例）+ `pose-full.png`。
