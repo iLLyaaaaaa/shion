@@ -167,3 +167,82 @@ def test_pinch_changes_pixels_only_on_the_bulging_side(side, rig, right):
     assert len(xs)
     centre = (xs.min() + xs.max()) / 2 / .3
     assert (centre < M / 2) if side == 'left' else (centre > M / 2)
+
+
+# ---- 下颌：鼓包的下缘和下巴之间的描线要连续（S9 第 4b 步：neutral 的睁眼底板曾低 15 像素，到 x≈685 才接上）----
+def _jaw_top(image, x, y0=596, y1=720):
+    """第 x 列从 y0 往下第一个深色（描线）像素的行；找不到返回 -1。"""
+    dark = np.nonzero(image[y0:y1, x, :3].astype(int).sum(-1) < 260)[0]
+    return int(dark[0]) + y0 if len(dark) else -1
+
+
+def _on_white(image):
+    from PIL import Image
+    base = Image.new('RGBA', image.size, 'white')
+    base.alpha_composite(image)
+    return np.asarray(base.convert('RGB'))
+
+
+@pytest.fixture(scope='module')
+def painting(rig):
+    from tools.v3_right_plate import load_source
+    return load_source(rig)
+
+
+@pytest.mark.parametrize('face', ['smug', 'neutral', 'happy', 'teary', 'angry'])
+def test_right_jaw_outline_follows_the_painting_under_the_bulge(face, right, painting):
+    """每个表情：鼓包下缘到下巴缺口之间（x=590..700）的下颌描线，和新画的位置相差不超过 2 像素。"""
+    image = _on_white(right.rest(face, original=(face == 'smug')))
+    columns = range(590, 701, 5)
+    off = [abs(_jaw_top(image, x) - _jaw_top(painting, x)) for x in columns]
+    assert max(off) <= 2, (face, off)
+
+
+def test_right_jaw_outline_is_continuous_from_the_chin_to_the_bulge(right):
+    """neutral：相邻列的下颌描线最多差 3 像素（没有 15 像素的台阶）。"""
+    image = _on_white(right.rest('neutral'))
+    ys = [_jaw_top(image, x) for x in range(590, 701, 2)]
+    assert min(ys) > 0
+    assert max(abs(b - a) for a, b in zip(ys, ys[1:])) <= 3, ys
+
+
+def test_the_jaw_band_only_touches_the_open_plates_inside_the_right_zone(rig, right):
+    from tools.v3_right_plate import JAW_BAND, LEFT_ZONE, RIGHT_ZONE
+    x0, y0, x1, y1 = JAW_BAND
+    r0 = RIGHT_ZONE
+    assert r0[0] <= x0 and x1 <= r0[2] and r0[1] <= y0 and y1 <= r0[3]       # 在右侧改动框里，框外仍逐像素相同
+    assert LEFT_ZONE[2] <= x0
+
+
+# ---- 清眼睛：大块空洞用平滑补色，不拉放射状条纹（tired、bored 等眼睛比画稿小的表情会露出来）----
+def test_smooth_fill_follows_a_gradient_without_streaks():
+    from tools.v3_right_plate import smooth_fill
+    yy, xx = np.mgrid[0:120, 0:160]
+    truth = np.stack([250 - xx // 4, 225 - yy // 3, 215 - (xx + yy) // 8], -1).astype(np.uint8)
+    hole = ((xx - 80) / 45) ** 2 + ((yy - 60) / 40) ** 2 <= 1
+    damaged = truth.copy()
+    damaged[hole] = (30, 10, 10)
+    filled = smooth_fill(damaged, ~hole, hole)
+    assert np.array_equal(filled[~hole], truth[~hole])                      # 空洞外一个像素不动
+    err = np.abs(filled.astype(int) - truth.astype(int))[hole]
+    assert err.mean() < 6 and err.max() < 25                                 # 贴着渐变补
+    # 条纹：补出来的区域里，相邻像素的颜色差很小（最近像素法会在放射线上突变）
+    jump = np.abs(np.diff(filled.astype(int), axis=1)).max(-1)[hole[:, 1:] & hole[:, :-1]]
+    assert jump.max() <= 6
+
+
+def test_the_bulge_outline_under_the_eye_is_kept_in_the_clean_plate(right, painting):
+    """右眼的白眼角贴着鼓包上缘：清眼睛时不能把鼓包上缘的描线一起抹掉（以前 tired/bored 等表情里这一段是断的）。"""
+    from PIL import Image
+    plate, origin = right.face_plate
+    canvas = Image.new('RGBA', right.size)
+    canvas.alpha_composite(plate, origin)
+    got = np.asarray(canvas).astype(int)
+    checked = missing = 0
+    for x in range(676, 768, 4):
+        want = np.nonzero(painting[495:526, x].astype(int).sum(-1) < 260)[0]
+        if len(want) < 4:
+            continue                                                         # 这一列新画里没有描线（白缝）
+        checked += 1
+        missing += int((got[495:526, x, :3].sum(-1) < 260).sum() < 0.6 * len(want))
+    assert checked >= 8 and missing <= 0.3 * checked, (checked, missing)

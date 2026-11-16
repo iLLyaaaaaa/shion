@@ -25,8 +25,38 @@ OUT = Path("build/v3/integrate/s8")
 # 允许改动的两块（rig 坐标）：原左脸颊一带、新右脸颊一带。
 LEFT_ZONE = (90, 440, 470, 800)
 RIGHT_ZONE = (EYE_MIDLINE_SUM - 470, 440, EYE_MIDLINE_SUM - 90, 800)
+# 下颌带（rig 坐标 x0, y0, x1, y1）：新鼓包的下缘到下巴缺口之间。neutral 的睁眼底板（旧稿）在这里的下颌描线比新画低约
+# 15 像素（实测 x=590..680：新画 y=647..636，neutral 底板 y≈662..651），到 x≈685 突然接上新画的粗描线，看起来
+# 鼓包和下巴“断开”。其余睁眼底板（smug/teary/angry）和 plate 路径的表情（happy 等）都在新画 1 像素内。
+# 带里的睁眼底板一律取干净底板（已按新画重画）：左边缘 571 = 右侧改动框的内墙，刚好盖住旧稿里比新画低 12 像素的
+# 下巴缺口（x=572..590）；右边缘 724 在重画区里（两者本来就相同）。边缘 JAW_FEATHER 像素内渐变，不留直角台阶。
+JAW_BAND = (571, 596, 724, 700)
+JAW_FEATHER = 4
+# 新鼓包连描线的外轮廓椭圆（rig 坐标 cx, cy, rx, ry；cheek 框 [614,502,789,642] 外扩）。清眼睛时这里面的像素不动：
+# 右眼的白眼角正好贴在鼓包上缘，旧做法把靠近眼睛的非肤色像素（含鼓包上缘的描线）一起换成了肤色。
+BULGE = (701, 572, 93, 76)
 THRESHOLD = 40
-LID_MARGIN = 12     # reference pixels around an eye polygon that count as the eye window
+LID_MARGIN = 12    # reference pixels around an eye polygon that count as the eye window
+
+
+def smooth_fill(image, valid, hole):
+    """hole 里的像素用周围 valid 像素的高斯加权平均补上（σ 由小到大，够到有效像素为止）。
+    比“取最近的肤色像素”平滑：后者在大块空洞里会拉出放射状的条纹，眼睛比画稿小的表情（tired、bored 等）会露出来。"""
+    result = image.copy()
+    pixels = image.astype(np.float32)
+    done = np.zeros(hole.shape, bool)
+    for sigma in (2, 4, 8, 16, 32, 64):
+        weight = nd.gaussian_filter(valid.astype(np.float32), sigma)
+        take = hole & ~done & (weight > 0.12)
+        if take.any():
+            mean = np.stack([nd.gaussian_filter(pixels[..., k] * valid, sigma) for k in range(3)], -1)
+            result[take] = np.rint(mean[take] / weight[take][:, None]).astype(np.uint8)
+            done |= take
+    rest = hole & ~done
+    if rest.any():
+        _, near = nd.distance_transform_edt(~valid, return_indices=True)
+        result[rest] = image[tuple(near)][rest]
+    return result
 
 
 def reference(rig):
@@ -229,11 +259,11 @@ def build(rig, out=OUT):
     skin_like = (c[..., 0] > 225) & (c[..., 1] > 130) & (c[..., 0] - c[..., 1] > 10) & (c[..., 2] > c[..., 1] - 12)
     eye_zone = nd.binary_dilation(eyes, iterations=14)
     # Not limited to the skin flood: an eye touching the fringe is not a closed hole of it.
-    eye_content = eye_zone & ~skin_like
-    eye_content = nd.binary_dilation(eye_content, iterations=1)
-    _, near = nd.distance_transform_edt(~(skin_like & new_skin & ~eye_content), return_indices=True)
-    clean_source = source.copy()
-    clean_source[eye_content] = source[tuple(near)][eye_content]
+    yy_, xx_ = np.indices(skin_like.shape)
+    in_bulge = ((xx_ - BULGE[0]) / BULGE[2]) ** 2 + ((yy_ - BULGE[1]) / BULGE[3]) ** 2 <= 1
+    eye_content = eye_zone & ~skin_like & ~in_bulge
+    eye_content = nd.binary_dilation(eye_content, iterations=1) & ~in_bulge
+    clean_source = smooth_fill(source, skin_like & new_skin & ~eye_content, eye_content)
 
     # 1. Skin slices: head_skin (smug original) and the clean base share one box.
     #    Alpha is the painted skin and its own outline only, never hair.
@@ -317,6 +347,10 @@ def build(rig, out=OUT):
         stray = ring & (oc.min(-1) < 150) & (clean[..., :3].astype(int).min(-1) >= 150)
         stray = nd.binary_dilation(stray, iterations=2) & ring
         a[stray] = clean[stray]
+        # 带内取干净底板；边缘 JAW_FEATHER 像素内渐变（带外一个像素都不动：框外逐像素相同的约定）。
+        weight = np.clip(nd.distance_transform_edt(zone_mask(a.shape[:2], (JAW_BAND,))) / JAW_FEATHER, 0, 1)
+        weight = np.where(clean[..., 3] > 0, weight, 0)[..., None]
+        a[..., :3] = np.rint(a[..., :3] * (1 - weight) + clean[..., :3] * weight).astype(np.uint8)
         put = eye_pixels & (o[..., 3] > 0)
         a[put, :3] = o[put][:, :3]
         back = own_windows[face] & open_eye_colour(a) & ~open_eye_colour(o)
