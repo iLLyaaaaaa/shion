@@ -906,7 +906,8 @@ V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer 
 
 ### 状态表现
 - 表情：idle/working→neutral，neglect1→bored，slump→tired，happy/done/cheer→happy，proud→smug，stop→angry，dizzy→dizzy，neglect2→teary，yawn→yawn，collapse/sleep/bed/desk→sleep，drag→surprised。bored/tired/yawn 由 `tools/v3_s0_faces.py` 用 S0 部件拼成。
-- 姿态（只用 Pose 已有字段）：working 头略低、每 4～6 秒轻点头；neglect1/2 低头；slump/collapse 下压低头；desk 低头；yawn 每 6～8 秒上抻；dizzy 头部画圈；喂零食点头咀嚼；stop 双臂略外抬（占位）。静态姿态 0.35 秒缓动，换状态不跳，互动期间整体淡出。V3 下关掉 V2 整图点头（`Animator.whole_nod`）。
+- 姿态（只用 Pose 已有字段）：working 头略低、每 4～6 秒轻点头，并抱着笔记本电脑（`Settings.arms='hold'`：`arms_hold` 整块代替两条手臂；手臂不动，捏脸挣扎/挠痒躲闪/拎起抬手都被忽略，身体、头、脸颊照常反应）；neglect1/2 低头；slump/collapse 下压低头；desk 低头；yawn 每 6～8 秒上抻；dizzy 头部画圈；喂零食点头咀嚼；stop 双臂略外抬（占位）。静态姿态 0.35 秒缓动，换状态不跳，互动期间整体淡出。V3 下关掉 V2 整图点头（`Animator.whole_nod`）。
+- 抱电脑（S8）：`tools/v3_hold.py` 把 `assets/sprites/raw/v3/s6/working-hold.png` 按身体和腿拟合仿射对位，切出双臂加电脑整块为 `rig.json` 的 `arms_hold`（层级同手臂层，父级 body）。命中测试里它算 body：可戳、不触发挠痒；肚子挠痒只对电脑以外露出的肚子生效。
 - 需新画素材清单与优先级见 `docs/v3-integration-plan.md`“需新画清单”。
 
 ### 换边（已实现，默认打开）

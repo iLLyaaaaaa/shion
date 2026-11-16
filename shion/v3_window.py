@@ -23,7 +23,7 @@ from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREAT
 from shion.behavior import BELLY_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS, TICKLE_STOP_SECONDS
 from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX,
                               MASK_GROW, PetWindow)
-from shion.v3_display import (REST_POSE, STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, StateMotion,
+from shion.v3_display import (REST_POSE, STATE_EXPRESSIONS, arms_for, V2_FOOT_GAP_RATIO, StateMotion,
                               desired_side, draw_key, expression_for, frame_interval, hair_moving,
                               logical_scale, state_pose)
 from shion import v3_scene
@@ -579,7 +579,7 @@ class V3PetWindow(PetWindow):
             self._timer.setInterval(interval)
         frame_key = (round(f.sx / 0.002), round(f.sy / 0.002), round(f.angle / 0.1),
                      round(self._jump_offset * 4))
-        key = draw_key(expression, pose, self.v3_texture_scale, frame_key)
+        key = draw_key(expression, pose, self.v3_texture_scale, frame_key, self._v3_settings.arms)
         self._sync_sleep_z(now, f)
         self._frame = f
         self._v3_pose = pose
@@ -837,6 +837,7 @@ class V3PetWindow(PetWindow):
         self._v3_pose_weight = w
         settings = self._v3_settings
         settings.breath_rate, settings.blink_gap = static.breath_rate, static.blink_gap
+        settings.arms = arms_for(state)
         offset = (current + dynamic + self._v3_pose_carry).scaled(w)
         moving = (current != static or self._v3_pose_carry != REST_POSE
                   or w != target_w or motion.busy(state, now))

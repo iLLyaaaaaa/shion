@@ -18,10 +18,10 @@ from tools import v3_slice as vs
 from v3proto.render import Rig
 
 
-def align_head(reference, source, mask):
-    """Fit affine sampling coordinates using unchanged upper-head artwork."""
+def align_head(reference, source, mask, rows=(35, 425)):
+    """Fit affine sampling coordinates using unchanged artwork (default: the upper head)."""
     yy, xx = np.indices(mask.shape)
-    pick = mask & (yy < 425) & (yy > 35) & (xx % 5 == 0) & (yy % 5 == 0)
+    pick = mask & (yy < rows[1]) & (yy > rows[0]) & (xx % 5 == 0) & (yy % 5 == 0)
     x, y = xx[pick].astype(float), yy[pick].astype(float)
     # Parameters use centered coordinates for well-conditioned scale/shear fits.
     x, y = x - 540, y - 250

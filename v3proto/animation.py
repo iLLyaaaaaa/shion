@@ -39,6 +39,7 @@ class Settings:
     head_touch: HeadParameters = field(default_factory=HeadParameters)
     lift: bool = True
     tickle: bool = True
+    arms: str = "default"  # "hold"：抱电脑整块（arms_hold）代替两条手臂
 
 
 @dataclass

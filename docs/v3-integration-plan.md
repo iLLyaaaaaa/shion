@@ -119,7 +119,7 @@
 | `face-smug-ref.png` | 1086×1448 | 表情输入底图（`v3_replace_expressions` 对位用） |
 | `face-neutral.png` / `face-sleep.png` | 1086×1448 | 现有 neutral / sleep 表情参考 |
 
-### 1. working 道具
+### 1. working 道具——已于 S8 接入（2026-11-12，抱电脑整块替换双臂，无单独道具零件图）
 
 - **用途**：工作中手边的道具（参照 V2 working 精灵的道具语义）。现回退：neutral + 头略低 + 每 4～6 秒轻点头 + 工作气泡。
 - **GPT 输入**：`working-full.png`（对位）+ `arms-x2.png`（手的位置和大小）。

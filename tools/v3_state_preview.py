@@ -19,6 +19,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--height", type=int, choices=[160, 200, 260, 320], default=260)
     p.add_argument("--auto", type=float, default=0, help="每 N 秒自动切换（0 = 只用按钮）")
+    p.add_argument("--fixed-left", action="store_true", help="固定左鼓（默认按屏幕位置换边）")
     a = p.parse_args(argv)
 
     from PySide6.QtCore import QTimer
@@ -28,7 +29,7 @@ def main(argv=None):
     from shion.v3_window import V3PetWindow
 
     win = V3PetWindow(height=a.height, debug=False)
-    win.auto_side = False
+    win.auto_side = not a.fixed_left
     panel = QWidget()
     panel.setWindowTitle("V3 状态预览")
     grid = QGridLayout(panel)

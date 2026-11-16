@@ -218,7 +218,7 @@ class StaticCheekSurface:
         self.motion_weights=None
 
     def _compose_image(self,settings,pose,cut_cheek=False):
-        image=self.renderer.rig.rest(settings.expression)
+        image=self.renderer.rig.rest(settings.expression,arms=settings.arms)
         if cut_cheek:
             head=self.renderer.head_surface
             background=head._compose_image(settings,pose,True)

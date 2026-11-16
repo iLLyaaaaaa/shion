@@ -200,8 +200,8 @@ def test_committed_rig_v2_is_consistent():
     for n, p in rig["parts"].items():
         assert (vx.OUT / p["file"]).exists(), n
         assert p["layer"] in rig["layers"], n
-        # s0_part：S6 用 S0 部件拼的表情（tools/v3_s0_faces.py）
-        assert p["source"] in ("ref_slice", "gpt_underlay", "gpt_expression_diff", "s0_part"), n
+        # s0_part：S6 用 S0 部件拼的表情（tools/v3_s0_faces.py）；hold_slice：S8 抱电脑整块（tools/v3_hold.py）
+        assert p["source"] in ("ref_slice", "gpt_underlay", "gpt_expression_diff", "s0_part", "hold_slice"), n
     L = rig["layers"]
     assert L.index("side_hair_l") < L.index("head_skin") < L.index("side_hair_r")
     assert L.index("hair_top") < L.index("bangs")

@@ -62,6 +62,14 @@ def expression_for(sprite: str, base: str) -> str:
     raise ValueError(f"没有 V3 显示映射：{sprite}")
 
 
+# S8：working 抱着电脑（整块替换两条手臂）；其它状态用原手臂
+STATE_ARMS = {"working": "hold"}
+
+
+def arms_for(state: str) -> str:
+    return STATE_ARMS.get(state, "default")
+
+
 def _state_expression(base: str) -> str:
     if base in FOLLOW_BASE:
         return "neutral"
@@ -123,7 +131,7 @@ def _q(value: float, step: float) -> int:
     return round(value / step)
 
 
-def draw_key(expression: str, pose, texture_scale: float, frame_key: tuple):
+def draw_key(expression: str, pose, texture_scale: float, frame_key: tuple, arms: str = "default"):
     """量化后的“这一帧长什么样”；与上一帧相同就不必重画。
 
     位移量化到 0.25 设备像素，角度到 0.1°，比例/进度到 0.02。
@@ -142,6 +150,7 @@ def draw_key(expression: str, pose, texture_scale: float, frame_key: tuple):
         _q(pose.arm_degrees, _ANGLE_STEP), _q(pose.leg_degrees, _ANGLE_STEP),
         _q(pose.body_roll, _ANGLE_STEP), _q(pose.root_roll, _ANGLE_STEP),
         tuple(_q(v, position) for v in pose.root_offset),
+        arms,
     )
 
 

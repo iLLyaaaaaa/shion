@@ -10,6 +10,8 @@ from scipy import ndimage as nd
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, QPainter, QTransform
 
+from dataclasses import replace
+
 from .animation import Pose, Settings
 from .motion import bend_inverse, pivot_matrix, transform_point, translation, rooted_rotation_inverse
 from .face import brows_image, without_brows, eye_image
@@ -21,7 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RIG = ROOT / "assets" / "sprites" / "v3" / "rig.json"
 BENDING = {"side_hair_l", "side_hair_r", "ribbon"}
 ROTATING = {"bangs", "ahoge", "flower"}
-BODY = {"body", "body_under", "arm_l", "arm_r"}
+BODY = {"body", "body_under", "arm_l", "arm_r", "arms_hold"}
+HOLD = "hold"  # Settings.arms：抱电脑整块替换两条手臂（S8）
 LEGS = {"leg_l", "leg_r"}
 
 
@@ -141,16 +144,19 @@ class Rig:
     def face_parts(self, expression):
         return [n for n in self.order if self.parts[n].get("variant") == expression]
 
-    def active(self, expression, underlays_only=False):
+    def active(self, expression, underlays_only=False, arms="default"):
+        """arms='hold'：用抱电脑整块（arms_hold）代替 arm_l / arm_r；默认不含 arms_hold。"""
         if expression not in self.faces:
             raise ValueError("unknown expression")
+        hold = arms == HOLD
         return [n for n in self.order if
                 (not underlays_only or self.parts[n]["source"] == "gpt_underlay") and
-                ("variant" not in self.parts[n] or self.parts[n]["variant"] == expression)]
+                ("variant" not in self.parts[n] or self.parts[n]["variant"] == expression) and
+                (n != "arms_hold" or hold) and not (hold and n in ("arm_l", "arm_r"))]
 
-    def rest(self, expression, underlays_only=False, original=False):
+    def rest(self, expression, underlays_only=False, original=False, arms="default"):
         canvas = Image.new("RGBA", self.size)
-        for n in self.active(expression, underlays_only):
+        for n in self.active(expression, underlays_only, arms):
             p = self.parts[n]
             if expression!='smug' and self.face_plate and p.get('role'):
                 continue  # The complete plate draws these once, above bangs.
@@ -317,6 +323,8 @@ class Renderer:
                 qimage(background.resize(target,Image.Resampling.LANCZOS)),eyes)
 
     def render(self, settings: Settings, pose: Pose, *, padding=(0, 0, 0, 0)) -> QImage:
+        if settings.arms == HOLD and pose.arm_degrees:
+            pose = replace(pose, arm_degrees=0.)  # 抱着电脑：捏脸挣扎、挠痒躲闪、拎起抬手都不动手臂
         image = self._render_rig(settings,pose)
         left, top, right, bottom = padding
         if any(padding) or any(pose.root_offset) or pose.root_roll:
@@ -335,9 +343,9 @@ class Renderer:
 
     def _render_rig(self, settings: Settings, pose: Pose) -> QImage:
         if pose.rig_is_rest:
-            key = (settings.expression, settings.underlays_only)
+            key = (settings.expression, settings.underlays_only, settings.arms)
             if key not in self.rest_cache:
-                im = self.rig.rest(*key)
+                im = self.rig.rest(key[0], key[1], arms=key[2])
                 size = tuple(round(x * self.scale) for x in im.size)
                 if im.size != size:
                     im = im.resize(size, Image.Resampling.LANCZOS)
@@ -370,7 +378,7 @@ class Renderer:
         im.fill(0);painter=QPainter(im)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         matrices=self.matrices(pose)
-        for n in self.rig.active(settings.expression):
+        for n in self.rig.active(settings.expression, arms=settings.arms):
             if n not in BODY|LEGS:continue
             tex=self.textures[n]
             self._draw(painter,tex.image,tex.x,tex.y,matrices[n])
@@ -415,7 +423,7 @@ class Renderer:
                         if 0<=x<image.width and 0<=y<image.height and image.getpixel((x,y))[3]>64:
                             return ('crown' if crown and n in {'hair_top','bangs','ahoge'} else 'head'),local
         matrices = self.matrices(pose)
-        for n in reversed(self.rig.active(settings.expression, settings.underlays_only)):
+        for n in reversed(self.rig.active(settings.expression, settings.underlays_only, settings.arms)):
             if not settings.underlays_only and n not in BODY|LEGS:continue
             p = self.rig.parts[n]
             local = transform_point(np.linalg.inv(matrices[n]), point)

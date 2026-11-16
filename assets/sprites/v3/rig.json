@@ -5421,6 +5421,19 @@
     ]
    },
    "role": "mouth"
+  },
+  "arms_hold": {
+   "file": "slices/arms_hold.png",
+   "source": "hold_slice",
+   "layer": "arm_l",
+   "z": 6,
+   "x": 288,
+   "y": 686,
+   "size": [
+    543,
+    291
+   ],
+   "parent": "body"
   }
  },
  "slots": {
@@ -7158,5 +7171,16 @@
    },
    "under": "right/cheek_under.png"
   }
+ },
+ "hold": {
+  "source": "assets/sprites/raw/v3/s6/working-hold.png",
+  "affine": [
+   0.956195,
+   0.001103,
+   30.629606,
+   0.001171,
+   0.968125,
+   0.126711
+  ]
  }
 }
