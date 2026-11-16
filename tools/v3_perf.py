@@ -7,6 +7,9 @@ python -m tools.v3_perf --round2             # idle/working everywhere (60 s) + 
 python -m tools.v3_perf --only v3 320 1.5 pinch 10   # one run, prints one JSON line
 python -m tools.v3_perf --warmup 20 --only v3 320 1.5 idle 30   # S7：等后台预热做完再测（默认 3 秒）
 python -m tools.v3_perf --only v3 320 1.5 state:slump 30   # 只切状态不互动
+python -m tools.v3_perf --warmup 20 --only v3 320 1.5 state:bed+knock 20   # S9：scene 里敲头（也可 +pat）
+python -m tools.v3_perf --warmup 20 --only v3 260 1.5 switch 30            # S9：idle/bed/desk/collapse 每秒轮换
+SHION_V3_SCENES=0 同上可测站姿回退（scene 的对照）。
 
 Every run is a separate process with a real (non-offscreen) window. Nothing is
 connected and no save file is read or written. DPR 1 uses QT_ENABLE_HIGHDPI_SCALING=0.
@@ -42,6 +45,23 @@ def percentile(values, q):
     return values[lo] + (values[hi] - values[lo]) * (k - lo)
 
 
+SWITCH_CYCLE = ('idle', 'bed', 'desk', 'collapse')    # S9：scene 切换场景每秒换一个
+
+
+def parse_scenario(scenario):
+    """场景名 → (起始状态, 驱动名或 None)。
+
+    'state:bed' 只切状态；'state:bed+knock' 切状态后驱动敲头（也可 +pat 等 drive_v3 认识的名字）；
+    'switch' 每秒在 idle/bed/desk/collapse 间换；其余旧场景沿用原来的规则。
+    """
+    if scenario.startswith('state:'):
+        state, _, drive = scenario.split(':', 1)[1].partition('+')
+        return state, (drive or None)
+    if scenario == 'switch':
+        return SWITCH_CYCLE[0], 'switch'
+    return ('working' if scenario == 'working' else 'idle'), scenario
+
+
 def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
     from PySide6.QtCore import QTimer
     from PySide6.QtGui import QGuiApplication
@@ -56,9 +76,8 @@ def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
     avail = QGuiApplication.primaryScreen().availableGeometry()
     win.move(avail.center().x() - win.width() // 2, avail.bottom() - win.height())
     # 'state:<名字>'：只切到该状态、不互动（S6 抽查 slump / dizzy 等状态姿态）
-    state = scenario.split(':', 1)[1] if scenario.startswith('state:') else (
-        'working' if scenario == 'working' else 'idle')
-    win.set_state(state, animate=False)
+    start_state, drive_name = parse_scenario(scenario)
+    win.set_state(start_state, animate=False)
     win.show()
 
     paints, durations, stamps = [0], [], []
@@ -87,9 +106,9 @@ def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
         now = time.perf_counter()
         t = now - start
         if renderer == 'v2':
-            drive_v2(win, scenario, t, now)
+            drive_v2(win, drive_name, t, now)
         else:
-            drive_v3(win, scenario, t, state)
+            drive_v3(win, drive_name, t, state)
     driver = QTimer()
     driver.setInterval(16)
     driver.timeout.connect(drive)
@@ -122,6 +141,8 @@ def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
             'refresh_p50_ms': round(percentile(refreshes, .5) or 0, 2),
             'refresh_p95_ms': round(percentile(refreshes, .95) or 0, 2),
             'frame_p95_ms': round((percentile(refreshes, .95) or 0) + (percentile(durations, .95) or 0), 2),
+            'refresh_max_ms': round(max(refreshes, default=0), 2),
+            'scene_load_ms': list(getattr(win, '_v3_scene_load_ms', [])),
             'cpu_one_core_pct': round(cpu / wall * 100, 2),
             'cpu_total_pct': round(cpu / wall * 100 / (os.cpu_count() or 1), 2),
         }
@@ -150,7 +171,12 @@ def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
 def drive_v3(win, scenario, t, state):
     a = win._v3_animator
     s = win._v3_settings
-    if scenario == 'pinch':
+    if scenario == 'switch':
+        index = int(t) % len(SWITCH_CYCLE)
+        if state.get('switch') != index:
+            state['switch'] = index
+            win.set_state(SWITCH_CYCLE[index], animate=False)
+    elif scenario == 'pinch':
         s.pinch = True
         if not a.dragging:
             a.press((325., 610.))

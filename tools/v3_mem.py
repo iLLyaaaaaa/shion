@@ -2,6 +2,8 @@
 
 python -m tools.v3_mem                    # 260 高、DPR1.5，结果写 build/v3/integrate/s7/mem/
 python -m tools.v3_mem --height 320 --dpr 1.5 --wait 20 --out build/x
+python -m tools.v3_mem --blink bed,desk,collapse --load-bench 5 --out build/v3/integrate/s9/mem   # S9 scene
+SHION_V3_SCENES=0 时文件名带 -noscene，可对照 scene 带来的增量。
 
 统计方法：从 rig、渲染器、窗口出发按属性名逐层走（dict/list/tuple/OrderedDict 展开），
 numpy 数组记 nbytes、PIL 图记 宽×高×通道、QImage 记 sizeInBytes；同一个对象只记一次
@@ -114,6 +116,37 @@ def counts(win) -> dict:
     return out
 
 
+def scene_stats(win) -> dict:
+    """S9：姿势变体缓存里每个 scene 的图像字节数、同步载入记录。"""
+    mb = 1024 * 1024
+    items = []
+    for key, images in win._v3_scene_cache.items():
+        items.append({'key': list(key), 'size': list(images.size), 'mb': round(images.nbytes() / mb, 2)})
+    return {'enabled': win._v3_scenes is not None, 'cached': items,
+            'total_mb': round(sum(i['mb'] for i in items), 2),
+            'sync_load_ms': list(win._v3_scene_load_ms)}
+
+
+def load_bench(win, repeat: int) -> dict:
+    """没有后台任务时同步载入一个 scene（读图、缩放、预乘、垫底）要多久。"""
+    from shion import v3_scene
+    scenes = win._v3_scenes
+    if not scenes:
+        return {}
+    texture = win._v3_scale * win._v3_dpr
+    out = {}
+    for scene in dict.fromkeys(scenes.values()):
+        times = []
+        for _ in range(max(1, repeat)):
+            t0 = time.perf_counter()
+            v3_scene.load_arrays(scene, texture)
+            times.append((time.perf_counter() - t0) * 1000)
+        times.sort()
+        out[scene.name] = {'min_ms': round(times[0], 1), 'median_ms': round(times[len(times) // 2], 1),
+                           'max_ms': round(times[-1], 1)}
+    return out
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--height', type=int, default=260)
@@ -121,6 +154,8 @@ def main(argv=None):
     p.add_argument('--wait', type=float, default=20.0, help='预热等待秒数')
     p.add_argument('--blink', default='', help='逗号分隔：依次切到这些状态各待 3 秒（让眨眼帧补齐）')
     p.add_argument('--out', default=str(OUT))
+    p.add_argument('--load-bench', type=int, default=0, metavar='N',
+                   help='S9：对每个 scene 同步载入 N 次并记耗时（0 = 不测）')
     a = p.parse_args(argv)
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtCore import QTimer
@@ -142,9 +177,13 @@ def main(argv=None):
         result['after_window'] = process_memory()
         result['breakdown_mb'] = {k: round(v / 1024 / 1024, 2) for k, v in breakdown(win).items()}
         result['counts'] = counts(win)
+        result['scenes'] = scene_stats(win)
+        if a.load_bench:
+            result['load_bench'] = load_bench(win, a.load_bench)
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
-        (out / f'mem-{a.height}-{a.dpr}.json').write_text(json.dumps(result, ensure_ascii=False, indent=1),
+        tag = '-noscene' if os.environ.get('SHION_V3_SCENES') == '0' else ''
+        (out / f'mem-{a.height}-{a.dpr}{tag}.json').write_text(json.dumps(result, ensure_ascii=False, indent=1),
                                                           encoding='utf-8')
         print(json.dumps(result, ensure_ascii=False))
         app.quit()
