@@ -23,6 +23,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage as nd
 
+from shion import v3_scene as vsrt
 from tools import v3_extract as vx
 from tools import v3_slice as vs
 
@@ -413,6 +414,187 @@ def cmd_check() -> None:
               {h: f"{w['standing']}→{w['scene']} (+{w['extra']})" for h, w in r["window_width_logical"].items()})
 
 
+# ---------------------------------------------------------------- 离屏窗口截图（第 3 步）
+
+PREVIEW_HEIGHTS = (160, 200, 260, 320)
+PREVIEW_STATES = ("collapse", "bed", "desk")
+GRAY = (130, 135, 145)
+
+
+def _step(w, t, seconds: float) -> None:
+    end = t[0] + seconds
+    while t[0] < end:
+        t[0] += w._timer.interval() / 1000
+        w.advance_to(t[0])
+
+
+def _window(height: int, dpr: float):
+    from PySide6.QtCore import Qt
+    from shion.v3_window import V3PetWindow
+    t = [100.0]
+    w = V3PetWindow(height=height, clock=lambda: t[0], autostart=False, debug=False, pixel_ratio=dpr)
+    w.setAttribute(Qt.WA_DontShowOnScreen)
+    w.auto_side = False
+    w.move(300, 120)
+    w.show()
+    return w, t
+
+
+def _destroy(w) -> None:
+    from PySide6.QtCore import QCoreApplication, QEvent
+    w.close()
+    w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def _frame_pil(w, scale: int, clip: bool = True):
+    from v3proto.render import to_pil
+    return to_pil(w.render_scene_frame(scale, clip=clip))
+
+
+def _on_gray(image: Image.Image) -> Image.Image:
+    base = Image.new("RGBA", image.size, GRAY + (255,))
+    base.alpha_composite(image.convert("RGBA"))
+    return base.convert("RGB")
+
+
+def _label_font(size: int):
+    """带中文的字体（总览图标题用）；找不到就退回 vx._font。"""
+    from PIL import ImageFont
+    for name in ("msyh.ttc", "simhei.ttf", "simsun.ttc"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            pass
+    return vx._font(size)
+
+
+def _grid(cells, label_h: int = 26) -> Image.Image:
+    """cells[行][列] = (标题, 图)。同一行底边对齐。"""
+    font = _label_font(18)
+    pad = 16
+    row_h = [max(im.height for _, im in row) + label_h for row in cells]
+    width = max(sum(im.width + pad for _, im in row) + pad for row in cells)
+    sheet = Image.new("RGB", (width, sum(row_h) + pad * (len(cells) + 1)), GRAY)
+    d = ImageDraw.Draw(sheet)
+    y = pad
+    for row, h in zip(cells, row_h):
+        x = pad
+        for title, im in row:
+            d.text((x, y), title, fill=(255, 255, 255), font=font)
+            sheet.paste(im, (x, y + h - im.height))
+            x += im.width + pad
+        y += h + pad
+    return sheet
+
+
+def _mask_panel(w, scale: int) -> Image.Image:
+    """画面（不裁剪）+ 遮罩轮廓；再并排一张按遮罩裁剪后的样子。"""
+    from PySide6.QtGui import QColor, QPainter, QPainterPath
+    from v3proto.render import to_pil
+    overlay = w._v3_scene_overlay
+    shown = overlay is not None and overlay.isVisible()
+    left = min(0, overlay.x() - w.x()) if shown else 0
+    top = min(0, overlay.y() - w.y()) if shown else 0
+    image = w.render_scene_frame(scale, clip=False)
+    p = QPainter(image)
+    p.translate(-left, -top)                # 图像已带 devicePixelRatio=scale，坐标直接用逻辑像素
+    path = QPainterPath()
+    path.addRegion(w._v3_region)
+    p.fillPath(path, QColor(0, 255, 255, 110))     # 遮罩区域：半透明青色（点得到的地方）
+    p.end()
+    return _grid([[("遮罩区域（青色 = 点得到）", _on_gray(to_pil(image))),
+                   ("按遮罩裁剪后（家具只在覆盖窗里）", _on_gray(_frame_pil(w, scale, clip=True)))]])
+
+
+def _far_furniture_inside_mask(w, scene) -> dict:
+    """离角色远的家具像素有多少落在诗音窗口遮罩里（应为 0：点得穿）。"""
+    from PySide6.QtCore import QPoint
+    from shion.v3_scene_view import local_origin
+    a = vsrt.load_arrays(scene, w.v3_texture_scale)
+    reach = max(8, round(44 * a["scale"]))
+    far = (a["furniture"][..., 3] >= 250) & ~nd.binary_dilation(a["alpha"] > 0, iterations=reach)
+    ys, xs = np.nonzero(far)
+    o = local_origin(w, scene, w._v3_scale, 0.0)
+    region = w.mask()
+    points = list(zip(xs[::40], ys[::40]))
+    inside = sum(region.contains(QPoint(round(o.x() + (x / a["scale"] - a["pad"]) * w._v3_scale),
+                                        round(o.y() + (y / a["scale"] - a["pad"]) * w._v3_scale)))
+                 for x, y in points)
+    return {"checked": len(points), "inside": int(inside)}
+
+
+def cmd_preview() -> None:
+    import os
+    import statistics
+    import time
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from shion.v3_window import V3PetWindow
+    V3PetWindow._v3_scene_prewarm = lambda self: None            # 量“用到才同步载入”的耗时
+    BUILD.mkdir(parents=True, exist_ok=True)
+    report: dict = {"windows": {}, "sync_load_ms": {}, "scene_paint_ms": {}, "furniture_points_inside_mask": {}}
+    for dpr, name in ((1.0, "scenes-dpr1.png"), (1.5, "scenes-dpr1.5.png")):
+        scale = 2 if dpr > 1 else 1
+        rows = []
+        for height in PREVIEW_HEIGHTS:
+            w, t = _window(height, dpr)
+            w.set_state("idle", animate=False)
+            _step(w, t, 0.3)
+            standing = w.width()
+            feet = w.x() + w.width() / 2
+            row = []
+            for state in PREVIEW_STATES:
+                w.set_state(state, animate=False)
+                _step(w, t, 0.8)
+                row.append((f"{state} {height}px", _on_gray(_frame_pil(w, scale))))
+                info = report["windows"].setdefault(f"{height}@{dpr}", {"standing": standing})
+                info[state] = {"width": w.width(), "extra": w.width() - standing,
+                               "feet_moved": round(abs((w.x() + w.width() / 2) - feet), 2)}
+                if dpr == 1.5 or height == 260:
+                    pet = QImage(w.size() * scale, QImage.Format_ARGB32_Premultiplied)
+                    pet.setDevicePixelRatio(scale)
+                    times = []
+                    for _ in range(20):
+                        pet.fill(0)
+                        q = QPainter(pet)
+                        t0 = time.perf_counter()
+                        w._draw_sprite(q, w._frame)
+                        times.append((time.perf_counter() - t0) * 1000)
+                        q.end()
+                    report["scene_paint_ms"][f"{state}@{height}x{dpr}"] = round(statistics.median(times), 2)
+                _step(w, t, 0.1)
+                w.set_state("idle", animate=False)
+                _step(w, t, 0.5)
+            report["sync_load_ms"][f"{height}@{dpr}"] = dict(zip(PREVIEW_STATES, w._v3_scene_load_ms))
+            rows.append(row)
+            _destroy(w)
+        _grid(rows).save(BUILD / name)
+    # 260 高：淡化四帧与遮罩轮廓
+    for state in PREVIEW_STATES:
+        w, t = _window(260, 1.0)
+        w.set_state("idle", animate=False)
+        _step(w, t, 0.3)
+        w.set_state(state, animate=False)
+        frames = []
+        elapsed = 0.0
+        for target in (0.0, 0.1, 0.2, 0.3):
+            _step(w, t, target - elapsed)
+            elapsed = target
+            frames.append((f"t={target:.1f}s w={w._v3_scene_w:.2f}", _on_gray(_frame_pil(w, 1))))
+        _grid([frames]).save(BUILD / f"fade-{state}.png")
+        _step(w, t, 0.6)
+        _mask_panel(w, 2).save(BUILD / f"mask-{state}.png")
+        if state != "collapse":
+            report["furniture_points_inside_mask"][state] = _far_furniture_inside_mask(w, w._v3_scenes[state])
+        _destroy(w)
+    app.processEvents()
+    (BUILD / "preview.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(report, indent=1, ensure_ascii=False))
+
+
 def main(argv=None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
@@ -425,6 +607,8 @@ def main(argv=None) -> None:
         cmd_build(rest)
     elif cmd == "check":
         cmd_check()
+    elif cmd == "preview":
+        cmd_preview()
     else:
         raise SystemExit(f"未知子命令：{cmd}")
 

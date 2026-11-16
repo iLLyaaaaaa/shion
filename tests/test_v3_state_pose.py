@@ -100,11 +100,12 @@ def test_state_change_eases_without_jumps(qapp):
     w, t = make(qapp, 200, 1.5)
     w.set_state("idle", animate=False)
     run(w, t, .5)
-    w.set_state("collapse", animate=False)
+    # collapse 现在用整图姿势（S9），不再套站姿回退；这里用仍是站姿的 slump 测缓动
+    w.set_state("slump", animate=False)
     frames = run(w, t, 1.0)
     ys = [p.head_y for _, p in frames]
     assert max(abs(b - a) for a, b in zip(ys, ys[1:])) < 12
-    assert w._v3_pose_static == STATE_POSES["collapse"]  # 1 秒内到位
+    assert w._v3_pose_static == STATE_POSES["slump"]  # 1 秒内到位
     w.set_state("idle", animate=False)
     ys = [p.head_y for _, p in run(w, t, 1.0)]
     assert max(abs(b - a) for a, b in zip(ys, ys[1:])) < 12
@@ -160,7 +161,7 @@ def test_mouth_anchor_sits_on_the_face_and_follows_the_head(qapp):
     m = w.mouth_anchor()
     assert abs(m.x() - (x + bw / 2)) < bw * .1
     assert y + bh * .3 < m.y() < y + bh * .55
-    w.set_state("collapse", animate=False)
+    w.set_state("slump", animate=False)   # collapse 是整图姿势（S9），嘴部锚点见 test_v3_scene_window
     run(w, t, 1.0)
     assert w.mouth_anchor().y() > m.y()  # 低头后嘴更低
     w.close()

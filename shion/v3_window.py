@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from collections import OrderedDict
 from dataclasses import replace
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBitmap, QGuiApplication, QImage, QPainter, QRegion, QTransform
 
 from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREATH_AMP,
@@ -25,8 +26,10 @@ from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_
 from shion.v3_display import (REST_POSE, STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, StateMotion,
                               desired_side, draw_key, expression_for, frame_interval, hair_moving,
                               logical_scale, state_pose)
+from shion import v3_scene
 from shion.v3_layers import SwayEnvelope, affine_ok, render_affine
 from shion.v3_prewarm import BLINK_LEVELS, Prewarmer, quantize_eye
+from shion.v3_scene_view import SceneImages, SceneOverlay, local_origin
 
 RENDERER_CACHE = 2  # 每侧最多两份（换屏 DPR 来回不重建）
 AUTO_SIDE_ENV = "SHION_V3_AUTO_SIDE"  # 换边默认打开（S8 起用画好的右鼓素材）；设为 0 固定左鼓
@@ -49,6 +52,7 @@ PROGRAM_FAST_SCALE_PER_SECOND = 0.2    # 压扁/拉伸变化快于此用 60 FPS
 SWAY_DEGREES = 2.0  # 轻摆满幅（原型默认值）
 LEAD = 0.07  # 秒：眨眼、轻摆开始前提前提速
 POSE_EASE_TAU = 0.12  # 秒：状态姿态切换的缓动时间常数（约 0.35 秒到位）
+SCENE_CACHE = 6  # scene 图像缓存：三个 scene × 两种尺寸/DPR
 MOUTH_RIG = (529.0, 588.5)  # rig 坐标：neutral 嘴部区域中心（rig.json expression_sources.neutral.regions.mouth）
 
 _RIGS: dict[str, object] = {}
@@ -178,6 +182,21 @@ class V3PetWindow(PetWindow):
         self._v3_pose_weight = 1.0
         self._v3_pose = None
         self._v3_screen_hooked = False
+        # 姿势变体（S9）：collapse / bed / desk 用整图（shion/v3_scene.py）。None = 不用（环境变量或没有资源）
+        self._v3_scenes = v3_scene.load_metadata()
+        self._v3_scene_fade = v3_scene.FadeWeight()
+        self._v3_scene_w = 0.0
+        self._v3_scene_shown = None       # 此刻显示（或正在淡出）的 Scene
+        self._v3_scene_cache: OrderedDict[tuple, SceneImages] = OrderedDict()
+        self._v3_scene_jobs: dict[tuple, object] = {}
+        self._v3_scene_overlay = None
+        self._v3_scene_sig = "off"
+        self._v3_scene_affine = (1.0, 0.0)
+        self._v3_scene_override = None    # 测试用：固定 (sy, angle)
+        self._v3_scene_mask_affine = (1.0, 0.0)
+        self._v3_scene_stars = None       # 金星的整幅透明图（有金星时每帧重画）
+        self._v3_mask_pass = False
+        self._v3_scene_load_ms: list[float] = []
         _hook_quit()
         self._v3_ready = True
 
@@ -201,6 +220,9 @@ class V3PetWindow(PetWindow):
         self._sequences.clear()
         self._v3_renderer = self._renderer_for(self._height, dpr)
         self._v3_prewarmer = self._v3_prewarmers[self._v3_cache_key(self._v3_side, self._height, dpr)]
+        self._v3_scene_sig = "off"
+        self._v3_scene_stars = None
+        self._v3_scene_prewarm()
         self._v3_side_target = None  # 尺寸/DPR 变了：正在准备的另一侧作废，停稳后重来
         self._v3_side_job = None
         self._v3_side_blink = None
@@ -408,7 +430,13 @@ class V3PetWindow(PetWindow):
     def hideEvent(self, e) -> None:
         self._v3_resume = self._timer.isActive()
         self._timer.stop()
+        if self._v3_scene_overlay is not None:
+            self._v3_scene_overlay.hide()
         super().hideEvent(e)
+
+    def moveEvent(self, e) -> None:
+        super().moveEvent(e)
+        self._v3_scene_follow()
 
     @property
     def v3_texture_scale(self) -> float:
@@ -436,6 +464,11 @@ class V3PetWindow(PetWindow):
     def closeEvent(self, e) -> None:
         for prewarmer in getattr(self, "_v3_prewarmers", {}).values():
             prewarmer.close()
+        overlay = getattr(self, "_v3_scene_overlay", None)
+        if overlay is not None:
+            overlay.hide()
+            overlay.deleteLater()
+            self._v3_scene_overlay = None
         super().closeEvent(e)
 
     def _without_v2_breath(self, f):
@@ -497,7 +530,10 @@ class V3PetWindow(PetWindow):
         pose = animator.advance(dt)
         if animator.lift.active:
             pose.root_offset = (0.0, 0.0)  # 窗口自己在动；root_roll / 身体 / 手臂照常
+        raw = pose  # 叠加状态姿态之前的原始姿态：scene 的呼吸、敲头、摸头从这里取
         pose, posing = self._v3_state_pose(pose, now, dt)
+        scene_sig = self._v3_scene_update(now, f, raw)
+        scene_w = self._v3_scene_w
         self._v3_side_step(now)
         if any(animator.delta) and not any(pose.pinch_delta):
             pose = replace(pose, pinch_delta=tuple(animator.delta))  # 换边“啵”的第一帧就带上拉伸
@@ -520,7 +556,7 @@ class V3PetWindow(PetWindow):
         program = self._program_active(f, dt)
         fast = (program or self._v3_animator.interaction_active
                 or moving_hair or pose.star_effects or self._v3_side_blink is not None
-                or any(pose.pinch_delta))
+                or any(pose.pinch_delta) or 0.0 < scene_w < 1.0)
         still = affine_ok(pose)
         soon = (pose.eye_scale < 1 or 0 <= animator.blink_start - animator.time <= LEAD
                 or self._v3_sway.until_start(now) <= LEAD or posing)
@@ -533,32 +569,40 @@ class V3PetWindow(PetWindow):
         self._sync_sleep_z(now, f)
         self._frame = f
         self._v3_pose = pose
-        if key is not None and key == self._v3_key and self._v3_image is not None:
-            return
-        if (self._v3_image is not None and self._v3_deferred_run < MAX_DEFERRED
-                and prewarmer.would_block(self._v3_settings, pose)):
-            # 这一帧要现算的东西正被后台占着锁：先留着上一张图，下一 tick 再画，不让界面等锁。
-            # V2 变换（_frame）照常更新，下面的遮罩也照常按“旧图 + 新变换”重建，和屏幕上一致。
-            stats["deferred"] += 1
-            self._v3_deferred_run += 1
+        scene_same = scene_sig is not None and scene_sig == self._v3_scene_sig
+        self._v3_scene_sig = scene_sig
+        if scene_w >= 1.0:
+            # scene 完全显示：站姿图不画（离开 scene 的第一帧必然重画）
+            self._v3_key = None
+            if scene_same:
+                return
         else:
-            self._v3_deferred_run = 0
-            self._v3_key = key
-            if still:
-                image = render_affine(self._v3_renderer, self._v3_settings, pose)
-                stats["affine"] += 1
+            if scene_same and key is not None and key == self._v3_key and self._v3_image is not None:
+                return
+            if (self._v3_image is not None and self._v3_deferred_run < MAX_DEFERRED
+                    and prewarmer.would_block(self._v3_settings, pose)):
+                # 这一帧要现算的东西正被后台占着锁：先留着上一张图，下一 tick 再画，不让界面等锁。
+                # V2 变换（_frame）照常更新，下面的遮罩也照常按“旧图 + 新变换”重建，和屏幕上一致。
+                stats["deferred"] += 1
+                self._v3_deferred_run += 1
             else:
-                image = self._v3_renderer.render(self._v3_settings, pose)
-                stats["mesh"] += 1
-            image.setDevicePixelRatio(self._v3_dpr)
-            self._v3_image = image
-            stats["rendered"] += 1
+                self._v3_deferred_run = 0
+                self._v3_key = key
+                if still:
+                    image = render_affine(self._v3_renderer, self._v3_settings, pose)
+                    stats["affine"] += 1
+                else:
+                    image = self._v3_renderer.render(self._v3_settings, pose)
+                    stats["mesh"] += 1
+                image.setDevicePixelRatio(self._v3_dpr)
+                self._v3_image = image
+                stats["rendered"] += 1
         # 遮罩最多 10 次/秒；但 V2 帧（倾斜/压扁/跳）快速变化时轮廓每帧都在动，遮罩滞后会
         # 把落地回弹时伸出遮罩的头发尖裁掉（看起来闪一下），这时才每帧重建。
         # 判据是“轮廓相对上次遮罩漂了多少像素”，不是“有没有按着鼠标”：setMask 是原生调用，
         # 约 4ms/次，按着摸头时每帧重建会让每帧多花 5ms。
         if (self._v3_mask_force or now - self._v3_mask_at >= MASK_INTERVAL
-                or self._v3_mask_stale(f) or self._v3_animator.lift.active):
+                or self._v3_mask_stale(f) or self._v3_animator.lift.active or 0.0 < scene_w < 1.0):
             self._update_mask(now)
         self.update()
         if self._fps_overlay is not None:
@@ -566,12 +610,193 @@ class V3PetWindow(PetWindow):
         if self._pause_badge is not None:
             self._pause_badge.follow()
 
+    # ---- 姿势变体（S9）：collapse / bed / desk 的整图，规则见 shion/v3_scene.py ----
+    def _v3_scene_key(self, scene) -> tuple:
+        return (scene.name, self._height, round(self._v3_dpr, 4))
+
+    def _v3_scene_prewarm(self) -> None:
+        """后台把三个 scene 的数组算好（读图、缩放、预乘）；QImage 在主线程建。"""
+        self._v3_scene_jobs.clear()
+        if not self._v3_scenes:
+            return
+        executor = PREWARM_EXECUTOR or Prewarmer._shared_pool()
+        scale = self._v3_scale * self._v3_dpr
+        for scene in dict.fromkeys(self._v3_scenes.values()):
+            key = self._v3_scene_key(scene)
+            if key not in self._v3_scene_cache:
+                self._v3_scene_jobs[key] = executor.submit(v3_scene.load_arrays, scene, scale)
+
+    def _v3_scene_store(self, scene, arrays) -> SceneImages:
+        key = self._v3_scene_key(scene)
+        images = SceneImages(scene, arrays, self._v3_dpr)
+        cache = self._v3_scene_cache
+        cache[key] = images
+        cache.move_to_end(key)
+        while len(cache) > SCENE_CACHE:
+            cache.popitem(last=False)
+        return images
+
+    def _v3_scene_drop(self, scene) -> None:
+        """这个 scene 载入失败：以后不再用它，状态回到站姿回退姿态。"""
+        left = {k: v for k, v in (self._v3_scenes or {}).items() if v is not scene}
+        self._v3_scenes = left or None
+
+    def _v3_scene_images(self, scene) -> SceneImages | None:
+        """这个 scene 在当前尺寸/DPR 下的图像。后台已经好了就取；没好就只同步载入这一个。"""
+        key = self._v3_scene_key(scene)
+        hit = self._v3_scene_cache.get(key)
+        if hit is not None:
+            self._v3_scene_cache.move_to_end(key)
+            return hit
+        job = self._v3_scene_jobs.pop(key, None)
+        arrays = None
+        if job is not None:
+            if job.done():
+                try:
+                    arrays = job.result()
+                except Exception:
+                    arrays = None
+            else:
+                job.cancel()
+        if arrays is None:
+            t0 = time.perf_counter()
+            try:
+                arrays = v3_scene.load_arrays(scene, self._v3_scale * self._v3_dpr)
+            except Exception:
+                self._v3_scene_drop(scene)
+                return None
+            self._v3_scene_load_ms.append(round((time.perf_counter() - t0) * 1000, 1))
+        return self._v3_scene_store(scene, arrays)
+
+    def _v3_scene_collect(self) -> None:
+        """后台算好的 scene 数组转成图像放进缓存（每帧最多一个，不卡界面）。"""
+        for key, job in list(self._v3_scene_jobs.items()):
+            if not job.done():
+                continue
+            del self._v3_scene_jobs[key]
+            scene = next((sc for sc in (self._v3_scenes or {}).values() if self._v3_scene_key(sc) == key), None)
+            if scene is None or job.cancelled():
+                continue
+            try:
+                arrays = job.result()
+            except Exception:
+                continue
+            self._v3_scene_store(scene, arrays)
+            return
+
+    def _v3_scene_interrupted(self) -> bool:
+        """拎起、拖动、下落、跳跃、拖动回放：scene 不淡化，直接切回站姿。"""
+        return (self._v3_lifting or self._dragging or self._falling or self._jump_start is not None
+                or self._drag_playback is not None)
+
+    def _v3_set_width(self, width: int) -> None:
+        """改窗口宽度，脚底中心不动（照 PetWindow._refresh 里 V2 床的做法）。"""
+        if width == self._sw:
+            return
+        feet_x = self.x() + self.width() / 2
+        old_pos = self.pos()
+        self._sw = width
+        self.setFixedSize(width + 2 * MARGIN_X, self.height())
+        self.move(round(feet_x - self.width() / 2), self.y())
+        self._mask_cache.clear()
+        self._mask_key = None
+        self.clamp_position()
+        if self._press_global is not None:
+            self._grab_offset += old_pos - self.pos()
+        self._v3_mask_force = True
+        self.moved.emit()
+
+    def _v3_scene_update(self, now: float, f, raw):
+        """每帧：scene 显示权重、窗口宽度、覆盖窗、呼吸/敲头/摸头的仿射、金星。
+        返回本帧 scene 的绘制签名："off" = 没有 scene；None = 每帧都要重画（有金星）。"""
+        fade = self._v3_scene_fade
+        target = v3_scene.scene_for(self.sprite_name, self._v3_scenes)
+        if target is not None and self._v3_scene_images(target) is None:
+            target = None                                    # 载入失败：回退站姿姿态
+        if self._v3_scene_shown is None:
+            self._v3_scene_shown = target
+        shown = self._v3_scene_shown
+        want = target is not None and target is shown       # 换了 scene：先把旧的淡出
+        w = fade.snap(False, now) if self._v3_scene_interrupted() else fade.step(want, now)
+        if w <= 0.0 and not want:
+            self._v3_scene_shown = shown = None
+        previous, self._v3_scene_w = self._v3_scene_w, w
+        if (w > 0.0) != (previous > 0.0):
+            self._v3_mask_force = True
+            self._v3_animator._star_bursts = ()              # 金星的坐标系换了
+        if shown is None or w <= 0.0:
+            self._v3_scene_stars = None
+            if self._v3_scene_overlay is not None and self._v3_scene_overlay.isVisible():
+                self._v3_scene_overlay.set_scene(None, None, 0.0, False)
+            if self._sw != self.normal_width:
+                self._v3_set_width(self.normal_width)
+            if not self._v3_scene_interrupted():
+                self._v3_scene_collect()
+            return "off"
+        images = self._v3_scene_images(shown)
+        if images is None:
+            self._v3_scene_w = 0.0
+            return "off"
+        self._v3_set_width(max(self.normal_width, math.ceil(2 * v3_scene.extra_half_width(shown) * self._v3_scale)))
+        sy, angle = v3_scene.scene_affine(shown, raw.body_scale, raw.head_y, raw.head_roll,
+                                          v3_scene.poke_scale(f.sy))
+        if self._v3_scene_override is not None:
+            sy, angle = self._v3_scene_override
+        self._v3_scene_affine = (sy, angle)
+        # 遮罩要跟得上缩回/倾斜：自上次建遮罩漂过 MASK_DRIFT_PX 就重建
+        mask_sy, mask_angle = self._v3_scene_mask_affine
+        s = self._v3_scale
+        drift = (abs(sy - mask_sy) * (shown.ground_y - shown.char_box[1]) * s
+                 + math.radians(abs(angle - mask_angle)) * 0.5 * shown.size[0] * s)
+        if drift > MASK_DRIFT_PX:
+            self._v3_mask_force = True
+        stars = bool(raw.star_effects)
+        self._v3_scene_stars = self._v3_scene_paint_stars(shown, images, raw) if stars else None
+        self._v3_scene_place(shown, images, w)
+        return v3_scene.scene_draw_key(shown, w, sy, angle, self.v3_texture_scale, stars)
+
+    def _v3_scene_paint_stars(self, scene, images, raw):
+        from v3proto.stars import paint_stars
+        image = QImage(images.size[0], images.size[1], QImage.Format.Format_RGBA8888_Premultiplied)
+        image.fill(0)
+        foot = self._v3_rig.v3_foot
+        offset = (images.pad + scene.anchor_x - foot[0], images.pad + scene.ground_y - foot[1])
+        return paint_stars(image, self._v3_rig, images.scale, raw, offset=offset)
+
+    def _v3_scene_place(self, scene, images, w: float) -> None:
+        """家具覆盖窗：只在有家具的 scene 里显示；位置按诗音窗口的静止换算（不跟 V2 压扁/倾斜）。"""
+        overlay = self._v3_scene_overlay
+        if images.furniture is None:
+            if overlay is not None:
+                overlay.set_scene(None, None, 0.0, False)
+            return
+        if overlay is None:
+            overlay = self._v3_scene_overlay = SceneOverlay(self)
+        s = self._v3_scale
+        origin = local_origin(self, scene, s, images.pad)
+        rw, rh = images.rig_size
+        rect = QRectF(self.x() + origin.x(), self.y() + origin.y(), rw * s, rh * s)
+        overlay.set_scene(images.furniture, rect, w, bool(self.windowFlags() & Qt.WindowStaysOnTopHint))
+
+    def _v3_scene_follow(self) -> None:
+        """窗口移动时家具覆盖窗跟着走。"""
+        scene = getattr(self, "_v3_scene_shown", None)
+        overlay = getattr(self, "_v3_scene_overlay", None)
+        if scene is None or overlay is None or not overlay.isVisible():
+            return
+        images = self._v3_scene_cache.get(self._v3_scene_key(scene))
+        if images is not None:
+            self._v3_scene_place(scene, images, self._v3_scene_w)
+
     # ---- 状态姿态（S6）----
     def _v3_state_pose(self, pose, now: float, dt: float):
         """叠加状态姿态；返回 (新 pose, 是否还在动)。互动期间整体淡出，结束后淡回。"""
         self._animator.whole_nod = False  # 工作点头由 V3 只动头来做，V2 不再整图点头
         state = self.sprite_name
         static = state_pose(state)
+        if v3_scene.scene_for(state, self._v3_scenes) is not None:
+            # 有整图姿势时，站姿只在淡入淡出和被拎起时露面：保持原样，不套“瘫倒/趴桌”的回退姿态
+            static = replace(REST_POSE, breath_rate=static.breath_rate, blink_gap=static.blink_gap)
         motion = self._v3_motion
         if state != self._v3_pose_state:
             self._v3_pose_carry = self._v3_pose_carry + self._v3_pose_dynamic
@@ -896,6 +1121,45 @@ class V3PetWindow(PetWindow):
                 self.gesture.emit("tickle")
         super().advance_to(now)
 
+    # ---- 截图（家具在覆盖窗里，普通的 render_frame 只有诗音窗口那一层）----
+    def render_frame(self, scale: int = 1) -> QImage:
+        if self._v3_scene_w > 0.0:
+            return self.render_scene_frame(scale, clip=False)
+        return super().render_frame(scale)
+
+    def render_scene_frame(self, scale: int = 1, *, clip: bool = True) -> QImage:
+        """诗音窗口 ∪ 家具覆盖窗合成的整幅画面（验收图和测试用）。clip=True 时按窗口遮罩裁剪，
+        和屏幕上实际看到的一致（家具层本来就在遮罩外，由覆盖窗画）。"""
+        union = self.rect()
+        overlay = self._v3_scene_overlay
+        local = None
+        if overlay is not None and overlay.isVisible() and overlay.image is not None:
+            local = overlay.geometry().translated(-self.pos())
+            union = union.united(local)
+        image = QImage(union.size() * scale, QImage.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(scale)
+        image.fill(0)
+        pet = QImage(self.size() * scale, QImage.Format_ARGB32_Premultiplied)
+        pet.setDevicePixelRatio(scale)
+        pet.fill(0)
+        q = QPainter(pet)
+        q.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+        self._draw_sprite(q, self._frame)
+        q.end()
+        p = QPainter(image)
+        p.translate(-union.topLeft())
+        p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+        region = getattr(self, "_v3_region", None)
+        if clip and region is not None:
+            p.setClipRegion(region)
+        p.drawImage(QPointF(0, 0), pet)
+        p.setClipping(False)
+        if local is not None:
+            p.setOpacity(overlay.opacity)
+            p.drawImage(overlay.image_rect().translated(local.x(), local.y()), overlay.image)
+        p.end()
+        return image
+
     # ---- 遮罩 ----
     def _v3_mask_stale(self, f) -> bool:
         """V2 帧（压扁/倾斜/跳）自上次建遮罩以来，轮廓估计漂了多少像素；超过 MASK_DRIFT_PX 就重建。"""
@@ -918,7 +1182,12 @@ class V3PetWindow(PetWindow):
         img.fill(0)
         p = QPainter(img)
         p.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
-        self._draw_sprite(p, self._frame)
+        self._v3_mask_pass = True   # 遮罩：站姿全不透明；scene 只含变形后的角色和家具缝带，不含家具
+        self._v3_scene_mask_affine = self._v3_scene_affine
+        try:
+            self._draw_sprite(p, self._frame)
+        finally:
+            self._v3_mask_pass = False
         p.end()
         base = QRegion(QBitmap.fromImage(img.createMaskFromColor(0, Qt.MaskInColor)))
         region = QRegion(base)
@@ -939,18 +1208,56 @@ class V3PetWindow(PetWindow):
         return getattr(self, "_v3_region", QRegion(self.rect()))
 
     def _draw_sprite(self, p: QPainter, f) -> None:
-        if self._v3_image is None:
+        w = self._v3_scene_w
+        if self._v3_image is not None and w < 1.0:
+            rig = self._v3_rig
+            foot_x, foot_y = rig.v3_foot
+            s = self._v3_scale
+            p.save()
+            if w > 0.0 and not self._v3_mask_pass:
+                p.setOpacity(1.0 - w)          # 淡入淡出：站姿淡出
+            p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM - self._jump_offset)
+            p.rotate(f.angle)
+            p.scale(f.sx, f.sy)
+            gap = self._height * V2_FOOT_GAP_RATIO
+            p.drawImage(QPointF(-foot_x * s, -gap - foot_y * s), self._v3_image)
+            p.restore()
+        if w > 0.0:
+            self._draw_scene(p, w)
+
+    def _draw_scene(self, p: QPainter, w: float) -> None:
+        """姿势变体：整张场景图（静止）垫底 → 变形的角色层 → 金星。家具层在覆盖窗里，不在这里画。
+        遮罩那一遍只画变形后的角色和家具缝带（家具本体不进遮罩，点得穿）。"""
+        scene = self._v3_scene_shown
+        images = self._v3_scene_cache.get(self._v3_scene_key(scene)) if scene is not None else None
+        if images is None:
             return
-        rig = self._v3_rig
-        foot_x, foot_y = rig.v3_foot
         s = self._v3_scale
-        p.save()
-        p.translate(self.width() / 2, self.height() - MARGIN_BOTTOM - self._jump_offset)
-        p.rotate(f.angle)
-        p.scale(f.sx, f.sy)
+        origin = local_origin(self, scene, s, images.pad)
+        rw, rh = images.rig_size
+        rect = QRectF(origin.x(), origin.y(), rw * s, rh * s)
+        sy, angle = self._v3_scene_affine
         gap = self._height * V2_FOOT_GAP_RATIO
-        p.drawImage(QPointF(-foot_x * s, -gap - foot_y * s), self._v3_image)
+        px, py = self.width() / 2, self.height() - MARGIN_BOTTOM - gap    # 地面线上的 anchor 点
+        mask = self._v3_mask_pass
+        p.save()
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        if not mask:
+            p.setOpacity(w)
+            p.drawImage(rect, images.full)                              # 垫底：整张场景图，不动
+        elif images.seam is not None:
+            p.drawImage(rect, images.seam)                              # 遮罩：家具边上的静止缝带
+        p.translate(px, py)
+        p.rotate(angle)
+        p.scale(1.0, sy)
+        p.translate(-px, -py)
+        p.drawImage(rect, images.char)                                  # 角色层：呼吸、敲头、摸头
         p.restore()
+        if self._v3_scene_stars is not None and not mask:
+            p.save()
+            p.setOpacity(w)
+            p.drawImage(rect, self._v3_scene_stars)
+            p.restore()
 
 
 __all__ = ["V3PetWindow", "shared_rig", "MARGIN_X", "MARGIN_TOP", "MASK_CACHE_MAX"]
