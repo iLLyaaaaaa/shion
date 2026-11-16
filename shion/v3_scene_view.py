@@ -13,6 +13,7 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QWidget
 
+from shion.effects import Z_BASE_HEIGHT, Z_ORIGIN, Z_OVERLAY_SIZE, SleepZOverlay
 from shion.v3_scene import Scene
 
 
@@ -29,8 +30,8 @@ def _alpha_image(a: np.ndarray) -> QImage:
 class SceneImages:
     """一个 scene 在某个纹理比例下的全部图像（主线程用）。
 
-    full：整张场景图，静止，垫底；char：只有角色，变形；furniture：家具层（覆盖窗用）；
-    seam：家具边上的静止缝带（只用来建遮罩）；alpha：角色 alpha（命中用）。
+    under：垫底，只有家具颜色（没有家具时为 None）；char：只有角色，变形；furniture：家具层（覆盖窗用）；
+    seam：under 的 alpha（只用来建遮罩）；alpha：角色 alpha（命中用）。
     左上角在 scene 坐标里是 (-pad, -pad)。
     """
 
@@ -40,7 +41,7 @@ class SceneImages:
         self.pad = arrays["pad"]
         self.size = arrays["size"]            # 数组宽高（设备像素）
         self.dpr = dpr
-        self.full = _rgba_image(arrays["full"])
+        self.under = _rgba_image(arrays["under"]) if arrays["under"] is not None else None
         self.char = _rgba_image(arrays["char"])
         self.furniture = _rgba_image(arrays["furniture"]) if scene.has_furniture else None
         self.seam = _alpha_image(arrays["seam"]) if arrays["seam"].any() else None
@@ -53,7 +54,7 @@ class SceneImages:
 
     def nbytes(self) -> int:
         total = self.alpha.nbytes
-        for image in (self.full, self.char, self.furniture, self.seam):
+        for image in (self.under, self.char, self.furniture, self.seam):
             if image is not None:
                 total += image.sizeInBytes()
         return total
@@ -112,6 +113,20 @@ class SceneOverlay(QWidget):
         p.end()
 
 
+class V3SleepZ(SleepZOverlay):
+    """睡觉的 Z：窗口给出 scene 里的出 Z 点（v3_sleep_z_anchor）时用它，否则走 V2 的锚点。"""
+
+    def follow(self) -> None:
+        anchor = self.pet.v3_sleep_z_anchor(self.state)
+        if anchor is None:
+            super().follow()
+            return
+        self.scale = self.pet.sprite_height / Z_BASE_HEIGHT
+        size = math.ceil(Z_OVERLAY_SIZE * self.scale)
+        self.setFixedSize(size, size)
+        self.move(anchor.x() - round(Z_ORIGIN[0] * self.scale), anchor.y() - round(Z_ORIGIN[1] * self.scale))
+
+
 def local_origin(win, scene: Scene, scale_logical: float, pad: float) -> QPointF:
     """scene 图左上角（含留边）在诗音窗口坐标里的位置（逻辑像素），静止、不含 V2 压扁/跳跃。
 
@@ -125,4 +140,4 @@ def local_origin(win, scene: Scene, scale_logical: float, pad: float) -> QPointF
                    win.height() - MARGIN_BOTTOM - gap - (pad + scene.ground_y) * scale_logical)
 
 
-__all__ = ["SceneImages", "SceneOverlay", "local_origin", "QPoint"]
+__all__ = ["SceneImages", "SceneOverlay", "V3SleepZ", "local_origin", "QPoint"]

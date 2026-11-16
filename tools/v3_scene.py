@@ -572,7 +572,7 @@ def cmd_preview() -> None:
             rows.append(row)
             _destroy(w)
         _grid(rows).save(BUILD / name)
-    # 260 高：淡化四帧与遮罩轮廓
+    # 260 高：切换四帧（直接切 + 小弹跳）、遮罩轮廓、敲头最深帧
     for state in PREVIEW_STATES:
         w, t = _window(260, 1.0)
         w.set_state("idle", animate=False)
@@ -580,15 +580,22 @@ def cmd_preview() -> None:
         w.set_state(state, animate=False)
         frames = []
         elapsed = 0.0
-        for target in (0.0, 0.1, 0.2, 0.3):
+        for target in (0.0, 0.08, 0.16, 0.24):
             _step(w, t, target - elapsed)
             elapsed = target
-            frames.append((f"t={target:.1f}s w={w._v3_scene_w:.2f}", _on_gray(_frame_pil(w, 1))))
-        _grid([frames]).save(BUILD / f"fade-{state}.png")
+            frames.append((f"t={target:.2f}s sy={w._v3_scene_affine[0]:.3f}", _on_gray(_frame_pil(w, 1))))
+        _grid([frames]).save(BUILD / f"switch-{state}.png")
         _step(w, t, 0.6)
         _mask_panel(w, 2).save(BUILD / f"mask-{state}.png")
         if state != "collapse":
             report["furniture_points_inside_mask"][state] = _far_furniture_inside_mask(w, w._v3_scenes[state])
+        rest = _on_gray(_frame_pil(w, 2))
+        w._v3_scene_override = (0.96, 0.0)                 # 敲头 + 点击压扁的最深：整图缩回约 4%
+        w._v3_mask_force = True
+        w._refresh(w._clock())
+        w._update_mask(w._clock())
+        pressed = _on_gray(_frame_pil(w, 2))
+        _grid([[("静止", rest), ("敲头最深 sy=0.96", pressed)]]).save(BUILD / f"knock-{state}.png")
         _destroy(w)
     app.processEvents()
     (BUILD / "preview.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")

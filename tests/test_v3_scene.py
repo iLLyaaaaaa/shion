@@ -1,4 +1,4 @@
-"""shion/v3_scene.py：坐标、命中分区、淡化、量化键、载入，以及“呼吸极值帧不露缝”的分层模型。"""
+"""shion/v3_scene.py：坐标、命中分区、进入弹跳、量化键、载入，以及“呼吸极值帧不露缝、不留残影”的分层模型。"""
 import math
 from pathlib import Path
 
@@ -122,20 +122,20 @@ def test_array_mask_scale_and_pad():
     assert m.contains(10.5, 10.5) and not m.contains(-5, -5)
 
 
-# ---- 淡化 ----
-def test_fade_reaches_one_in_point_three_seconds_and_reverses_smoothly():
-    f = vs.FadeWeight()
-    assert f.step(True, 0.0) == 0.0
-    values = [f.step(True, t / 100) for t in range(1, 31)]
-    assert values[-1] == pytest.approx(1.0) and all(b >= a for a, b in zip(values, values[1:]))
-    assert 0.4 < values[14] < 0.6                                       # smoothstep 中点
-    f = vs.FadeWeight()
-    f.step(True, 0.0)
-    up = [f.step(True, t / 100) for t in range(1, 16)]                 # 走到一半
-    down = [f.step(False, 0.15 + t / 100) for t in range(1, 6)]        # 中途反向
-    assert down[0] < up[-1] and abs(down[0] - up[-1]) < 0.1            # 连续，不跳
-    assert all(b <= a for a, b in zip(down, down[1:]))
-    assert f.snap(False, 1.0) == 0.0 and f.snap(True) == 1.0
+# ---- 进入弹跳 ----
+def test_enter_pop_dips_once_then_is_exactly_one():
+    dur, low = vs.ENTER_POP
+    assert vs.enter_pop(0.0) == 1.0 and vs.enter_pop(-1.0) == 1.0 and vs.enter_pop(dur) == 1.0 and vs.enter_pop(5.0) == 1.0
+    values = [vs.enter_pop(dur * i / 200) for i in range(201)]
+    assert min(values) == pytest.approx(low, abs=1e-3)
+    assert max(values) <= 1.0 + 0.3 * (1.0 - low) + 1e-9               # 回弹只有压扁深度的 30%
+    assert values.index(min(values)) < 0.4 * 200                        # 先压下去
+
+
+def test_scene_affine_multiplies_in_the_pop():
+    s = synthetic()
+    assert vs.scene_affine(s, 1.0, 0.0, 0.0) == (1.0, 0.0)
+    assert vs.scene_affine(s, 1.0, 0.0, 0.0, 1.0, 0.97)[0] == pytest.approx(0.97)
 
 
 def test_draw_key_quantises_and_stars_disable_it():
@@ -155,36 +155,92 @@ def test_load_arrays_layers(scenes, name):
     a = vs.load_arrays(s, 0.2)
     width = round((s.size[0] + 2 * vs.SCENE_PAD) * 0.2)
     height = round((s.size[1] + 2 * vs.SCENE_PAD) * 0.2)
-    for key in ("full", "char", "furniture"):
+    assert "full" not in a                                              # 整图只用来算 under，不保留
+    for key in ("char", "furniture") + (("under",) if s.has_furniture else ()):
         assert a[key].shape == (height, width, 4) and a[key].dtype == np.uint8, key
         assert (a[key][..., :3] <= a[key][..., 3:4]).all(), key           # 预乘：颜色不超过 alpha
-    assert a["alpha"].shape == (height, width) and a["size"] == (width, height)
+    assert (a["under"] is None) == (not s.has_furniture)
+    assert a["alpha"].shape == (height, width) and a["size"] == (width, height) and a["seam"].shape == (height, width)
     assert a["scale"] == pytest.approx(width / (s.size[0] + 2 * vs.SCENE_PAD))
-    full, char, furniture = (a[k][..., 3].astype(int) for k in ("full", "char", "furniture"))
-    opaque = int((full > 8).sum())
-    # 整张图是最完整的一层。各层分别缩放，个别像素会差几级（振铃），所以按比例容忍
-    assert (full < char - 8).sum() <= 0.001 * opaque and (full < furniture - 8).sum() <= 0.001 * opaque
-    assert full.max() == 255 and char.max() == 255
+    char, furniture = (a[k][..., 3].astype(int) for k in ("char", "furniture"))
+    assert char.max() == 255
     # 角色层和家具层在原图分辨率上互不重叠（硬边）；缩放后只在交界一两个像素内有抗锯齿
     both = (char > 8) & (furniture > 8)
-    assert both.sum() <= 0.02 * (full > 8).sum()
+    assert both.sum() <= 0.02 * ((char > 8) | (furniture > 8)).sum()
 
 
-def test_full_layer_is_the_whole_picture_not_a_cutout(scenes):
-    """垫底的是整张场景图：角色所在的像素在 full 里也是不透明的（不是挖掉的）。"""
-    for name, s in scenes.items():
-        a = vs.load_arrays(s, 0.2)
-        char_opaque = a["char"][..., 3] >= 250
-        assert char_opaque.sum() > 1000
-        assert (a["full"][..., 3][char_opaque] >= 235).all(), name
-        # 家具图本身是挖掉了角色的；整图不是
-        if s.has_furniture:
-            assert (a["furniture"][..., 3][char_opaque] <= 8).all(), name     # 缩放的振铃至多几级
+def nearest_fill(a):
+    """每个像素最近的家具“底色”像素（不含深色描线）的行列号。"""
+    f = a["furniture"].astype(float)
+    solid = a["furniture"][..., 3] >= 250
+    fill = solid & ((0.3 * f[..., 0] + 0.59 * f[..., 1] + 0.11 * f[..., 2]) > vs.FILL_LUMA)
+    return nd.distance_transform_edt(~fill, return_indices=True)[1]
 
 
-def test_collapse_has_no_furniture_layer(scenes):
+@pytest.mark.parametrize("name", ["bed", "desk"])
+def test_under_layer_holds_only_furniture_colours(scenes, name):
+    """垫底只有家具颜色：落在角色像素上的，每个都等于最近的家具像素的颜色（不是不动的角色描线）。"""
+    s = scenes[name]
+    a = vs.load_arrays(s, 0.2)
+    under = a["under"]
+    char_opaque = a["char"][..., 3] >= 250
+    iy, ix = nearest_fill(a)
+    on_char = char_opaque & (under[..., 3] > 0)
+    assert on_char.sum() > 500                                          # 确实延伸到了角色底下
+    assert (under[..., 3][on_char] == 255).all()
+    assert np.array_equal(under[..., :3][on_char], a["furniture"][..., :3][iy[on_char], ix[on_char]])
+    assert ((a["seam"] > 0) <= (under[..., 3] > 0)).all() and (a["seam"] > 0).any()   # 遮罩只取 under 里角色一侧的部分
+
+
+def test_collapse_has_no_furniture_and_no_underlay(scenes):
     a = vs.load_arrays(scenes["collapse"], 0.2)
     assert (a["furniture"][..., 3] > 8).sum() < 200
+    assert a["under"] is None and not a["seam"].any()
+
+
+def test_seam_reach_grows_with_height():
+    assert vs.seam_reach(0) == vs.SEAM_MARGIN and vs.seam_reach(-50) == vs.SEAM_MARGIN
+    assert vs.seam_reach(1000) == pytest.approx(vs.SEAM_MARGIN + 1000 * vs.SEAM_SHRINK)
+
+
+def _toy():
+    """棕色家具块（左）+ 紧挨着的红色角色块（带 3 像素黑描线），100×60，scale = 1。"""
+    full = np.zeros((60, 100, 4), np.uint8)
+    full[10:60, 0:40] = (120, 80, 40, 255)
+    full[10:60, 40:100] = (200, 20, 20, 255)
+    full[10:60, 40:43] = (0, 0, 0, 255)
+    char = np.zeros_like(full)
+    char[10:60, 40:100] = full[10:60, 40:100]
+    furniture = np.zeros_like(full)
+    furniture[10:60, 0:38] = full[10:60, 0:38]                         # 挖掉角色周围 2 像素
+    return full, char, furniture
+
+
+def test_under_layer_extends_furniture_colour_under_the_character_and_nothing_else():
+    full, char, furniture = _toy()
+    under, seam = vs.under_layer(full, char, furniture, 1.0, 60.0)
+    assert under is not None and (seam[10:60, 40:100] == under[10:60, 40:100, 3]).all()
+    assert not seam[:, :34].any()                                        # 补在圈外侧的家具不进遮罩
+    band = under[10:60, 40:100]
+    painted = band[..., 3] > 0
+    assert painted[:, :3].all()                                          # 描线那几列都被垫上了
+    assert (band[painted][:, :3] == (120, 80, 40)).all()                  # 全是棕色：没有红、没有黑
+    assert not painted[:, 60:].any() and not under[:10].any()             # 离家具远的角色像素和空气里没有
+    assert (under[10:60, 38:40] == full[10:60, 38:40]).all()              # 挖掉的那圈原样补回
+
+
+def test_under_layer_reach_widens_with_height():
+    full, char, furniture = _toy()
+    under, _ = vs.under_layer(full, char, furniture, 1.0, 60.0)
+    width = lambda row: int((under[row, 40:100, 3] > 0).sum())
+    top, bottom = width(11), width(58)                                    # 顶部离地 49，底部离地 2；带宽从家具边（x=37）起算
+    assert top > bottom >= 4
+
+
+def test_under_layer_returns_nothing_without_furniture():
+    full, char, _ = _toy()
+    under, seam = vs.under_layer(full, char, np.zeros_like(full), 1.0, 60.0)
+    assert under is None and not seam.any()
 
 
 def test_split_layers_on_a_small_picture():
@@ -200,9 +256,9 @@ def test_split_layers_on_a_small_picture():
     assert (furniture[:, :40 - gap, 3] == 255).all() and (furniture[:, 40 - gap:, 3] == 0).all()
 
 
-# ---- 极值帧：角色层呼吸缩放时，和家具层之间不能露出透明缝 ----
-# 分层：full（整张场景图，静止，垫底）→ 角色层（变形）→ 覆盖窗里的家具层。诗音窗口的遮罩 =
-# 变形后的角色 ∪ seam（家具 SEAM_BAND 以内的静止非家具像素），再外扩 MASK_GROW。
+# ---- 极值帧：角色层呼吸缩放时，和家具层之间不能露出透明缝，也不能留下不动的描线 ----
+# 分层：under（只有家具颜色，静止，垫底）→ 角色层（变形）→ 覆盖窗里的家具层。诗音窗口的遮罩 =
+# 变形后的角色 ∪ under 的轮廓，再外扩 MASK_GROW。
 MASK_GROW = 4          # 同 shion/pet_window.py MASK_GROW（逻辑像素）；这里按数组像素用，够盖住 FURNITURE_GAP
 
 
@@ -216,63 +272,93 @@ def warp(alpha: np.ndarray, scene, scale, pad, sy, angle) -> np.ndarray:
     return np.asarray(image)
 
 
+def under_alpha(a: dict) -> np.ndarray:
+    return a["under"][..., 3] if a["under"] is not None else np.zeros_like(a["alpha"])
+
+
 def visible(a: dict, scene, sy, angle, *, underlay: bool) -> np.ndarray:
-    """窗口里看到的不透明度：诗音窗口 = （整图垫底 ∩ 遮罩）再叠变形后的角色；覆盖窗 = 家具层。
-    underlay=False 是“挖掉角色的图垫底”的错误做法，用作对照。"""
+    """窗口里看到的不透明度：诗音窗口 = （under ∩ 遮罩）再叠变形后的角色；覆盖窗 = 家具层。
+    underlay=False 是“没有垫底”的错误做法，用作对照。"""
     moved = warp(a["alpha"], scene, a["scale"], a["pad"], sy, angle)
     region = nd.binary_dilation((a["seam"] > 0) | (moved > 0), iterations=MASK_GROW)
-    pet = np.maximum(moved, a["full"][..., 3] * region) if underlay else moved
+    pet = np.maximum(moved, under_alpha(a) * region) if underlay else moved
     return np.maximum(pet, a["furniture"][..., 3])
 
 
-def near_furniture(a: dict) -> np.ndarray:
-    """静止整图里：家具本身，以及离家具 SEAM_BAND 以内的像素（缝只会出在这里）。"""
+def rest_opaque(a: dict) -> np.ndarray:
+    """静止画面里不透明的像素：角色、家具，以及垫底补上的那圈。"""
+    return (a["alpha"] >= 250) | (a["furniture"][..., 3] >= 250) | (under_alpha(a) >= 250)
+
+
+def near_furniture(a: dict, px: int = 3) -> np.ndarray:
+    """贴着家具的像素：离家具不超过 px 个数组像素（透明缝只会出在这里）。"""
     furniture = a["furniture"][..., 3] > 8
     if not furniture.any():
         return furniture
-    return nd.binary_dilation(furniture, iterations=max(1, math.ceil(vs.SEAM_BAND * a["scale"])))
+    return nd.binary_dilation(furniture, iterations=px)
+
+
+def beyond_reach(a: dict, scene, margin_px: int = 2) -> np.ndarray:
+    """离家具比垫底带宽还远（再加 margin_px）的像素：这里不该有任何静止的垫底。"""
+    furniture = a["furniture"][..., 3] >= 250
+    if not furniture.any():
+        return np.ones_like(furniture)
+    dist = nd.distance_transform_edt(~furniture)
+    ground_row = (a["pad"] + scene.ground_y) * a["scale"]
+    rows = np.arange(furniture.shape[0])
+    reach = np.array([vs.seam_reach((ground_row - r) / a["scale"]) * a["scale"] for r in rows])[:, None]
+    return dist > reach + margin_px
 
 
 @pytest.mark.parametrize("name", ["bed", "desk"])
 @pytest.mark.parametrize("extreme", list(EXTREMES))
 def test_no_seam_opens_between_character_and_furniture_at_any_extreme(scenes, name, extreme):
-    """呼吸最小/最大（以及敲头、点击压扁、摸头倾斜的极值）：静止帧里不透明、又贴着家具的像素仍不透明。"""
+    """呼吸最小/最大（以及敲头、点击压扁、摸头倾斜、进入弹跳的极值）：静止帧里不透明、又贴着家具的像素仍不透明。"""
     s = scenes[name]
     a = vs.load_arrays(s, 0.25)
     sy, angle = EXTREMES[extreme]
-    rest = (a["full"][..., 3] >= 250) & near_furniture(a)
+    rest = rest_opaque(a) & near_furniture(a)
     assert rest.sum() > 5000
     shown = visible(a, s, sy, angle, underlay=True)
-    assert (shown[rest] >= 250).all(), (name, extreme, int((shown[rest] < 250).sum()))
+    gaps = int((shown[rest] < 250).sum())                            # 倾斜时边缘个别像素的抗锯齿会差几级
+    assert gaps <= 0.0005 * rest.sum(), (name, extreme, gaps)
 
 
 @pytest.mark.parametrize("name", ["bed", "desk"])
-def test_the_underlay_is_the_whole_picture(scenes, name):
-    """垫底的是整张场景图（角色所在的像素在 full 里也是不透明的），不是挖掉角色的图。"""
-    s = scenes[name]
-    a = vs.load_arrays(s, 0.25)
-    char = a["alpha"] >= 250
-    assert (a["full"][..., 3][char] >= 235).all()
-    assert (a["furniture"][..., 3][char] <= 8).all()                   # 对照：家具层是挖掉角色的
-    assert (a["seam"] > 0).any() and not ((a["seam"] > 0) & (a["furniture"][..., 3] > 8)).any()   # 遮罩里没有家具
-
-
-@pytest.mark.parametrize("name", ["bed", "desk"])
-def test_without_the_full_underlay_the_extremes_would_show_seams(scenes, name):
+def test_without_the_underlay_the_extremes_would_show_seams(scenes, name):
     """对照：只画“角色层 + 挖掉角色的家具层”，极值帧里贴着家具的地方会有透明缝——证明上面的测试能抓到。"""
     s = scenes[name]
     a = vs.load_arrays(s, 0.25)
-    rest = (a["full"][..., 3] >= 250) & near_furniture(a)
+    rest = rest_opaque(a) & near_furniture(a)
     worst = max(int((visible(a, s, *EXTREMES[e], underlay=False)[rest] < 250).sum()) for e in EXTREMES)
     assert worst > 100
 
 
 @pytest.mark.parametrize("name", ["bed", "desk"])
-def test_character_free_air_does_not_leave_a_still_ghost(scenes, name):
-    """离家具远的地方不留静止残影：敲头压下去时，头顶那一层真的缩回去了（压扁看得见）。"""
+@pytest.mark.parametrize("extreme", ["knock", "knock+poke", "inhale"])
+def test_what_the_character_uncovers_next_to_furniture_is_furniture_colour(scenes, name, extreme):
+    """这次的 bug：露出来的不能是不动的角色描线。角色层缩回去后，垫底里每个“露出来”的不透明像素都是家具颜色，
+    而垫底里没有任何角色颜色。"""
     s = scenes[name]
     a = vs.load_arrays(s, 0.25)
-    far = (a["full"][..., 3] >= 250) & ~near_furniture(a) & (a["alpha"] >= 250)
+    moved = warp(a["alpha"], s, a["scale"], a["pad"], *EXTREMES[extreme])
+    uncovered = (under_alpha(a) > 0) & (moved < 250) & (a["alpha"] >= 250)
+    iy, ix = nearest_fill(a)
+    colours = a["under"][..., :3][uncovered]
+    assert np.array_equal(colours, a["furniture"][..., :3][iy[uncovered], ix[uncovered]])
+    # 垫底整体：不含任何“角色独有的颜色”——角色像素上的每个垫底像素都等于某个家具像素
+    on_char = (a["alpha"] >= 250) & (under_alpha(a) > 0)
+    assert np.array_equal(a["under"][..., :3][on_char], a["furniture"][..., :3][iy[on_char], ix[on_char]])
+
+
+@pytest.mark.parametrize("name", ["bed", "desk"])
+def test_character_free_air_does_not_leave_a_still_ghost(scenes, name):
+    """离家具远的地方（超出垫底带宽）没有任何静止垫底；敲头压下去时头顶那一层真的缩回去了（压扁看得见）。"""
+    s = scenes[name]
+    a = vs.load_arrays(s, 0.25)
+    far = beyond_reach(a, s) & (a["alpha"] >= 250)
+    assert far.sum() > 1000
+    assert not (under_alpha(a)[far] > 0).any()
     shown = visible(a, s, *EXTREMES["knock+poke"], underlay=True)
     assert int((shown[far] < 250).sum()) > 100
 

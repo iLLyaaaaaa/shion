@@ -4,15 +4,15 @@
 图已经缩放到站姿的 rig 比例，所以 scene 像素 ≈ rig 像素；地面线（ground_y）对齐脚底线，
 水平中心（anchor_x）对齐脚底中心，现有的窗口 ← rig 坐标换算原样可用。
 
-分层（家具看得见但点不到，呼吸时角色和家具之间不能露出透明缝）：
-- full：整张场景图（角色 + 家具），静止，**垫在最底下**——不是挖掉角色的图；
-- char：只有角色像素，呼吸/摸头/敲头时绕地面支点做仿射，画在 full 上面；
+分层（家具看得见但点不到，呼吸时角色和家具之间不能露透明缝，敲头时不能留下不动的描线）：
+- under：垫在最底下，**只有家具颜色**：角色像素里离家具不远的那些，换成最近的家具像素的颜色（家具往角色底下
+  延伸一圈），再加上被家具层挖掉的那圈 FURNITURE_GAP 家具像素。角色层缩回去时露出来的是家具，不是不动的角色；
+  没有家具（collapse）就没有 under；
+- char：只有角色像素，呼吸/摸头/敲头时绕地面支点做仿射，画在 under 上面；
 - furniture：整图去掉角色周围 FURNITURE_GAP 像素，画在点穿的覆盖窗里，盖在角色前面；
-- 诗音窗口的遮罩 = 变形后的角色 ∪ seam（静止的、离家具 SEAM_BAND 以内的非家具像素），再外扩。
-  角色层缩回去时，家具边上露出的是 full 垫底的不透明像素，不会有透明缝；离家具远的自由空气里
-  不留静止的残影（否则敲头下压时头顶会留一个不动的影子）。
-- 家具层不跟 V2 的整体压扁/倾斜走：scene 里只取点击压扁的 POKE_SHARE，角色最多缩回 ~4%，
-  SEAM_BAND 要比这个位移大。
+- 诗音窗口的遮罩 = 变形后的角色 ∪ under 的轮廓，再外扩；家具本体不进遮罩，所以点得穿。
+- 带宽随离地高度变宽（seam_reach）：同样缩 x%，越高的地方位移越大。
+- 家具层不跟 V2 的整体压扁/倾斜走：scene 里只取点击压扁的 POKE_SHARE。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ import numpy as np
 SCENES_ENV = "SHION_V3_SCENES"          # 设为 0：不用 scene，回到站姿回退
 SCENES_DIR = Path(__file__).resolve().parent.parent / "assets" / "sprites" / "v3" / "scenes"
 SCENES_JSON = SCENES_DIR / "scenes.json"
-SCENE_FADE = 0.3                         # 秒：进出 scene 的交叉淡化
+ENTER_POP = (0.24, 0.97)                 # 进入/换 scene 时的小弹跳：(时长 秒, 最扁 sy)，同 animator 的“switch”压扁
 SCENE_PAD = 60                           # rig 像素：scene 帧四周留的透明边（倾斜、金星用）
 KNOCK_SQUASH = 0.02                      # 敲头：整图最多下压 2%
 KNOCK_HEAD_Y = 28.0                      # 敲头下沉 28 rig 像素 = 满压
@@ -37,7 +37,9 @@ FURNITURE_MIN_PIXELS = 500               # 家具像素少于这个：算没有�
 HIT_ALPHA = 64                           # 命中：角色 alpha 要超过这个（同 V3 其它命中）
 WINDOW_MARGIN = 16                       # rig 像素：窗口宽度在角色半宽之外多留的余量
 POKE_SHARE = 0.25                        # V2 点击压扁（最深 0.92）在 scene 里只取这么多：最多压 2%
-SEAM_BAND = 28                           # rig 像素：家具边上这么宽以内，静止的整图垫底在遮罩里（够盖住 ~4% 的缩回）
+SEAM_MARGIN = 6                          # rig 像素：垫底带宽的固定部分
+FILL_LUMA = 70                           # 垫底取色：家具里比这更亮的才算“底色”（描线是深色，延伸出去会成一个深色楔子）
+SEAM_SHRINK = 0.08                       # 垫底带宽随离地高度增加的比例（角色层最多缩回/横移的上限：弹跳 3% + 敲头 2% + 点击 2% + 摸头 1°）
 
 
 @dataclass(frozen=True)
@@ -111,13 +113,24 @@ def poke_scale(frame_sy: float) -> float:
     return 1.0 + (frame_sy - 1.0) * POKE_SHARE
 
 
+def enter_pop(elapsed: float) -> float:
+    """进入/换 scene 后 elapsed 秒的纵向缩放：压到 ENTER_POP[1] 再轻微回弹，结束后精确为 1.0（曲线同 animator.squash_scale）。"""
+    dur, low = ENTER_POP
+    if elapsed <= 0 or elapsed >= dur:
+        return 1.0
+    p, depth = elapsed / dur, 1.0 - low
+    if p < 0.6:
+        return 1.0 - depth * math.sin(math.pi * p / 0.6)
+    return 1.0 + 0.3 * depth * math.sin(math.pi * (p - 0.6) / 0.4)
+
+
 def scene_affine(scene: Scene, body_scale: float, head_y: float, head_roll: float,
-                 poke: float = 1.0) -> tuple[float, float]:
+                 poke: float = 1.0, pop: float = 1.0) -> tuple[float, float]:
     """(纵向缩放 sy, 倾斜角度)。body_scale 是动画器的呼吸缩放（1～1.012），head_y 是敲头下沉量，
-    poke 是 poke_scale(V2 帧的 sy)。"""
+    poke 是 poke_scale(V2 帧的 sy)，pop 是 enter_pop(进入后经过的秒数)。"""
     sy = 1.0 + (body_scale - 1.0) * scene.breath_gain
     squash = min(1.0, max(0.0, head_y / KNOCK_HEAD_Y))
-    return sy * (1.0 - KNOCK_SQUASH * squash) * poke, head_roll * PAT_TILT
+    return sy * (1.0 - KNOCK_SQUASH * squash) * poke * pop, head_roll * PAT_TILT
 
 
 def affine_matrix(scene: Scene, sy: float, angle: float) -> np.ndarray:
@@ -168,39 +181,6 @@ def zone_at(scene: Scene, x: float, y: float, mask) -> str | None:
     return "body"
 
 
-# ---- 淡化 ----
-def _smooth(u: float) -> float:
-    u = min(1.0, max(0.0, u))
-    return u * u * (3 - 2 * u)
-
-
-class FadeWeight:
-    """进出 scene 的权重 0～1：0.3 秒 smoothstep，中途反向从当前值接着走。"""
-
-    def __init__(self, seconds: float = SCENE_FADE):
-        self.seconds = seconds
-        self.progress = 0.0
-        self.last: float | None = None
-
-    @property
-    def weight(self) -> float:
-        return _smooth(self.progress)
-
-    def step(self, want: bool, now: float) -> float:
-        dt = 0.0 if self.last is None else max(0.0, now - self.last)
-        self.last = now
-        delta = dt / self.seconds
-        self.progress = min(1.0, self.progress + delta) if want else max(0.0, self.progress - delta)
-        return self.weight
-
-    def snap(self, shown: bool, now: float | None = None) -> float:
-        """拎起、拖动、下落：不淡化，直接到位。"""
-        self.progress = 1.0 if shown else 0.0
-        if now is not None:
-            self.last = now
-        return self.weight
-
-
 def scene_draw_key(scene: Scene, w: float, sy: float, angle: float, texture_scale: float, stars: bool):
     """量化后的“这一帧 scene 长什么样”；没变就不必重画。有金星时返回 None（每帧都在动）。"""
     if stars:
@@ -232,22 +212,49 @@ def split_layers(image: np.ndarray, char: np.ndarray):
     return full, char_layer, furniture
 
 
-def seam_alpha(full_alpha: np.ndarray, furniture_alpha: np.ndarray, scale: float) -> np.ndarray:
-    """家具 SEAM_BAND 以内、且本身不是家具的静止像素（整图的 alpha）。"""
+def seam_reach(height_rig: float) -> float:
+    """离地 height_rig（rig 像素）处，垫底要延伸的宽度（rig 像素）：角色层缩回 SEAM_SHRINK 时那里的位移 + 固定余量。"""
+    return SEAM_MARGIN + SEAM_SHRINK * max(0.0, height_rig)
+
+
+def under_layer(full: np.ndarray, char: np.ndarray, furniture: np.ndarray, scale: float, ground_row: float):
+    """(under 预乘 RGBA 或 None, seam alpha：under 里属于角色一侧的部分，只用来建遮罩)。三张输入都是已缩好的预乘数组，同尺寸。
+
+    - 角色像素里离家具（不透明的家具层像素）不超过 seam_reach 的：取最近的家具底色像素（不含深色描线）的颜色——家具往角色底下延伸；
+    - 被家具层挖掉的那圈（整图里可见、既不是角色也不在家具层里），以及圈外侧几个像素的家具：原样放进来；
+    - 没有家具：返回 (None, 全 0)。
+    """
     from scipy import ndimage as nd
-    furniture = furniture_alpha > 8
-    if not furniture.any():
-        return np.zeros_like(full_alpha)
-    near = nd.binary_dilation(furniture, iterations=max(1, math.ceil(SEAM_BAND * scale)))
-    visible = full_alpha > 8                       # 缩放振铃留下的 1～8 级淡雾不算
-    return np.where(near & ~furniture & visible, full_alpha, 0).astype(np.uint8)
+    solid = furniture[..., 3] >= 250
+    zero = np.zeros(solid.shape, np.uint8)
+    if not solid.any():
+        return None, zero
+    dist = nd.distance_transform_edt(~solid)
+    luma = 0.3 * furniture[..., 0] + 0.59 * furniture[..., 1] + 0.11 * furniture[..., 2]
+    fill = solid & (luma > FILL_LUMA)                           # 取色只用家具的底色，不用深色描线
+    _, (iy, ix) = nd.distance_transform_edt(~(fill if fill.any() else solid), return_indices=True)
+    rows = np.arange(solid.shape[0], dtype=np.float64)
+    reach = np.array([seam_reach((ground_row - r) / scale) * scale for r in rows])[:, None]
+    char_visible = char[..., 3] > 8
+    near = char_visible & (dist <= reach)
+    under = np.zeros_like(furniture)
+    under[near, :3] = furniture[iy[near], ix[near], :3]
+    under[near, 3] = 255
+    around = nd.binary_dilation(char_visible, iterations=math.ceil((FURNITURE_GAP + 3) * scale) + 1)
+    ring = (full[..., 3] > 8) & around & ~char_visible & (furniture[..., 3] <= 8)   # 只在角色周围：别处的 1～8 级淡雾不算
+    under[ring] = full[ring]
+    seam = np.ascontiguousarray(under[..., 3])                  # 遮罩只含角色一侧和那圈：不含下面补的家具像素
+    # 挖掉的那圈两侧的家具像素也垫一份：覆盖窗和垫底在小数像素位置上各自插值，圈边上的像素才不会比周围透明几级
+    edge = nd.binary_dilation(char_visible, iterations=math.ceil((FURNITURE_GAP + 4) * scale) + 1) & (furniture[..., 3] > 8)
+    under[edge] = furniture[edge]
+    return under, seam
 
 
 def load_arrays(scene: Scene, texture_scale: float, root: Path | None = None) -> dict:
     """PIL 读图 → 补 SCENE_PAD 透明边 → LANCZOS 缩到纹理比例 → 预乘。
 
-    返回 full / char / furniture（H×W×4 预乘 uint8）、alpha（角色 alpha，H×W uint8，命中用）、
-    seam（H×W uint8：家具 SEAM_BAND 以内的静止非家具像素的 alpha，建遮罩用；没有家具时全 0）、
+    返回 under（垫底，只有家具颜色；没有家具时为 None）、char / furniture（H×W×4 预乘 uint8）、
+    alpha（角色 alpha，H×W uint8，命中用）、seam（under 的 alpha，建遮罩用；没有家具时全 0）、
     scale（实际比例 = 数组像素 / rig 像素）、pad、size（数组宽高）。
     数组左上角在 scene 坐标里是 (-pad, -pad)。
     """
@@ -271,12 +278,15 @@ def load_arrays(scene: Scene, texture_scale: float, root: Path | None = None) ->
         out[key] = _premultiply(np.asarray(canvas))
     out["alpha"] = np.ascontiguousarray(out["char"][..., 3])
     out["scale"] = target[0] / padded[0]
-    out["seam"] = seam_alpha(out["full"][..., 3], out["furniture"][..., 3], out["scale"])
+    full = out.pop("full")                                   # 只用来算 under，不保留
+    ground_row = (SCENE_PAD + scene.ground_y) * out["scale"]
+    out["under"], out["seam"] = under_layer(full, out["char"], out["furniture"], out["scale"], ground_row)
     out["pad"] = float(SCENE_PAD)
     out["size"] = target
     return out
 
 
 __all__ = ["Scene", "load_metadata", "scene_for", "to_scene", "to_rig", "extra_half_width", "scene_affine",
-           "affine_matrix", "to_rest", "poke_scale", "seam_alpha", "SEAM_BAND", "POKE_SHARE", "ArrayMask", "zone_at", "FadeWeight", "scene_draw_key", "split_layers",
-           "load_arrays", "SCENE_FADE", "SCENE_PAD", "SCENES_ENV", "FURNITURE_GAP"]
+           "enter_pop", "ENTER_POP", "affine_matrix", "to_rest", "poke_scale", "seam_reach", "under_layer",
+           "SEAM_MARGIN", "SEAM_SHRINK", "FILL_LUMA", "POKE_SHARE", "ArrayMask", "zone_at", "scene_draw_key", "split_layers",
+           "load_arrays", "SCENE_PAD", "SCENES_ENV", "FURNITURE_GAP"]

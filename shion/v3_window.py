@@ -29,7 +29,7 @@ from shion.v3_display import (REST_POSE, STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, S
 from shion import v3_scene
 from shion.v3_layers import SwayEnvelope, affine_ok, render_affine
 from shion.v3_prewarm import BLINK_LEVELS, Prewarmer, quantize_eye
-from shion.v3_scene_view import SceneImages, SceneOverlay, local_origin
+from shion.v3_scene_view import SceneImages, SceneOverlay, V3SleepZ, local_origin
 
 RENDERER_CACHE = 2  # 每侧最多两份（换屏 DPR 来回不重建）
 AUTO_SIDE_ENV = "SHION_V3_AUTO_SIDE"  # 换边默认打开（S8 起用画好的右鼓素材）；设为 0 固定左鼓
@@ -184,9 +184,12 @@ class V3PetWindow(PetWindow):
         self._v3_screen_hooked = False
         # 姿势变体（S9）：collapse / bed / desk 用整图（shion/v3_scene.py）。None = 不用（环境变量或没有资源）
         self._v3_scenes = v3_scene.load_metadata()
-        self._v3_scene_fade = v3_scene.FadeWeight()
         self._v3_scene_w = 0.0
-        self._v3_scene_shown = None       # 此刻显示（或正在淡出）的 Scene
+        self._v3_scene_shown = None       # 此刻显示的 Scene（被拎起/拖动/下落打断时为 None）
+        self._v3_scene_since = 0.0        # 这个 scene 开始显示的时刻（进入弹跳用）
+        self._v3_scene_pending = False    # 目标 scene 还在后台载入：先保持现在的画面
+        self._v3_scene_popping = False    # 进入弹跳正在播
+        self._v3_scene_left = False       # 这一帧刚离开 scene：站姿图必须马上画
         self._v3_scene_cache: OrderedDict[tuple, SceneImages] = OrderedDict()
         self._v3_scene_jobs: dict[tuple, object] = {}
         self._v3_scene_overlay = None
@@ -312,6 +315,13 @@ class V3PetWindow(PetWindow):
             if side not in (self._v3_side, self._v3_side_target) and now - since >= SIDE_IDLE_RELEASE:
                 self._v3_drop_side(side)
         if not self.auto_side or not self._v3_side_started:
+            return
+        if self._v3_scene_w > 0.0:      # 姿势变体（S9）期间冻结：不换边，取消正在准备的；回站姿停稳后再按原规则补换
+            if self._v3_side_target is not None:
+                self._v3_cancel_side()
+            self._v3_side_geom = (self.x(), self.y(), self.width(), self.height(), round(self._v3_dpr, 4))
+            self._v3_side_since = now
+            self._v3_side_blink = None
             return
         geom = (self.x(), self.y(), self.width(), self.height(), round(self._v3_dpr, 4))
         if self._v3_busy() or geom != self._v3_side_geom:
@@ -452,7 +462,11 @@ class V3PetWindow(PetWindow):
         return dict(self._v3_stats)
 
     def head_anchor(self) -> QPoint:
-        """头顶中心（全局坐标）：按 rig 实际头顶算。"""
+        """头顶中心（全局坐标）：按 rig 实际头顶算；姿势变体里用 scene 自己的头顶。"""
+        got = self._v3_scene_active()
+        if got is not None:
+            local = self._v3_scene_local(got[0], got[0].head_top)
+            return self.mapToGlobal(QPoint(round(local.x()), round(local.y() + self._sh * 0.04)))
         rig = self._v3_rig
         foot_y = rig.v3_foot[1]
         top = rig.v3_visible[1]
@@ -556,7 +570,7 @@ class V3PetWindow(PetWindow):
         program = self._program_active(f, dt)
         fast = (program or self._v3_animator.interaction_active
                 or moving_hair or pose.star_effects or self._v3_side_blink is not None
-                or any(pose.pinch_delta) or 0.0 < scene_w < 1.0)
+                or any(pose.pinch_delta) or self._v3_scene_popping)
         still = affine_ok(pose)
         soon = (pose.eye_scale < 1 or 0 <= animator.blink_start - animator.time <= LEAD
                 or self._v3_sway.until_start(now) <= LEAD or posing)
@@ -580,6 +594,7 @@ class V3PetWindow(PetWindow):
             if scene_same and key is not None and key == self._v3_key and self._v3_image is not None:
                 return
             if (self._v3_image is not None and self._v3_deferred_run < MAX_DEFERRED
+                    and not self._v3_scene_left      # 刚离开 scene：不能再留着进 scene 前的旧站姿图
                     and prewarmer.would_block(self._v3_settings, pose)):
                 # 这一帧要现算的东西正被后台占着锁：先留着上一张图，下一 tick 再画，不让界面等锁。
                 # V2 变换（_frame）照常更新，下面的遮罩也照常按“旧图 + 新变换”重建，和屏幕上一致。
@@ -602,7 +617,7 @@ class V3PetWindow(PetWindow):
         # 判据是“轮廓相对上次遮罩漂了多少像素”，不是“有没有按着鼠标”：setMask 是原生调用，
         # 约 4ms/次，按着摸头时每帧重建会让每帧多花 5ms。
         if (self._v3_mask_force or now - self._v3_mask_at >= MASK_INTERVAL
-                or self._v3_mask_stale(f) or self._v3_animator.lift.active or 0.0 < scene_w < 1.0):
+                or self._v3_mask_stale(f) or self._v3_animator.lift.active):
             self._update_mask(now)
         self.update()
         if self._fps_overlay is not None:
@@ -642,22 +657,25 @@ class V3PetWindow(PetWindow):
         self._v3_scenes = left or None
 
     def _v3_scene_images(self, scene) -> SceneImages | None:
-        """这个 scene 在当前尺寸/DPR 下的图像。后台已经好了就取；没好就只同步载入这一个。"""
+        """这个 scene 在当前尺寸/DPR 下的图像。
+        缓存里有就取；后台做好了就收下；后台还在做就不等（_v3_scene_pending = True，返回 None，界面不卡）；
+        没有后台任务（缓存被挤掉、预热关了）才同步载入这一个。载入失败：以后不再用这个 scene。"""
         key = self._v3_scene_key(scene)
         hit = self._v3_scene_cache.get(key)
         if hit is not None:
             self._v3_scene_cache.move_to_end(key)
             return hit
-        job = self._v3_scene_jobs.pop(key, None)
+        job = self._v3_scene_jobs.get(key)
         arrays = None
         if job is not None:
-            if job.done():
-                try:
-                    arrays = job.result()
-                except Exception:
-                    arrays = None
-            else:
-                job.cancel()
+            if not job.done():
+                self._v3_scene_pending = True
+                return None
+            del self._v3_scene_jobs[key]
+            try:
+                arrays = job.result()
+            except Exception:
+                arrays = None
         if arrays is None:
             t0 = time.perf_counter()
             try:
@@ -707,24 +725,28 @@ class V3PetWindow(PetWindow):
         self.moved.emit()
 
     def _v3_scene_update(self, now: float, f, raw):
-        """每帧：scene 显示权重、窗口宽度、覆盖窗、呼吸/敲头/摸头的仿射、金星。
+        """每帧：显示哪个 scene、窗口宽度、覆盖窗、呼吸/敲头/摸头/进入弹跳的仿射、金星。
+        scene 之间、scene 与站姿之间都是直接切换（不淡化：两个轮廓不同的图叠起来必然有叠影）；
+        目标 scene 还在后台载入时先保持现在的画面。
         返回本帧 scene 的绘制签名："off" = 没有 scene；None = 每帧都要重画（有金星）。"""
-        fade = self._v3_scene_fade
+        self._v3_scene_pending = False
         target = v3_scene.scene_for(self.sprite_name, self._v3_scenes)
         if target is not None and self._v3_scene_images(target) is None:
-            target = None                                    # 载入失败：回退站姿姿态
-        if self._v3_scene_shown is None:
-            self._v3_scene_shown = target
-        shown = self._v3_scene_shown
-        want = target is not None and target is shown       # 换了 scene：先把旧的淡出
-        w = fade.snap(False, now) if self._v3_scene_interrupted() else fade.step(want, now)
-        if w <= 0.0 and not want:
-            self._v3_scene_shown = shown = None
-        previous, self._v3_scene_w = self._v3_scene_w, w
-        if (w > 0.0) != (previous > 0.0):
+            # 还没载好（pending）就保持现在显示的；载入失败（scene 已被丢掉）就回站姿
+            target = self._v3_scene_shown if self._v3_scene_pending else None
+        shown = None if (target is None or self._v3_scene_interrupted()) else target
+        previous, self._v3_scene_shown = self._v3_scene_shown, shown
+        self._v3_scene_w = 1.0 if shown is not None else 0.0
+        self._v3_scene_left = previous is not None and shown is None
+        if shown is not previous:                           # 进入 / 换 / 离开：锚点、遮罩、金星坐标都变了
+            self._v3_scene_since = now
             self._v3_mask_force = True
             self._v3_animator._star_bursts = ()              # 金星的坐标系换了
-        if shown is None or w <= 0.0:
+            self.moved.emit()                                # 气泡、粒子的锚点换了：让控制器重新取
+        pop = v3_scene.enter_pop(now - self._v3_scene_since) if shown is not None else 1.0
+        self._v3_scene_popping = pop != 1.0
+        w = self._v3_scene_w
+        if shown is None:
             self._v3_scene_stars = None
             if self._v3_scene_overlay is not None and self._v3_scene_overlay.isVisible():
                 self._v3_scene_overlay.set_scene(None, None, 0.0, False)
@@ -734,12 +756,12 @@ class V3PetWindow(PetWindow):
                 self._v3_scene_collect()
             return "off"
         images = self._v3_scene_images(shown)
-        if images is None:
-            self._v3_scene_w = 0.0
+        if images is None:                                  # 刚被挤出缓存又没后台任务：同步载入失败
+            self._v3_scene_w, self._v3_scene_shown = 0.0, None
             return "off"
         self._v3_set_width(max(self.normal_width, math.ceil(2 * v3_scene.extra_half_width(shown) * self._v3_scale)))
         sy, angle = v3_scene.scene_affine(shown, raw.body_scale, raw.head_y, raw.head_roll,
-                                          v3_scene.poke_scale(f.sy))
+                                          v3_scene.poke_scale(f.sy), pop)
         if self._v3_scene_override is not None:
             sy, angle = self._v3_scene_override
         self._v3_scene_affine = (sy, angle)
@@ -826,6 +848,10 @@ class V3PetWindow(PetWindow):
 
     def mouth_anchor(self) -> QPoint:
         """嘴部中心（全局坐标）：跟随低头、点头和 V2 的压扁/倾斜/跳跃。"""
+        got = self._v3_scene_active()
+        if got is not None:
+            local = self._v3_scene_local(got[0], got[0].mouth)
+            return self.mapToGlobal(QPoint(round(local.x()), round(local.y())))
         f = getattr(self, "_frame", None)
         pose = self._v3_pose
         if f is None or pose is None:
@@ -839,6 +865,30 @@ class V3PetWindow(PetWindow):
         local = QPointF((rx - foot_x) * s, (ry - foot_y) * s - gap)
         p = self._v3_transform(f).map(local)
         return self.mapToGlobal(QPoint(round(p.x()), round(p.y())))
+
+    def v3_sleep_z_anchor(self, state: str):
+        """睡觉 Z 的出发点（全局坐标）。只有床上睡（bed）的姿势变体有自己的锚点；其余返回 None，走 V2 的。"""
+        scene = self._v3_scene_shown
+        if (state != "bed" or scene is None or scene.name != "bed" or scene.z_anchor is None
+                or self._v3_scene_w <= 0.0):
+            return None
+        local = self._v3_scene_local(scene, scene.z_anchor)
+        return self.mapToGlobal(QPoint(round(local.x()), round(local.y())))
+
+    def _sync_sleep_z(self, now: float, frame) -> None:
+        """同父类，只是 Z 窗换成能用 scene 锚点的 V3SleepZ。"""
+        state = ("bed" if frame.sprite.startswith("bed_") else "sleep" if frame.sprite == "sleep" else None)
+        if (self.sprite_name not in ("sleep", "bed") or self.motion_active
+                or self._dragging or self._falling or self.is_pressed):
+            state = None
+        if self._sleep_z is None:
+            if state is None:
+                return
+            from shion.pet_window import SPRITE_DIR
+            from shion.windowing import set_topmost
+            self._sleep_z = V3SleepZ(self, SPRITE_DIR / "fx_z.png")
+            set_topmost(self._sleep_z, bool(self.windowFlags() & Qt.WindowStaysOnTopHint))
+        self._sleep_z.advance(now, state)
 
     # ---- 手势（S3）----
     def _v3_transform(self, f) -> QTransform:
@@ -863,7 +913,37 @@ class V3PetWindow(PetWindow):
         gap = self._height * V2_FOOT_GAP_RATIO
         return np.array([p.x() / s + foot_x, (p.y() + gap) / s + foot_y])
 
+    # ---- 姿势变体里的命中、锚点（S9）----
+    def _v3_scene_active(self):
+        """scene 已经显示到可以点、可以对话的程度（权重 ≥ 0.5）→ (Scene, SceneImages)，否则 None。"""
+        scene = self._v3_scene_shown
+        if scene is None or self._v3_scene_w <= 0.0:
+            return None
+        images = self._v3_scene_cache.get(self._v3_scene_key(scene))
+        return None if images is None else (scene, images)
+
+    def _v3_scene_local(self, scene, point) -> QPointF:
+        """scene 像素（静止图）→ 窗口坐标（逻辑像素）。静止位置，不含呼吸/晃动。"""
+        s = self._v3_scale
+        o = local_origin(self, scene, s, 0.0)
+        return QPointF(o.x() + point[0] * s, o.y() + point[1] * s)
+
+    def _v3_scene_hit(self, got, pos):
+        """窗口坐标 → (区域, rig 点)：先撤销呼吸/摸头的仿射回到静止图，再查角色遮罩和 cheek/crown 椭圆。
+        家具像素不在角色遮罩里，返回 None（也点穿，见 _update_mask）。"""
+        scene, images = got
+        s = self._v3_scale
+        o = local_origin(self, scene, s, 0.0)
+        sy, angle = self._v3_scene_affine
+        x, y = v3_scene.to_rest(scene, ((pos.x() - o.x()) / s, (pos.y() - o.y()) / s), sy, angle)
+        zone = v3_scene.zone_at(scene, x, y, v3_scene.ArrayMask(images.alpha, images.scale, images.pad))
+        return zone, np.array(v3_scene.to_rig(scene, (x, y), self._v3_rig.v3_foot))
+
     def _v3_hit(self, pos):
+        got = self._v3_scene_active()
+        if got is not None:
+            zone, point = self._v3_scene_hit(got, QPointF(pos))
+            return zone, point, point
         point = self._to_rig(pos)
         if point is None:
             return None, None, None
@@ -897,7 +977,8 @@ class V3PetWindow(PetWindow):
             self._v3_gesture = "cheek"
             self._v3_cheek_started = False
             self._v3_cheek_local = local
-            self._v3_press_point = point
+            # 姿势变体里没有站姿的脸颊曲面：拎起用默认支点；横拉捏脸不响应（见 mouseMoveEvent）
+            self._v3_press_point = None if self._v3_scene_active() is not None else point
         elif self._caught_fall:
             self._v3_gesture = "idle"
         elif hit == "crown":
@@ -956,6 +1037,11 @@ class V3PetWindow(PetWindow):
             if up > LIFT_UP and up > LIFT_RATIO * abs(d.x()):
                 self._v3_begin_lift(e)
                 return
+            if self._v3_scene_active() is not None:     # 姿势变体：不捏脸，拖远了只提示“捏着脸往上提”
+                if distance > DRAG_THRESHOLD:
+                    self._v3_idle_moved = True
+                    self._v3_notify_ignored()
+                return
             if not self._v3_cheek_started and abs(d.x()) <= DRAG_THRESHOLD:
                 return
             if not self._v3_cheek_started:
@@ -997,6 +1083,7 @@ class V3PetWindow(PetWindow):
     def _v3_begin_lift(self, e) -> None:
         """脸颊上向上拖：V3 拎起反应 + 真实窗口跟着走（父类拖动：移动、下落、夹边、信号）。"""
         a = self._v3_animator
+        self._v3_scene_cut()      # 姿势变体：立刻切回站姿（不淡化），窗口恢复站姿宽度
         a.advance(0)
         point = self._v3_press_point
         pivot = self._v3_renderer.rig_point(point, a.pose) if point is not None else point
@@ -1008,6 +1095,20 @@ class V3PetWindow(PetWindow):
         self._animator.set_drag(False)  # V2 的拖动倾斜让给 V3 的 root_roll，不叠加
         self._v3_lift_follow()
         self._refresh(self._clock())
+
+    def _v3_scene_cut(self) -> None:
+        """拎起前：scene 不淡化，直接收掉（权重 0、家具窗隐藏、窗口宽度恢复、金星清掉）。"""
+        if self._v3_scene_w <= 0.0 and self._sw == self.normal_width:
+            return
+        self._v3_scene_w = 0.0
+        self._v3_scene_shown = None
+        self._v3_scene_stars = None
+        self._v3_animator._star_bursts = ()
+        if self._v3_scene_overlay is not None:
+            self._v3_scene_overlay.set_scene(None, None, 0.0, False)
+        self._v3_set_width(self.normal_width)
+        self._v3_mask_force = True
+        self._v3_key = None
 
     def _v3_lift_follow(self) -> None:
         disp = self.pos() - self._v3_lift_origin
@@ -1046,6 +1147,8 @@ class V3PetWindow(PetWindow):
                 a.release()
                 self.gesture.emit("cheek_release")
                 consumed = True
+            else:
+                consumed = self._v3_idle_moved     # 姿势变体里横拉过：不算点击
         elif kind == "crown":
             pos = (e.position().x(), e.position().y())
             delta = self._v3_head_gesture.move(pos, True)
@@ -1053,8 +1156,13 @@ class V3PetWindow(PetWindow):
                 a.stroke_head(delta)
             patting = self._v3_head_gesture.patting
             if self._v3_head_gesture.release():
-                point = self._to_rig(e.position())
-                neck_x = self._v3_rig.pivots["neck"][0]
+                scene = self._v3_scene_active()
+                if scene is not None:     # 姿势变体：金星落在点中的位置，左右按 scene 的头顶判断
+                    point = self._v3_scene_hit(scene, QPointF(e.position()))[1]
+                    neck_x = v3_scene.to_rig(scene[0], scene[0].head_top, self._v3_rig.v3_foot)[0]
+                else:
+                    point = self._to_rig(e.position())
+                    neck_x = self._v3_rig.pivots["neck"][0]
                 direction = 1 if point is None or point[0] >= neck_x else -1
                 a.knock_head(direction, point=tuple(point) if point is not None else (500., 150.))
                 self.knocked.emit(a.head_touch.stage == "protest")
@@ -1244,7 +1352,8 @@ class V3PetWindow(PetWindow):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         if not mask:
             p.setOpacity(w)
-            p.drawImage(rect, images.full)                              # 垫底：整张场景图，不动
+            if images.under is not None:
+                p.drawImage(rect, images.under)                         # 垫底：只有家具颜色，不动
         elif images.seam is not None:
             p.drawImage(rect, images.seam)                              # 遮罩：家具边上的静止缝带
         p.translate(px, py)

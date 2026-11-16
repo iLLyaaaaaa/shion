@@ -1,4 +1,4 @@
-"""S9：V3 窗口里的姿势变体（collapse / bed / desk）：淡化、遮罩、家具覆盖窗、窗口加宽、呼吸极值帧。"""
+"""S9：V3 窗口里的姿势变体（collapse / bed / desk）：直接切换与进入弹跳、遮罩、家具覆盖窗、窗口加宽、呼吸极值帧。"""
 import math
 
 import numpy as np
@@ -9,7 +9,7 @@ from scipy import ndimage as nd
 from shion import v3_scene as vs
 from shion.v3_scene_view import local_origin
 from tests.test_v3_display import make, qapp  # noqa: F401  (qapp 是 fixture)
-from tests.test_v3_scene import EXTREMES, near_furniture
+from tests.test_v3_scene import EXTREMES, near_furniture, rest_opaque
 from tests.test_v3_state_pose import run
 
 SCENE_STATES = ("collapse", "bed", "desk")
@@ -63,24 +63,114 @@ def scene_px(w, scene, x, y):
     return o.x() + x * w._v3_scale, o.y() + y * w._v3_scale
 
 
-# ---- 淡化 ----
+# ---- 切换：直接切，不淡化 ----
 @pytest.mark.parametrize("state", SCENE_STATES)
-def test_scene_fades_in_over_point_three_seconds_and_out_again(qapp, windows, state):  # noqa: F811
+def test_scene_switches_without_blending(qapp, windows, state):  # noqa: F811
     w, t = windows(qapp)
     w.set_state("idle", animate=False)
     run(w, t, 0.3)
     assert w._v3_scene_w == 0.0 and w._v3_scene_shown is None
     w.set_state(state, animate=False)
-    frames = track(w, t, 0.6)
-    ws = [v for _, v in frames]
-    assert ws[-1] == 1.0 and all(b >= a for a, b in zip(ws, ws[1:]))
-    assert any(0.0 < v < 1.0 for v in ws)                              # 中间确实有过渡
-    full_at = next(sec for sec, v in frames if v == 1.0)
-    assert 0.25 <= full_at <= 0.40                                     # 0.3 秒到位（过渡期间 60 FPS，误差一两帧）
+    assert w._v3_scene_w == 1.0 and w._v3_scene_shown is w._v3_scenes[state]   # 第一帧就是 scene
+    assert {v for _, v in track(w, t, 0.6)} == {1.0}                    # 两个轮廓从不叠在一起
     w.set_state("idle", animate=False)
-    ws = [v for _, v in track(w, t, 0.6)]
-    assert ws[-1] == 0.0 and all(b <= a for a, b in zip(ws, ws[1:]))
-    assert w._v3_scene_shown is None
+    assert w._v3_scene_w == 0.0 and w._v3_scene_shown is None
+    assert {v for _, v in track(w, t, 0.6)} == {0.0}
+
+
+def test_scene_to_scene_switch_never_shows_the_standing_pose(qapp, windows):  # noqa: F811
+    w, t = windows(qapp)
+    settle(w, t, "bed", 0.8)
+    rendered = w.v3_stats["rendered"]
+    w.set_state("desk", animate=False)
+    seen = [(w._v3_scene_w, w._v3_scene_shown.name)]
+    for _ in range(40):
+        t[0] += w._timer.interval() / 1000
+        w.advance_to(t[0])
+        seen.append((w._v3_scene_w, w._v3_scene_shown.name))
+    assert set(seen) == {(1.0, "desk")}                                 # bed 直接变 desk，中间没有站姿
+    assert w.v3_stats["rendered"] == rendered                           # 站姿图一张都没画
+
+
+def test_leaving_a_scene_renders_a_fresh_standing_image_in_the_same_frame(qapp, windows):  # noqa: F811
+    w, t = windows(qapp)
+    settle(w, t, "bed", 0.8)
+    w._v3_prewarmer.would_block = lambda *args: True                    # 后台正占着锁：平时会把这一帧推迟
+    rendered, deferred = w.v3_stats["rendered"], w.v3_stats["deferred"]
+    w.set_state("idle", animate=False)
+    assert w._v3_scene_w == 0.0
+    assert w.v3_stats["rendered"] == rendered + 1 and w.v3_stats["deferred"] == deferred
+
+
+def test_entering_a_scene_pops_once(qapp, windows):  # noqa: F811
+    w, t = windows(qapp)
+    w.set_state("idle", animate=False)
+    run(w, t, 0.3)
+    w.set_state("bed", animate=False)
+    start, sy = t[0], [w._v3_scene_affine[0]]
+    times = [start]
+    for _ in range(40):
+        t[0] += 0.016
+        w.advance_to(t[0])
+        times.append(t[0])
+        sy.append(w._v3_scene_affine[0])
+    pop = [v for at, v in zip(times, sy) if at - start < vs.ENTER_POP[0]]
+    assert min(pop) < 0.985                                             # 压下去
+    late = [v for at, v in zip(times, sy) if at - start > vs.ENTER_POP[0] + 0.05]
+    assert min(late) >= 0.999 and max(late) <= 1.0125                   # 之后只剩呼吸
+
+
+class FakeJob:
+    """手动完成的后台任务：不开线程，测试里决定什么时候做好。"""
+
+    def __init__(self, fn, *args):
+        self.fn, self.args, self._result, self._done = fn, args, None, False
+
+    def finish(self):
+        self._result, self._done = self.fn(*self.args), True
+
+    def done(self):
+        return self._done
+
+    def result(self):
+        return self._result
+
+    def cancel(self):
+        return False
+
+    def cancelled(self):
+        return False
+
+
+def test_a_scene_still_loading_keeps_the_current_picture_and_never_blocks(qapp, windows, monkeypatch):  # noqa: F811
+    from shion.v3_window import V3PetWindow
+    jobs = {}
+
+    def prewarm(self):
+        self._v3_scene_jobs.clear()
+        for scene in dict.fromkeys(self._v3_scenes.values()):
+            job = FakeJob(vs.load_arrays, scene, self._v3_scale * self._v3_dpr)
+            self._v3_scene_jobs[self._v3_scene_key(scene)] = jobs[scene.name] = job
+
+    monkeypatch.setattr(V3PetWindow, "_v3_scene_prewarm", prewarm)
+    w, t = windows(qapp)
+    w.set_state("idle", animate=False)
+    run(w, t, 0.3)
+    assert set(jobs) == {"collapse", "bed", "desk"}
+    w.set_state("bed", animate=False)
+    run(w, t, 0.5)
+    assert w._v3_scene_w == 0.0 and w._v3_scene_shown is None           # 还没好：继续站姿
+    assert w._v3_scene_load_ms == []                                    # 没有同步载入（界面没等）
+    jobs["bed"].finish()
+    run(w, t, 0.1)
+    assert w._v3_scene_w == 1.0 and w._v3_scene_shown.name == "bed"
+    w.set_state("desk", animate=False)
+    run(w, t, 0.5)
+    assert w._v3_scene_shown.name == "bed" and w._v3_scene_w == 1.0     # desk 没好：继续 bed
+    assert w._v3_scene_load_ms == []
+    jobs["desk"].finish()
+    run(w, t, 0.1)
+    assert w._v3_scene_shown.name == "desk"                             # 好了：直接换
 
 
 def test_standing_pose_is_not_squashed_into_the_old_fallback(qapp, windows):  # noqa: F811
@@ -198,17 +288,18 @@ def test_standing_image_is_not_rendered_while_the_scene_is_fully_shown(qapp, win
     assert w.v3_stats["rendered"] > rendered and w._v3_scene_w == 0.0  # 回站姿后重画
 
 
-def test_interrupting_drops_the_scene_at_once_and_it_fades_back(qapp, windows):  # noqa: F811
+def test_interrupting_drops_the_scene_at_once_and_it_cuts_back(qapp, windows):  # noqa: F811
     w, t = windows(qapp)
     settle(w, t, "bed", 0.8)
     assert w._v3_scene_w == 1.0 and w.width() > w.normal_width + 2 * 64 - 1
-    w._v3_lifting = True                                               # 拎起：不淡化，直接切回站姿
+    w._v3_lifting = True                                               # 拎起：直接切回站姿
     run(w, t, 0.1)
     assert w._v3_scene_w == 0.0
     assert w._sw == w.normal_width and not w._v3_scene_overlay.isVisible()
     w._v3_lifting = False
-    ws = [v for _, v in track(w, t, 0.6)]
-    assert ws[-1] == 1.0 and 0.0 < ws[2] < 1.0                         # 放下后重新淡入
+    t[0] += 0.016
+    w.advance_to(t[0])
+    assert w._v3_scene_w == 1.0                                        # 放下后第一帧就切回 scene
     assert w._v3_scene_overlay.isVisible()
 
 
@@ -258,10 +349,10 @@ def test_no_seam_in_the_real_window_frame_at_breath_extremes(qapp, windows, stat
     a = vs.load_arrays(scene, w.v3_texture_scale)
     origin = local_origin(w, scene, w._v3_scale, a["pad"])
     ox, oy = round(origin.x() - left), round(origin.y() - top)
-    region = (a["full"][..., 3] >= 250) & near_furniture(a)
+    region = rest_opaque(a) & near_furniture(a)
     region = nd.binary_erosion(region, iterations=3)                    # 避开 1～2 像素的取整误差
     ys, xs = np.nonzero(region)
-    assert len(xs) > 2000
+    assert len(xs) > 1000
     fx, fy = xs + ox, ys + oy
     inside = (fx >= 0) & (fx < shown.shape[1]) & (fy >= 0) & (fy < shown.shape[0])
     assert (rest[fy[inside], fx[inside]] >= 250).mean() > 0.99          # 静止帧里这些像素确实不透明
@@ -291,3 +382,20 @@ def test_collapse_feet_and_hands_hold_still_in_the_real_window_frame(qapp, windo
     labels, _ = nd.label(now)
     sizes = np.bincount(labels.ravel())[1:]
     assert (sizes >= 0.01 * now.sum()).sum() == 1, (extreme, "pieces")  # 变形后仍是一整块
+
+
+@pytest.mark.parametrize("state", SCENE_STATES)
+def test_knock_leaves_no_still_outline_behind(qapp, windows, state):  # noqa: F811
+    """敲头压下去时，窗口里最高的不透明像素跟着往下走：没有不动的角色描线留在头顶（以前垫底是整张图，会留下黑边）。"""
+    w, t = windows(qapp, 260)
+    settle(w, t, state)
+    scene = w._v3_scenes[state]
+    rest, _ = frame_alpha(w, 1.0, 0.0)
+    pressed, _ = frame_alpha(w, 0.96, 0.0)
+    top = lambda alpha: int(np.nonzero((alpha >= 128).any(axis=1))[0].min())
+    expected = (1 - 0.96) * (scene.ground_y - scene.char_box[1]) * w._v3_scale
+    assert expected > 6
+    assert top(pressed) - top(rest) >= 0.8 * expected - 1, (state, top(pressed), top(rest), expected)
+    # 头顶那几行：压下去之后在原来的轮廓上方不该还有不透明像素
+    band = slice(top(rest), top(rest) + int(0.5 * expected))
+    assert (pressed[band] >= 128).sum() <= 0.02 * (rest[band] >= 128).sum() + 8
