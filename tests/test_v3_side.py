@@ -233,3 +233,129 @@ def test_auto_side_is_on_by_default_and_env_turns_it_off(qapp, monkeypatch):  # 
         w2.advance_to(t[0])
     assert w2.cheek_side == "left" and w2._v3_side_target is None    # 关掉后左半边也保持左鼓
     w2.close()
+
+
+# ---- R1：启动按存档位置选侧、丢弃一侧后补一次 GC ----
+from concurrent.futures import Future  # noqa: E402
+import types  # noqa: E402
+import weakref  # noqa: E402
+
+from PySide6.QtCore import Qt  # noqa: E402
+
+from shion.v3_display import startup_side  # noqa: E402
+
+SCREEN = [(0, 0, 800, 800)]
+
+
+def test_startup_side_from_the_saved_position():
+    assert startup_side(None, None, 200, SCREEN) is None                 # 没有存档位置：默认右下角
+    assert startup_side(True, None, 200, SCREEN) is None                 # bool 不是位置
+    assert startup_side(50, None, 200, SCREEN) == "right"                # 窗口中心在左半
+    assert startup_side(600, 300, 200, SCREEN) == "left"
+    assert startup_side(270, None, 200, SCREEN) == "left"                # 中线死区内保持默认（左鼓）
+    assert startup_side(5000, 300, 200, SCREEN) is None                  # 那块屏被拔了
+    two = [(0, 0, 800, 800), (800, 0, 800, 800)]
+    assert startup_side(850, 300, 200, two) == "right"                   # 第二块屏的左半
+    assert startup_side(1400, 300, 200, two) == "left"
+
+
+@pytest.mark.parametrize("height", [160, 200, 260, 320])
+def test_the_window_width_estimate_matches_the_real_window(qapp, height):  # noqa: F811
+    from shion.v3_display import WINDOW_MARGIN_X, WINDOW_WIDTH_RATIO
+    w, _ = make(qapp, height, 1.5)
+    assert abs(w.width() - (round(WINDOW_WIDTH_RATIO * height) + 2 * WINDOW_MARGIN_X)) <= 6
+    w.close()
+
+
+def _hinted(qapp_, monkeypatch, hint, x):
+    """按提示直接构造（不经 make）；rig 缓存换成空的，记录实际加载过哪些侧。"""
+    loaded = []
+    real = vw.load_rig
+    monkeypatch.setattr(vw, "_RIGS", {})
+    monkeypatch.setattr(vw, "load_rig", lambda side: (loaded.append(side), real(side))[1])
+    t = [100.0]
+    w = vw.V3PetWindow(height=200, clock=lambda: t[0], autostart=False, debug=False,
+                       pixel_ratio=1.5, initial_side=hint)
+    w.setAttribute(Qt.WA_DontShowOnScreen)
+    w.set_state("idle", animate=False)
+    w.move(x - w.width() // 2, 200)
+    w.show()
+    t[0] += .1
+    w.advance_to(t[0])
+    return w, t, loaded
+
+
+def test_a_right_hint_on_the_left_half_loads_only_the_right_side(qapp, monkeypatch):  # noqa: F811
+    w, t, loaded = _hinted(qapp, monkeypatch, "right", 150)
+    assert loaded == ["right"] and w.cheek_side == "right"
+    assert w._v3_gc_wait is None and list(vw._RIGS) == ["right"]       # 没有丢弃过任何一侧
+    w.close()
+
+
+def test_a_wrong_hint_is_corrected_on_first_show(qapp, monkeypatch):  # noqa: F811
+    w, t, loaded = _hinted(qapp, monkeypatch, "left", 150)
+    assert loaded == ["left", "right"] and w.cheek_side == "right"
+    assert list(vw._RIGS) == ["right"]                                  # 左侧丢了
+    assert w._v3_gc_wait is None and w.v3_stats["gc_ms"] > 0.0          # 随后那一帧就补了一次 GC（任务已结束、没在互动）
+    w.close()
+
+
+def test_no_hint_means_left_and_auto_side_off_ignores_the_hint(qapp, monkeypatch):  # noqa: F811
+    w, t, loaded = _hinted(qapp, monkeypatch, None, 650)
+    assert loaded == ["left"] and w.cheek_side == "left"
+    w.close()
+    monkeypatch.setenv(vw.AUTO_SIDE_ENV, "0")
+    w, t, loaded = _hinted(qapp, monkeypatch, "right", 150)
+    assert loaded == ["left"] and w.cheek_side == "left"
+    w.close()
+
+
+def test_prewarmer_close_returns_only_tasks_that_are_running(qapp):  # noqa: F811
+    w, t = _window(qapp, 650)
+    pre = w._v3_prewarmer
+    queued, running, done = Future(), Future(), Future()
+    running.set_running_or_notify_cancel()
+    done.set_result(1)
+    pre.pending = {("a",): queued, ("b",): running, ("c",): done}
+    assert pre.close() == [running] and queued.cancelled() and pre.pending == {}
+    w.close()
+
+
+def test_gc_runs_once_after_a_drop_when_tasks_are_done_and_idle(qapp, monkeypatch):  # noqa: F811
+    w, t = _window(qapp, 650)
+    calls = []
+    monkeypatch.setattr(vw, "gc", types.SimpleNamespace(collect=lambda *a: calls.append(1) or 0))
+    running = Future()
+    running.set_running_or_notify_cancel()
+    w._v3_gc_wait = [running]
+    w._v3_side_step(t[0])
+    assert not calls                                   # 后台任务还在跑
+    running.set_result(None)
+    monkeypatch.setattr(w, "_v3_busy", lambda: True)
+    w._v3_side_step(t[0])
+    assert not calls                                   # 在互动，等停手
+    monkeypatch.setattr(w, "_v3_busy", lambda: False)
+    w._v3_side_step(t[0])
+    assert calls == [1] and w._v3_gc_wait is None and w.v3_stats["gc_ms"] >= 0.0
+    w._v3_side_step(t[0])
+    assert calls == [1]                                # 只做一次
+    w.close()
+
+
+def test_the_released_side_is_really_freed_and_gc_ran_once(qapp, monkeypatch):  # noqa: F811
+    w, t = _window(qapp, 650)
+    w.move(150 - w.width() // 2, 200)
+    assert _run(w, t, 0.4, until=lambda: w.cheek_side == "right")
+    left = next(r for k, r in w._v3_renderers.items() if k[0] == "left")
+    rig_ref, renderer_ref = weakref.ref(left.rig), weakref.ref(left)
+    del left
+    calls = []
+    real_gc = vw.gc
+    monkeypatch.setattr(vw, "gc", types.SimpleNamespace(
+        collect=lambda *a: (calls.append(1), real_gc.collect())[1]))
+    _run(w, t, 310)
+    assert not any(k[0] == "left" for k in w._v3_renderers) and "left" not in vw._RIGS
+    assert calls == [1] and w._v3_gc_wait is None
+    assert rig_ref() is None and renderer_ref() is None
+    w.close()
+    vw.shared_rig("left")

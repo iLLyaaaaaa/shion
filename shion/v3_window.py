@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import gc
 import math
 import os
 import time
@@ -115,17 +116,23 @@ class V3PetWindow(PetWindow):
     # 在脸颊以外按住拖动超过点击容差（窗口不动）：控制器用它提示“捏着脸往上提”。
     drag_ignored = Signal()
 
+    def __init__(self, *args, initial_side: str | None = None, **kwargs):
+        self._v3_initial_side = initial_side
+        super().__init__(*args, **kwargs)
+
     # ---- 尺寸与渲染器 ----
     def _v3_setup(self) -> None:
         if getattr(self, "_v3_ready", False):
             return
         from v3proto.animation import Animator, Settings
-        self._v3_side = "left"
-        self._v3_rig = shared_rig("left")
-        self._v3_geometry = None  # 窗口几何只按第一次加载的 rig 算，换边不改窗口
         # 按屏幕位置换边：右鼓用 S8 画好的素材（assets/sprites/v3/right）。
         # 设环境变量 SHION_V3_AUTO_SIDE=0 可固定左鼓。
         self.auto_side = os.environ.get(AUTO_SIDE_ENV) != "0"
+        # 启动时按存档位置先猜一侧（app.run 传入），免得先建左侧再丢掉；猜错了首次显示会纠正。
+        initial = getattr(self, "_v3_initial_side", None)
+        self._v3_side = initial if self.auto_side and initial in ("left", "right") else "left"
+        self._v3_rig = shared_rig(self._v3_side)
+        self._v3_geometry = None  # 窗口几何只按第一次加载的 rig 算，换边不改窗口
         self._v3_side_started = False
         self._v3_side_geom = None
         self._v3_side_since = 0.0
@@ -169,7 +176,8 @@ class V3PetWindow(PetWindow):
         self._v3_mask_force = True
         self._v3_mask_state = None
         self._v3_stats = {"refresh": 0, "rendered": 0, "masks": 0,
-                          "affine": 0, "mesh": 0, "side_switches": 0, "deferred": 0}
+                          "affine": 0, "mesh": 0, "side_switches": 0, "deferred": 0, "gc_ms": 0.0}
+        self._v3_gc_wait: list | None = None  # 丢掉一侧后待做的一次 GC：还在跑的后台任务（空表 = 马上可做）
         self._v3_deferred_run = 0  # 当前连续推迟了几帧
         self._v3_sway = None
         # 状态姿态（S6）：静态部分缓动；周期动作（点头/哈欠/画圈/咀嚼）直接叠加；
@@ -283,11 +291,15 @@ class V3PetWindow(PetWindow):
 
     def _v3_drop_side(self, side: str) -> None:
         """释放一侧：渲染器、预热器、预热缓存和 rig 本身。"""
+        running = self._v3_gc_wait or []
         for key in [k for k in self._v3_renderers if k[0] == side]:
             self._v3_renderers.pop(key)
-            self._v3_prewarmers.pop(key).close()
+            running = running + self._v3_prewarmers.pop(key).close()
         self._v3_side_idle.pop(side, None)
         _RIGS.pop(side, None)
+        # 刚丢掉的一侧可能还有后台任务拿着引用、加上 _locked() 的引用环：立刻 GC 没用，
+        # 等任务结束且没在互动时再收一次（_v3_side_step）。
+        self._v3_gc_wait = running
 
     def _v3_side_startup(self) -> None:
         """第一次显示：按恢复后的位置直接设定侧，不播过渡。"""
@@ -314,6 +326,12 @@ class V3PetWindow(PetWindow):
         for side, since in list(self._v3_side_idle.items()):
             if side not in (self._v3_side, self._v3_side_target) and now - since >= SIDE_IDLE_RELEASE:
                 self._v3_drop_side(side)
+        if (self._v3_gc_wait is not None and all(f.done() for f in self._v3_gc_wait)
+                and not self._v3_busy()):
+            self._v3_gc_wait = None
+            started = time.perf_counter()
+            gc.collect()
+            self._v3_stats["gc_ms"] = round((time.perf_counter() - started) * 1000, 1)
         if not self.auto_side or not self._v3_side_started:
             return
         if self._v3_scene_w > 0.0:      # 姿势变体（S9）期间冻结：不换边，取消正在准备的；回站姿停稳后再按原规则补换

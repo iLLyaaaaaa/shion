@@ -43,6 +43,7 @@ from shion.usage_service import UsageService
 from shion.weekly import WorkTimer, count as weekly_count, report as weekly_report, week_start
 from shion.weekly_ui import WeeklyWindow
 from shion.limits import Limits, clean_last
+from shion.v3_display import pick_screen_rect
 
 log = logging.getLogger("shion.controller")
 
@@ -50,23 +51,6 @@ SIZES = (160, 200, 260, 320)
 STALE_PAUSE_GRACE = timedelta(minutes=30)  # 和工具最长保持时间一致：这么久没有 CC 活动才清遗留暂停
 
 
-def pick_screen_rect(rects, x, y, w, h):
-    """按存档里的窗口位置 (x, y, w, h) 选该放在哪块屏上，返回那块屏的可用区域；都不匹配返回 None。
-
-    优先包含窗口中心点的屏；没有 y（旧存档）或没找到，就看哪块屏的横向范围包含窗口中心 x。
-    """
-    cx = x + w // 2
-    if y is not None:
-        cy = y + h // 2
-        for r in rects:
-            rx, ry, rw, rh = r
-            if rx <= cx < rx + rw and ry <= cy < ry + rh:
-                return r
-    for r in rects:
-        rx, _, rw, _ = r
-        if rx <= cx < rx + rw:
-            return r
-    return None
 TICK_MS = 100
 ACTIVITY_REPEAT = timedelta(seconds=3)  # 同一句“在干什么”这么久内不重复弹
 ROOT = Path(__file__).resolve().parent.parent

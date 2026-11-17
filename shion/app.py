@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QSize, QStandardPaths, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
@@ -190,7 +190,16 @@ def run(renderer: str = "v2") -> int:
     from shion.affection import load_rules
     pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty, affection=load_rules())
 
-    win = window_class(renderer)(height=data.window.get("height", 200), debug=debug)
+    height = data.window.get("height", 200)
+    extra = {}
+    if renderer == "v3":  # 按存档位置先猜鼓哪一侧，免得先建一侧再丢掉（首次显示仍会按真实位置核对）
+        from shion.v3_display import startup_side
+        rects = []
+        for screen in QGuiApplication.screens():
+            g = screen.availableGeometry()
+            rects.append((g.x(), g.y(), g.width(), g.height()))
+        extra["initial_side"] = startup_side(data.window.get("x"), data.window.get("y"), height, rects)
+    win = window_class(renderer)(height=height, debug=debug, **extra)
     overlay = HeartOverlay()
     bubble = BubbleWindow()
     lang = resolve_language(

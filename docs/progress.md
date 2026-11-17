@@ -4,6 +4,27 @@
 
 ## 当前状态总览
 
+### 2026-11-17 V3 转正 / 发布 v3.0.0：计划已批准，进行中（本地提交，不 push）
+
+计划全文：`C:\Users\<user>\.claude\plans\` 下的 v3.0.0 计划（同内容摘要如下）。决策：只留 V3、无切换开关；`PetWindow` 保留为 `V3PetWindow` 父类骨架；周报立绘换 V3 预渲染图；程序图标用 V3 头像重做。一个会话只做一步，标【停点】处必须等用户确认，push 前必须等用户同意。
+
+- [x] R1 内存回升排查与修复（2026-11-17，本地提交，待用户真机验收；验收线改为默认高度 ≤260MB，260/320 高未达线，待用户决定）
+  - **测量已完成，未改代码**（真实应用，默认高度 200、DPR1.5、启动 25 秒后 5 次中位数，同一时段交替；数据 `build/v300/ws-r1*/ws.log`，不入库）：S7 末 `b663712` 6 轮 252.7MB（专用 157.4）；`7a74395` 254.1；`35751a3` 252.6；HEAD 6 轮 256.8（专用 161.1）；HEAD 关换边 256.7；HEAD 关 scene 252.8；V2 对照 185MB（与 S7 记录一致，说明机器状态没变）。今天各组离散只有 ±2MB。
+  - **结论 1**：不是 S8/S9 回归。S7 末源码今天也是 253MB，S7 记的“223 平均”是 199/197/247/251 两档的平均，今天稳定落在高档；S7 之后只多了 +4MB（scene）。
+  - **结论 2（真问题）**：窗口存档位置在屏幕左半时（启动应为右鼓）稳定 **289MB**（+32MB），峰值 304MB。原因：`__init__` 先建左侧 rig/渲染器并排预热，首次 show 才发现该用右侧，再建右侧并丢掉左侧；丢掉时左侧预热任务还在跑，引用到任务结束才放开，之后没有再触发 GC。实验（只在 `build/v300/` 的包装脚本里，未动仓库）：25 秒后手动 `gc.collect()` 回到 254MB；换边瞬间立刻 `gc.collect()` 无效（289MB）。
+  - **修复**（用户选“修启动并放宽线”）：①`Prewarmer.close()` 返回还在跑的 future；`_v3_drop_side` 记下它们，`_v3_side_step` 在任务都结束且不在互动时补一次 `gc.collect()`（耗时进 `v3_stats["gc_ms"]`）。②`v3_display.startup_side` + `V3PetWindow(initial_side=…)`：`app.run` 按存档位置先选侧，左半屏启动不再白建左侧；`pick_screen_rect` 从 controller 挪到 `v3_display`（controller 仍可导入）。`SHION_V3_AUTO_SIDE=0` 时忽略提示。
+  - **修复后实测**（同法，`ws-r1g/h/i/j`）：200 高右半屏 254.8MB（4 轮）、左半屏 255.8MB（4 轮，修复前 289MB，峰值 304→257MB）；260 高 271MB、320 高 290MB（各 2 轮，左右一致）。`v3_perf` 260@1.5 前后：待机 18.2→19.2FPS/总 CPU 0.54→0.65%，工作 16.4→17.0，捏脸 62.1→62.2FPS/P95 15.0→15.0ms，摸头 60.6→60.9，敲头 60.0→60.7/P95 16.4→16.2ms，都在波动内。
+  - **测试**：`tests/test_v3_side.py` 新增 13 项（startup_side、窗口宽度估算 ×4 高度、右提示只加载右侧、错提示被纠正、无提示/关换边、`close()` 返回值、GC 只做一次且等任务和互动、释放后弱引用已死）；该文件 32 passed。全仓 `-X faulthandler`：**1 failed、2996 passed、9 skipped**（24 分 41 秒，日志 `build/v300/r1-full.log`）；唯一失败 `test_install_hooks.py::test_corrupt_json_not_touched` 与本次无关：它的子进程用 GBK 解码输出，后台 PowerShell 管道里 stderr 为 None；单独跑和不带本次改动都 11 passed。
+  - **踩坑**：①PowerShell 5.1 读无 BOM 的 UTF-8 脚本时，中文注释可能吞掉换行，把下一行变成注释；脚本注释写纯 ASCII。②Git Bash 的 `sed` 替换里写 Windows 路径会把 ``、`` 当转义；改用 Python 或正斜线。③丢弃一侧后立刻 `gc.collect()` 没用（后台任务还拿着引用），要等任务结束。④`Out-File -Encoding utf8` 的日志要用 `utf-8-sig` 读。
+  - **分项**（`probe_mem.py`、`tools.v3_mem`）：`import scipy.ndimage` 约 +27～41MB 工作集（连带加载 linalg/sparse/special，共 198 个模块；仅 `scipy.linalg` 单独就 +23MB，无法只拿 ndimage）；单侧 Rig 加载后保留约 28MB、Renderer 约 17MB；rig.images 12.3MB、pink_cleanup 4.3MB、expression_plates 3.2MB 是最大几项；V3 比 V2 多 68MB（专用多 59MB）。运行期用到的 ndimage 函数只有 8 个：map_coordinates、gaussian_filter、distance_transform_edt、binary_dilation/closing/opening、label、zoom。
+- [ ] R2 默认 V3、删 `--renderer`、删 V2 专用画图代码与测试——先出删除清单，【停点 R2a】
+- [ ] R3 周报立绘与图标换 V3，随后删 V2 精灵 PNG——【停点 R3】
+- [ ] R4 打包：Shion.spec 收 V3 素材与依赖、bundle_smoke 加 V3 自检、ZIP 体积前后对比
+- [ ] R5 reviewer 审查——【停点 R5】
+- [ ] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】
+- [ ] R7 打包版真机验收（exe）与替换 Shion-dev——【停点 R7】
+- [ ] R8 推送前审查、合并 master、标签、Release——【停点 R8a】，用户同意后才 push
+
 ### 2026-11-16 S9 姿势变体（collapse / bed / desk）：第 5 步测量与文档收尾（本地提交，不 push）
 
 - **做了什么**：第 1 步素材（`tools/v3_scene.py` 把三张整图切块、分出角色与家具，`d5ca2d9`）；第 2～3 步显示（整图 + 呼吸仿射、点穿家具覆盖窗、窗口临时加宽，`98a8dd5`）；第 4 步互动、锚点、睡觉 Z、scene 期间冻结换边，及真机验收后的 4b 修复（`5806319`）；右鼓脸型衔接（`2f6d84d`）；第 5 步（本条）测量工具、测试、文档。S8 第 2 项抱电脑用户 2026-11-16 确认已验收，单独提交 `9af0aaf`。详细设计见 spec“姿势变体 scene（S9）”。

@@ -159,6 +159,43 @@ SIDE_DEAD_FRACTION = 0.05  # 中线两侧死区：可用宽度的 5%
 SIDE_DEAD_MIN = 40         # 至少 40 逻辑像素
 
 
+def pick_screen_rect(rects, x, y, w, h):
+    """按存档里的窗口位置 (x, y, w, h) 选该放在哪块屏上，返回那块屏的可用区域；都不匹配返回 None。
+
+    优先包含窗口中心点的屏；没有 y（旧存档）或没找到，就看哪块屏的横向范围包含窗口中心 x。
+    """
+    cx = x + w // 2
+    if y is not None:
+        cy = y + h // 2
+        for r in rects:
+            rx, ry, rw, rh = r
+            if rx <= cx < rx + rw and ry <= cy < ry + rh:
+                return r
+    for r in rects:
+        rx, _, rw, _ = r
+        if rx <= cx < rx + rw:
+            return r
+    return None
+
+
+# 只是估算（窗口还没建出来时用）：V3 窗口宽 ≈ 0.66 × 高度 + 两侧留边 64（实测 160/200/260/320 高为 0.659～0.663），
+# 窗口高 ≈ 高度 + 60。估错只影响启动时先建哪一侧，首次显示会按真实位置再核对一次。
+WINDOW_WIDTH_RATIO = 0.66
+WINDOW_MARGIN_X = 64
+WINDOW_EXTRA_HEIGHT = 60
+
+
+def startup_side(x, y, height: int, rects) -> str | None:
+    """按存档里的窗口位置推测启动时该鼓哪一侧；位置缺失或没有匹配的屏返回 None（= 默认右下角 = 左鼓）。"""
+    if not isinstance(x, int) or isinstance(x, bool):
+        return None
+    width = round(WINDOW_WIDTH_RATIO * height) + 2 * WINDOW_MARGIN_X
+    rect = pick_screen_rect(rects, x, y if isinstance(y, int) else None, width, height + WINDOW_EXTRA_HEIGHT)
+    if rect is None:
+        return None
+    return desired_side(x + width // 2, rect[0], rect[2], "left")
+
+
 def desired_side(center_x: float, avail_left: float, avail_width: float, current: str) -> str:
     """窗口中心在可用区域右半边 → 鼓左脸颊（"left"，朝屏幕中间）；左半边 → 鼓右脸颊（"right"）。
     中线两侧死区内保持当前侧。"""

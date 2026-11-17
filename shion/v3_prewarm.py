@@ -327,8 +327,12 @@ class Prewarmer:
             return eye_scale
         return min(ready, key=lambda level: abs(level - eye_scale))
 
-    def close(self) -> None:
+    def close(self) -> list:
+        """取消排队任务；返回取消不掉、还在跑的 future（窗口等它们结束后再做一次 GC）。"""
         self.closed = True
+        running = []
         for future in self.pending.values():
-            future.cancel()
+            if not future.cancel() and not future.done():
+                running.append(future)
         self.pending.clear()
+        return running
