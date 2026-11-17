@@ -17,7 +17,13 @@
   - **测试**：`tests/test_v3_side.py` 新增 13 项（startup_side、窗口宽度估算 ×4 高度、右提示只加载右侧、错提示被纠正、无提示/关换边、`close()` 返回值、GC 只做一次且等任务和互动、释放后弱引用已死）；该文件 32 passed。全仓 `-X faulthandler`：**1 failed、2996 passed、9 skipped**（24 分 41 秒，日志 `build/v300/r1-full.log`）；唯一失败 `test_install_hooks.py::test_corrupt_json_not_touched` 与本次无关：它的子进程用 GBK 解码输出，后台 PowerShell 管道里 stderr 为 None；单独跑和不带本次改动都 11 passed。
   - **踩坑**：①PowerShell 5.1 读无 BOM 的 UTF-8 脚本时，中文注释可能吞掉换行，把下一行变成注释；脚本注释写纯 ASCII。②Git Bash 的 `sed` 替换里写 Windows 路径会把 ``、`` 当转义；改用 Python 或正斜线。③丢弃一侧后立刻 `gc.collect()` 没用（后台任务还拿着引用），要等任务结束。④`Out-File -Encoding utf8` 的日志要用 `utf-8-sig` 读。
   - **分项**（`probe_mem.py`、`tools.v3_mem`）：`import scipy.ndimage` 约 +27～41MB 工作集（连带加载 linalg/sparse/special，共 198 个模块；仅 `scipy.linalg` 单独就 +23MB，无法只拿 ndimage）；单侧 Rig 加载后保留约 28MB、Renderer 约 17MB；rig.images 12.3MB、pink_cleanup 4.3MB、expression_plates 3.2MB 是最大几项；V3 比 V2 多 68MB（专用多 59MB）。运行期用到的 ndimage 函数只有 8 个：map_coordinates、gaussian_filter、distance_transform_edt、binary_dilation/closing/opening、label、zoom。
-- [ ] R2 默认 V3、删 `--renderer`、删 V2 专用画图代码与测试——先出删除清单，【停点 R2a】
+- [ ] R2 默认 V3、删 `--renderer`、删 V2 专用画图代码与测试——**进行中，停在【停点 R2a】，等用户确认清单**（2026-11-17）
+  - **已做（本地提交，不 push）**：默认 V3 `ddf2605`——`--renderer` 与 `window_class()` 已删，运行 / `SnapshotScene` / 截图 / 面板截图一律 `V3PetWindow`；新增 `tests/test_v3_default.py` 10 项（默认窗口、`--renderer` 被拒、v2.2.0 旧存档不报错且夹在屏内、拎脸提示只说一次、`--hook` / `--chat-mcp` / `--codex-observer` / `--snapshot` 入口；`--hook` 命令行格式未变）。该提交后 7 项老测试因默认外观变 V3 而失败（`test_pet_window` 2、`test_windowing[about]` 1、`test_make_media` 4），已列入迁移表，下个会话处理。
+  - **取证（只读，不入库，在 `build/v300/r2/`）**：`linecov.py` 逐行计数 + A 组（V3 测试 + 脚本化真实场景，542 passed）+ B 组（其余全部测试，`PetWindow` 顶替成 V3：2145 passed、123 failed，全是依赖 V2 画面的测试）；引用搜索 `refs-precise.txt`；**完整清单 `build/v300/r2/R2a-清单.md`**（删除清单分三张表：两条同时满足 / 只满足一条 / 保留；`--snapshot` 参数方案；测试迁移表 + 128 项失败名单 `migration-failures.txt`）。
+  - **对不上总计划预期的一处**：`behavior.jump_sample` 计划写“V3 在用”，证据是 V3 从不走 `_jump_framed`（V3 的 `_sequences` 恒空），A=0，已在清单第二节 b 列出。
+  - **取证踩坑**：①Qt 回调（`paintEvent`、`enterEvent`、`contextMenuEvent` 等）离屏测试里次数为 0 但真实窗口会调，grep 也搜不到，不能按“0 次”删；②引用搜索不能用 `\b`（`_v3_pose` 会算成 `_pose`），要用 PCRE 的 `(?<![A-Za-z0-9_])`；③V3 在松手时故意设 `_pat_mode = True` 让父类跳过点击，`_pat_mode` / `_pat_step` 必须留；④B 组测试会直接塞内部状态，B>0 不等于真实 V3 会走到。
+  - **用户批准计划时的修改**：删除准入 = 执行次数 0 且 V3 窗口 / 控制器 / tools 无调用；取证范围补待机定时器、周报、权限 / 检查点面板、聊天联动、Codex 观察；`tools/process_sprites.py` 的删除挪到 R3；开始删除前先打本地标签 `pre-r2-delete`；控制器里的 `hasattr(w, "knocked")` 等判断随测试夹具换成 V3 后再改（现在改会让 `test_controller` 用 V2 窗口的夹具直接崩）。
+  - **下一步**：用户确认清单后，新会话先打 `pre-r2-delete`，再按清单：测试迁移 → 删 `pet_window.py` V2 画图 / 手势 / 淡化 → 删 `behavior.py` 与截图参数 → 删 `tools/process_sheets.py`、`tests/test_process_sheets.py` 与 `v3_perf` 的 V2 分支；最后全仓测试、`--snapshot` 截图、spec / progress 更新。
 - [ ] R3 周报立绘与图标换 V3，随后删 V2 精灵 PNG——【停点 R3】
 - [ ] R4 打包：Shion.spec 收 V3 素材与依赖、bundle_smoke 加 V3 自检、ZIP 体积前后对比
 - [ ] R5 reviewer 审查——【停点 R5】
