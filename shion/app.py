@@ -155,17 +155,7 @@ def setup_logging(directory: Path, debug: bool) -> None:
         root.addHandler(logging.StreamHandler())
 
 
-def window_class(renderer: str = "v2"):
-    """--renderer v3 用 V3 纸偶显示；默认 V2，不写进存档。"""
-    if renderer == "v3":
-        from shion.v3_window import V3PetWindow
-        return V3PetWindow
-    if renderer != "v2":
-        raise ValueError(f"未知渲染器：{renderer}")
-    return PetWindow
-
-
-def run(renderer: str = "v2") -> int:
+def run() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Shion")
     app.setApplicationVersion(__version__)
@@ -191,15 +181,15 @@ def run(renderer: str = "v2") -> int:
     pet_state = state_mod.PetState(data, now, config, on_change=scheduler.mark_dirty, affection=load_rules())
 
     height = data.window.get("height", 200)
-    extra = {}
-    if renderer == "v3":  # 按存档位置先猜鼓哪一侧，免得先建一侧再丢掉（首次显示仍会按真实位置核对）
-        from shion.v3_display import startup_side
-        rects = []
-        for screen in QGuiApplication.screens():
-            g = screen.availableGeometry()
-            rects.append((g.x(), g.y(), g.width(), g.height()))
-        extra["initial_side"] = startup_side(data.window.get("x"), data.window.get("y"), height, rects)
-    win = window_class(renderer)(height=height, debug=debug, **extra)
+    # 按存档位置先猜鼓哪一侧，免得先建一侧再丢掉（首次显示仍会按真实位置核对）
+    from shion.v3_display import startup_side
+    from shion.v3_window import V3PetWindow
+    rects = []
+    for screen in QGuiApplication.screens():
+        g = screen.availableGeometry()
+        rects.append((g.x(), g.y(), g.width(), g.height()))
+    side = startup_side(data.window.get("x"), data.window.get("y"), height, rects)
+    win = V3PetWindow(height=height, debug=debug, initial_side=side)
     overlay = HeartOverlay()
     bubble = BubbleWindow()
     lang = resolve_language(
@@ -271,13 +261,14 @@ class SnapshotScene:
     """一次创建、按假时钟连续取帧。调用者负责触发动作和 close。"""
 
     def __init__(self, state: str = "idle", height: int = 200, activity: str = "normal",
-                 *, seed: int | None = None, scale: int = 1, renderer: str = "v2"):
+                 *, seed: int | None = None, scale: int = 1):
+        from shion.v3_window import V3PetWindow
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.time = [100.0]
         self.scale = scale
-        self.win = window_class(renderer)(height=height, clock=lambda: self.time[0], autostart=False,
-                             debug=False, rng=random.Random(seed) if seed is not None else None,
-                             pixel_ratio=scale if seed is not None or scale != 1 else None)
+        self.win = V3PetWindow(height=height, clock=lambda: self.time[0], autostart=False,
+                               debug=False, rng=random.Random(seed) if seed is not None else None,
+                               pixel_ratio=scale if seed is not None or scale != 1 else None)
         self.win.setAttribute(Qt.WA_DontShowOnScreen)
         self.win.set_activity(activity)
         self.win.set_calm(activity == "quiet")
@@ -322,7 +313,6 @@ def render_snapshot(
     weight_shift: str | None = None,
     nod: bool = False,
     desk_blink: str | None = None,
-    renderer: str = "v2",
 ) -> QImage:
     """离屏渲染一帧并返回 QImage。不显示窗口，不做单实例检查。
 
@@ -332,7 +322,7 @@ def render_snapshot(
     """
     # 不强制 offscreen：offscreen 平台没有任何字体，中文会变成方块；
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
-    scene = SnapshotScene(from_state or state, height, activity, renderer=renderer)
+    scene = SnapshotScene(from_state or state, height, activity)
     t, win = scene.time, scene.win
     if from_state:
         win.set_state(state)
@@ -424,12 +414,10 @@ def snapshot(
     cheek: str | None = None, tickle: bool = False, badge: bool = False, height: int = 200,
     activity: str = "normal", weight_shift: str | None = None, nod: bool = False,
     desk_blink: str | None = None,
-    renderer: str = "v2",
 ) -> int:
     """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
     img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, drag,
-                          cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink,
-                          renderer=renderer)
+                          cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
 
     ok = img.save(out, "PNG")
     if not ok:
@@ -470,12 +458,13 @@ def snapshot_icon_preview(out: str) -> int:
 
 def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
                           more: int = 0, expand: bool = False, with_pet: bool = False,
-                          *, scale: int = 1, fixed_scene: bool = False, renderer: str = "v2") -> QImage:
+                          *, scale: int = 1, fixed_scene: bool = False) -> QImage:
     """返回面板 QImage；默认保留真实屏幕定位，固定媒体场景隐藏窗口并在 2x 画布绘制。
 
     同意/否决按钮在 0.6 秒内是灰的，截图时按“已生效”画。
     """
     from shion.panel import ARM_DELAY, ConnectionPanel, InputPanel, PermissionPanel
+    from shion.v3_window import V3PetWindow
 
     if fixed_scene and kind != "permission":
         raise ValueError("固定媒体场景仅支持授权面板")
@@ -490,7 +479,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
     body = (400, 400, 100, 100)
     scene_pet = None
     if with_pet and kind != "eating":
-        scene_pet = window_class(renderer)(autostart=False, debug=False, **(
+        scene_pet = V3PetWindow(autostart=False, debug=False, **(
             {"height": 260, "clock": lambda: 100.0, "rng": random.Random(42), "pixel_ratio": scale}
             if fixed_scene else {}))
         if fixed_scene:
@@ -499,7 +488,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         body = scene_pet.body_rect()
     if kind == "eating":
         from shion.effects import CrumbOverlay
-        win = window_class(renderer)(autostart=False, debug=False)
+        win = V3PetWindow(autostart=False, debug=False)
         win.set_state("happy", animate=False)
         img = win.render_frame()
         t = [100.0]
@@ -512,7 +501,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         crumbs.fill(0)
         panel.render(crumbs)
         p = QPainter(img)
-        mouth = win.mapFromGlobal(win.mouth_anchor())  # V2 与原来同一位置；V3 是 rig 嘴部
+        mouth = win.mapFromGlobal(win.mouth_anchor())  # rig 嘴部
         p.drawImage(mouth.x() - panel.SIZE // 2, mouth.y() - 40, crumbs)
         p.end()
         win.close()
@@ -594,10 +583,9 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
 
 
 def snapshot_panel(out: str, kind: str, text: str = "git status", lang: str = "zh",
-                   more: int = 0, expand: bool = False, with_pet: bool = False,
-                   renderer: str = "v2") -> int:
+                   more: int = 0, expand: bool = False, with_pet: bool = False) -> int:
     """原面板截图入口，保留真实屏幕定位与 PNG 输出。"""
-    img = render_snapshot_panel(kind, text, lang, more, expand, with_pet, renderer=renderer)
+    img = render_snapshot_panel(kind, text, lang, more, expand, with_pet)
     ok = img.save(out, "PNG")
     if not ok:
         print(f"保存失败：{out}", file=sys.stderr)

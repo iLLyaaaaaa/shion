@@ -64,8 +64,6 @@ def main(argv: list[str] | None = None) -> int:
     motion.add_argument("--weight-shift", choices=["crouch", "left", "right"], help="截图用：0 秒触发换重心，配合 --at 0～0.6")
     motion.add_argument("--nod", action="store_true", help="截图用：working 在 0 秒点头，配合 --at 0～0.4")
     motion.add_argument("--desk-blink", choices=["single", "double"], help="截图用：desk 在 0 秒眨眼")
-    p.add_argument("--renderer", choices=["v2", "v3"], default="v2",
-                   help="立绘：v2 旧版精灵（默认）或 v3 纸偶开发预览；不写进存档")
     args = p.parse_args(argv)
 
     from shion import app
@@ -84,15 +82,14 @@ def main(argv: list[str] | None = None) -> int:
         return app.snapshot_icon_preview(args.snapshot)
     if args.snapshot and args.panel:
         return app.snapshot_panel(args.snapshot, args.panel, args.panel_text, args.lang,
-                                  args.panel_more, args.panel_expand, args.with_pet,
-                                  renderer=args.renderer)
+                                  args.panel_more, args.panel_expand, args.with_pet)
     if args.snapshot:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
                             args.from_state, jump=args.jump, drag=args.drag,
                             cheek=args.cheek, tickle=args.tickle, badge=args.badge,
                             height=args.height, activity=args.activity, weight_shift=args.weight_shift,
-                            nod=args.nod, desk_blink=args.desk_blink, renderer=args.renderer)
-    return app.run(renderer=args.renderer)
+                            nod=args.nod, desk_blink=args.desk_blink)
+    return app.run()
 
 
 if __name__ == "__main__":

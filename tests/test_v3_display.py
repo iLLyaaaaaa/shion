@@ -1,4 +1,4 @@
-"""S1: --renderer v3 entry, state → V3 expression mapping and texture scale."""
+"""S1: V3 display entry, state → V3 expression mapping and texture scale."""
 import time
 import numpy as np
 import pytest
@@ -98,15 +98,13 @@ def test_set_height_keeps_feet_and_set_state_changes_expression(qapp):
     w.close()
 
 
-def test_snapshot_entry_selects_the_renderer(qapp, tmp_path):
-    from shion.app import SnapshotScene, snapshot, window_class
+def test_snapshot_entry_uses_the_v3_window(qapp, tmp_path):
+    from shion.app import SnapshotScene, snapshot
     from shion.v3_window import V3PetWindow
-    assert window_class() is PetWindow and window_class("v2") is PetWindow
-    assert window_class("v3") is V3PetWindow
     with SnapshotScene("idle", 200) as scene:
-        assert type(scene.win) is PetWindow
+        assert type(scene.win) is V3PetWindow
     out = tmp_path / "v3.png"
-    assert snapshot(str(out), "happy", renderer="v3") == 0
+    assert snapshot(str(out), "happy") == 0
     from PIL import Image
     with Image.open(out) as im:
         assert np.asarray(im.convert("RGBA"))[..., 3].any()
@@ -255,7 +253,7 @@ def test_head_anchor_is_near_the_top_of_the_head(qapp):
 
 def test_panel_snapshot_with_v3_pet(qapp):
     from shion.app import render_snapshot_panel
-    img = render_snapshot_panel("permission", with_pet=True, renderer="v3")
+    img = render_snapshot_panel("permission", with_pet=True)
     assert not img.isNull() and img.width() > 0
 
 
