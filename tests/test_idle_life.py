@@ -155,10 +155,11 @@ def alpha(image):
     return np.frombuffer(image.constBits(), np.uint8).reshape(image.height(), image.bytesPerLine() // 4, 4)[:, :image.width(), 3].copy()
 
 
-@pytest.mark.parametrize("kind", ["crouch", "left", "right"])
+@pytest.mark.parametrize("kind", ["quiet", "normal", "lively"])
 def test_snapshot_cli_can_preview_weight_shift_and_size(qapp, tmp_path, kind):
+    """`--weight-shift` 是 V2 帧的截图参数，已删除；这里保留“四档大小 + 三档活跃度的截图可用”。"""
     from shion.__main__ import main
     out = tmp_path / f"{kind}.png"
-    assert main(["--snapshot", str(out), "--height", "320", "--weight-shift", kind, "--at", ".3"]) == 0
+    assert main(["--snapshot", str(out), "--height", "320", "--activity", kind, "--at", ".3"]) == 0
     image = QImage(str(out))
     assert not image.isNull() and image.height() > 320

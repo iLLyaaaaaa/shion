@@ -210,3 +210,45 @@ def test_snapshot_entry_renders_the_v3_pet_and_a_panel(qapp, tmp_path):  # noqa:
         assert main(["--snapshot", str(out), *args]) == 0
         with Image.open(out) as im:
             assert np.asarray(im.convert("RGBA"))[..., 3].any()
+
+
+@pytest.mark.parametrize("flag", [["--cheek", "left"], ["--tickle"], ["--drag"], ["--weight-shift", "crouch"],
+                                  ["--desk-blink", "single"], ["--face", "left"]])
+def test_removed_v2_snapshot_flags_are_rejected(flag, tmp_path, capsys):
+    from shion.__main__ import main
+    with pytest.raises(SystemExit) as stop:
+        main(["--snapshot", str(tmp_path / "x.png"), *flag])
+    assert stop.value.code == 2
+    assert flag[0] in capsys.readouterr().err
+
+
+def test_gesture_and_side_choices_match_the_app_constants():
+    from shion import app
+    from shion.__main__ import main
+    assert app.GESTURES == ("pinch", "pat", "knock", "tickle", "lift") and app.SIDES == ("left", "right")
+    for bad in (["--gesture", "cheek"], ["--side", "middle"]):
+        with pytest.raises(SystemExit) as stop:
+            main(["--snapshot", "x.png", *bad])
+        assert stop.value.code == 2
+
+
+def test_snapshot_gesture_and_side_render_distinct_v3_frames(tmp_path):
+    """每次都是新进程（后台预热的缓存是冷的）：手势截图必须真的带出手势，而不是预热没好的静态帧。"""
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+
+    def frame(*args):
+        out = tmp_path / ("-".join(a.strip("-") for a in args) + ".png")
+        result = subprocess.run([sys.executable, "-m", "shion", "--snapshot", str(out), "--at", "0.6", *args],
+                                cwd=root, capture_output=True, timeout=120)
+        assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+        return out.read_bytes()
+
+    seen = {frame()}
+    for gesture in ("pinch", "pat", "knock", "tickle", "lift"):
+        data = frame("--gesture", gesture)
+        assert data not in seen, gesture  # 每个手势都和待机、彼此不同
+        seen.add(data)
+    assert frame("--side", "left") != frame("--side", "right")  # 鼓脸颊的一侧不同

@@ -22,8 +22,8 @@ from PySide6.QtGui import QBitmap, QGuiApplication, QImage, QPainter, QRegion, Q
 from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREATH_AMP,
                             WORKING_BREATH_AMP, WORKING_BREATH_PERIOD)
 from shion.behavior import BELLY_LIFT_DISTANCE, TICKLE_SPEECH_SECONDS, TICKLE_STOP_SECONDS
-from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_CACHE_MAX,
-                              MASK_GROW, PetWindow)
+from shion.pet_window import (DRAG_THRESHOLD, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, MASK_GROW,
+                              PetWindow)
 from shion.v3_display import (REST_POSE, STATE_EXPRESSIONS, arms_for, V2_FOOT_GAP_RATIO, StateMotion,
                               desired_side, draw_key, expression_for, frame_interval, hair_moving,
                               logical_scale, state_pose)
@@ -230,8 +230,6 @@ class V3PetWindow(PetWindow):
         self._sw = math.ceil(2 * half * self._v3_scale)
         self._sh = self._height
         self.normal_width = self._sw
-        self._pixmaps.clear()
-        self._sequences.clear()
         self._v3_renderer = self._renderer_for(self._height, dpr)
         self._v3_prewarmer = self._v3_prewarmers[self._v3_cache_key(self._v3_side, self._height, dpr)]
         self._v3_scene_sig = "off"
@@ -243,8 +241,6 @@ class V3PetWindow(PetWindow):
         self._v3_image = None
         self._v3_key = None
         self._v3_mask_force = True
-        if hasattr(self, "_mask_cache"):
-            self._mask_cache.clear()
 
     @staticmethod
     def _v3_cache_key(side: str, height: int, dpr: float) -> tuple:
@@ -526,7 +522,7 @@ class V3PetWindow(PetWindow):
     def _program_active(self, f, dt: float) -> bool:
         """V2 程序动作是否在快速变化。待机轻摇（约 1°、几秒一周期）不算。"""
         if (self.motion_active or self._dragging or self._falling or self.is_pressed
-                or self._drag_playback is not None or self._action_fade is not None
+                or self._drag_playback is not None
                 or self._jump_offset != 0):
             return True
         last = getattr(self, "_v3_last_frame", None)
@@ -545,8 +541,6 @@ class V3PetWindow(PetWindow):
         self._animator.idle_enabled = not (self.motion_active or self._dragging or self._falling
                                           or self.is_pressed or self._drag_playback is not None)
         f = self._animator.frame(now)
-        f = self._action_frame(now, f)
-        f = self._blend_action(now, f)
         f = self._without_v2_breath(f)
         shown = max(f.layers, key=lambda item: item[1])[0] if f.layers else f.sprite
         expression = expression_for(shown, self.sprite_name)
@@ -737,8 +731,6 @@ class V3PetWindow(PetWindow):
         self._sw = width
         self.setFixedSize(width + 2 * MARGIN_X, self.height())
         self.move(round(feet_x - self.width() / 2), self.y())
-        self._mask_cache.clear()
-        self._mask_key = None
         self.clamp_position()
         if self._press_global is not None:
             self._grab_offset += old_pos - self.pos()
@@ -1391,4 +1383,4 @@ class V3PetWindow(PetWindow):
             p.restore()
 
 
-__all__ = ["V3PetWindow", "shared_rig", "MARGIN_X", "MARGIN_TOP", "MASK_CACHE_MAX"]
+__all__ = ["V3PetWindow", "shared_rig", "MARGIN_X", "MARGIN_TOP"]

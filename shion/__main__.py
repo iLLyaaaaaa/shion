@@ -58,12 +58,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--panel-expand", action="store_true", help="截图用：展开长内容")
     motion = p.add_mutually_exclusive_group()
     motion.add_argument("--jump", action="store_true", help="截图用：0 秒时触发原地跳")
-    motion.add_argument("--cheek", choices=["left", "right", "release"], help="截图用：捏脸与松手")
-    motion.add_argument("--tickle", action="store_true", help="截图用：持续挠痒痒")
-    motion.add_argument("--drag", action="store_true", help="截图用：循环拖动帧，配合 --at 检查帧序列")
-    motion.add_argument("--weight-shift", choices=["crouch", "left", "right"], help="截图用：0 秒触发换重心，配合 --at 0～0.6")
     motion.add_argument("--nod", action="store_true", help="截图用：working 在 0 秒点头，配合 --at 0～0.4")
-    motion.add_argument("--desk-blink", choices=["single", "double"], help="截图用：desk 在 0 秒眨眼")
+    motion.add_argument("--gesture", choices=["pinch", "pat", "knock", "tickle", "lift"],
+                        help="截图用：捏脸 / 摸头 / 敲头 / 挠痒 / 拎起，让动画器走到手势的第 --at 秒")
+    p.add_argument("--side", choices=["left", "right"], default=None, help="截图用：鼓脸颊的一侧（不自动换边）")
     args = p.parse_args(argv)
 
     from shion import app
@@ -85,10 +83,9 @@ def main(argv: list[str] | None = None) -> int:
                                   args.panel_more, args.panel_expand, args.with_pet)
     if args.snapshot:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
-                            args.from_state, jump=args.jump, drag=args.drag,
-                            cheek=args.cheek, tickle=args.tickle, badge=args.badge,
-                            height=args.height, activity=args.activity, weight_shift=args.weight_shift,
-                            nod=args.nod, desk_blink=args.desk_blink)
+                            args.from_state, jump=args.jump, badge=args.badge,
+                            height=args.height, activity=args.activity, nod=args.nod,
+                            gesture=args.gesture, side=args.side)
     return app.run()
 
 

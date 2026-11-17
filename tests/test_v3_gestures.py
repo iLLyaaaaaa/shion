@@ -90,7 +90,7 @@ def click(w, pos):
 
 
 def assert_clean(w):
-    assert not w.is_pressed and not w._pat_mode and not w._cheek_mode and not w._belly_mode
+    assert not w.is_pressed and not w._pat_mode
     assert w._v3_gesture is None
 
 
@@ -120,7 +120,7 @@ def test_zones_are_found_by_v3_hit_test_not_v2_rectangles(qapp):
     assert len(kinds) == 3
     assert w._hit_zone(QPoint(0, 0)) == "outside"
     assert w._hit_zone(find(w, "crown")) == "body"  # V2 的“头”分区不再触发 V2 摸头
-    assert not w._is_head(find(w, "crown"))
+    assert not hasattr(w, "_is_head")  # V2 的“头”分区判断已删除
     w.close()
 
 
@@ -134,7 +134,7 @@ def test_cheek_pinch_emits_pull_once_then_release_and_never_clicked(qapp):
     move(w, start + QPoint(18, 0))
     assert spy.gesture == ["cheek_pull"]
     assert w._v3_animator.reaction.active and w._v3_animator.dragging
-    assert w._pose is None                          # 不用 V2 的脸颊精灵
+    assert not hasattr(w, "_pose")                  # 不用 V2 的脸颊精灵
     run_for(w, t, .2)
     assert w._timer.interval() == 16                # 互动期间 60 FPS
     release(w, start + QPoint(18, 0))
@@ -724,12 +724,12 @@ def test_v3_lift_hint_and_cheek_lift_lines_exist_in_every_language():
 # ---- S4：控制器 ----
 def test_drag_start_uses_cheek_lift_line_only_when_lifting(env):  # noqa: F811
     lines = env.ctl.lines._lines
-    env.win.lifting = True
+    env.win._v3_lifting = True  # lifting 是只读属性，直接置内部状态
     env.win.drag_started.emit()
     assert env.said[-1] in lines["cheek_lift"]
     env.win.drag_finished.emit()
     env.advance(6)
-    env.win.lifting = False
+    env.win._v3_lifting = False
     env.win.drag_started.emit()
     assert env.said[-1] in lines["drag"]
 
@@ -759,7 +759,6 @@ def test_first_start_hint_is_remembered_only_after_it_is_really_said(env, monkey
     import shion.controller as C
     timers = []
     monkeypatch.setattr(C.QTimer, "singleShot", staticmethod(lambda ms, fn: timers.append((ms, fn))))
-    env.win.knocked = object()                         # 假装是 V3 窗口
     env.ctl.say("别的话", priority=C.Priority.MEDIUM, category="startup")
     assert env.said == ["别的话"]
     env.ctl.arm_lift_hint()

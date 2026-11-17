@@ -261,14 +261,17 @@ class SnapshotScene:
     """一次创建、按假时钟连续取帧。调用者负责触发动作和 close。"""
 
     def __init__(self, state: str = "idle", height: int = 200, activity: str = "normal",
-                 *, seed: int | None = None, scale: int = 1):
+                 *, seed: int | None = None, scale: int = 1, side: str | None = None):
         from shion.v3_window import V3PetWindow
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.time = [100.0]
         self.scale = scale
         self.win = V3PetWindow(height=height, clock=lambda: self.time[0], autostart=False,
                                debug=False, rng=random.Random(seed) if seed is not None else None,
-                               pixel_ratio=scale if seed is not None or scale != 1 else None)
+                               pixel_ratio=scale if seed is not None or scale != 1 else None,
+                               initial_side=side)
+        if side is not None:
+            self.win.auto_side = False  # 截图指定了鼓哪一侧：不要再按位置换边
         self.win.setAttribute(Qt.WA_DontShowOnScreen)
         self.win.set_activity(activity)
         self.win.set_calm(activity == "quiet")
@@ -296,7 +299,53 @@ class SnapshotScene:
         self.close()
 
 
-def render_snapshot(
+GESTURES = ("pinch", "pat", "knock", "tickle", "lift")
+SIDES = ("left", "right")
+
+
+def apply_snapshot_gesture(win, gesture: str, at: float) -> None:
+    """让真实窗口的 V3 动画器按确定性输入走到手势的第 at 秒（输入来自 v3proto 的 *_scenario）。"""
+    animator = win._v3_animator
+    pivot = (325.0, 586.0) if win._v3_side == "left" else (543.0, 586.0)  # 脸颊按下点（与窗口的默认拎起支点一致）
+    if gesture == "pinch":
+        start = animator.clock
+        animator.press(pivot, now=start)
+        steps = max(1, round(at * 60))
+        for i in range(steps + 1):
+            moment = at * i / steps
+            animator.advance(max(0.0, moment - (at * (i - 1) / steps if i else 0.0)), now=start + moment)
+            reach = min(1.0, moment / 0.3)
+            animator.drag((pivot[0] - 70.0 * reach, pivot[1]))
+    elif gesture == "pat":
+        from v3proto.head_scenarios import head_scenario
+        head_scenario(animator, "pat-right", at)
+    elif gesture == "knock":
+        from v3proto.head_scenarios import head_scenario
+        head_scenario(animator, "knock", at)
+    elif gesture == "tickle":
+        from v3proto.tickle_scenarios import tickle_scenario
+        tickle_scenario(animator, "rub", at)
+    elif gesture == "lift":
+        from v3proto.lift_scenarios import lift_scenario
+        lift_scenario(animator, "held", at, pivot)
+    else:
+        raise ValueError(f"未知手势：{gesture}")
+
+
+def render_snapshot(*args, **kwargs) -> QImage:
+    """离屏渲染一帧并返回 QImage（参数见 _render_snapshot）。V3 的预热在当前线程里做完，截图才确定。"""
+    import shion.v3_window as v3_window
+    from shion.v3_prewarm import InlineExecutor
+
+    previous = v3_window.PREWARM_EXECUTOR
+    v3_window.PREWARM_EXECUTOR = InlineExecutor()
+    try:
+        return _render_snapshot(*args, **kwargs)
+    finally:
+        v3_window.PREWARM_EXECUTOR = previous
+
+
+def _render_snapshot(
     state: str = "idle",
     bubble: str | None = None,
     at: float = 0.0,
@@ -304,25 +353,24 @@ def render_snapshot(
     lang: str = "zh",
     from_state: str | None = None,
     jump: bool = False,
-    drag: bool = False,
-    cheek: str | None = None,
-    tickle: bool = False,
     badge: bool = False,
     height: int = 200,
     activity: str = "normal",
-    weight_shift: str | None = None,
     nod: bool = False,
-    desk_blink: str | None = None,
+    gesture: str | None = None,
+    side: str | None = None,
 ) -> QImage:
     """离屏渲染一帧并返回 QImage。不显示窗口，不做单实例检查。
 
     at：切到该状态后第几秒的那一帧（用来检查晃动、呼吸）。squash：在 0 秒触发压扁。
     bubble：同时画出头顶的气泡；此时 at 是气泡打字的进度，at=0 表示显示完整台词。
     from_state：从指定精灵淡化到 state，用 at 检查过渡的中间帧。
+    gesture：pinch / pat / knock / tickle / lift，让动画器按确定性输入走到手势的第 at 秒。
+    side：left / right，鼓脸颊的一侧（不换边）。
     """
     # 不强制 offscreen：offscreen 平台没有任何字体，中文会变成方块；
     # 原生平台不显示窗口也能渲染（测试里可用环境变量 QT_QPA_PLATFORM 覆盖）
-    scene = SnapshotScene(from_state or state, height, activity)
+    scene = SnapshotScene(from_state or state, height, activity, side=side)
     t, win = scene.time, scene.win
     if from_state:
         win.set_state(state)
@@ -330,30 +378,10 @@ def render_snapshot(
         win._animator.squash(t[0], squash)
     if jump:
         win.jump()
-    elif cheek:
-        from shion.behavior import CHEEK_RELEASE_SECONDS
-        win._begin_action_fade(t[0])
-        win._pose = win._gesture_sprite("cheek", {"right": 1, "left": 2, "release": 3}[cheek], "stop")
-        win._cheek_pulling = cheek != "release"
-        win._pose_until = t[0] + CHEEK_RELEASE_SECONDS
-    elif tickle:
-        win._feed_tickle(t[0])
-        win._tickle_last = t[0] + at  # 截图模拟一直在挠，不在一秒后停止
-    elif drag:
-        from shion.behavior import DragPlayback
-        win.set_state("drag", animate=False)
-        win._drag_playback = DragPlayback(t[0])
-    elif weight_shift:
-        win._animator._idle_life.active = (t[0], "crouch" if weight_shift == "crouch" else "lean",
-                                          -1 if weight_shift == "left" else 1)
+    elif gesture:
+        apply_snapshot_gesture(win, gesture, at)
     elif nod:
         win._animator._nod_at = t[0]
-    elif desk_blink:
-        from shion.behavior import DESK_BLINK_SECONDS, DESK_DOUBLE_BLINK_GAP
-        props = win._animator._props
-        props.active = ("desk_2", t[0] + DESK_BLINK_SECONDS)
-        props.blink = props.sigh = float("inf")
-        props.second_blink = t[0] + DESK_BLINK_SECONDS + DESK_DOUBLE_BLINK_GAP if desk_blink == "double" else float("inf")
     # 截图重建睡眠的发射时刻；正式运行掉帧时仍不补发历史粒子。
     if win._sleep_z is not None and win._sleep_z.particles.sleeping:
         from shion.effects import Z_INTERVAL
@@ -410,14 +438,13 @@ def render_snapshot(
 def snapshot(
     out: str, state: str = "idle", bubble: str | None = None, at: float = 0.0,
     squash: str | None = None, lang: str = "zh", from_state: str | None = None,
-    jump: bool = False, drag: bool = False,
-    cheek: str | None = None, tickle: bool = False, badge: bool = False, height: int = 200,
-    activity: str = "normal", weight_shift: str | None = None, nod: bool = False,
-    desk_blink: str | None = None,
+    jump: bool = False, badge: bool = False, height: int = 200,
+    activity: str = "normal", nod: bool = False,
+    gesture: str | None = None, side: str | None = None,
 ) -> int:
     """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
-    img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, drag,
-                          cheek, tickle, badge, height, activity, weight_shift, nod, desk_blink)
+    img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, badge, height, activity,
+                          nod, gesture, side)
 
     ok = img.save(out, "PNG")
     if not ok:

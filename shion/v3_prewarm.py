@@ -21,6 +21,18 @@ EYE_MIN = 0.1
 FRAME_LIMIT = 64  # 与 HeadSurface.compose 的上限相同
 
 
+class InlineExecutor:
+    """在当前线程里立刻执行的“线程池”：截图和配图要确定性，不能等后台预热的快慢决定哪一帧用上预热好的图。"""
+
+    def submit(self, fn, *args):
+        future = Future()
+        try:
+            future.set_result(fn(*args))
+        except BaseException as error:  # noqa: BLE001 - 和线程池一样，把异常交给 future
+            future.set_exception(error)
+        return future
+
+
 def quantize_eye(eye_scale: float) -> float:
     if eye_scale >= 1.0:
         return 1.0

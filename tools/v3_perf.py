@@ -1,4 +1,5 @@
-"""Real-window FPS / CPU comparison: V2 vs V3.
+"""Real-window FPS / CPU measurement of the V3 window (the V2 window was removed in v3.0.0;
+V2 rows in old results.jsonl are kept as the comparison baseline).
 
 (The optional outline was removed after S2; 'v3o' rows in old results.jsonl are kept as records only.)
 
@@ -13,9 +14,7 @@ SHION_V3_SCENES=0 同上可测站姿回退（scene 的对照）。
 
 Every run is a separate process with a real (non-offscreen) window. Nothing is
 connected and no save file is read or written. DPR 1 uses QT_ENABLE_HIGHDPI_SCALING=0.
-Interactions are synthesised through each renderer's own animation entry points
-(V3: the V3 animator; V2: its existing cheek/tickle/drag paths). V2 has no knock or
-V3-style head pat, so those rows are V3 only.
+Interactions are synthesised through the V3 animator's own entry points.
 """
 import argparse
 import json
@@ -29,7 +28,6 @@ from pathlib import Path
 HEIGHTS = (160, 200, 260, 320)
 DPRS = (1.0, 1.5)
 SCENARIOS = {
-    'v2': ('idle', 'working', 'pinch', 'tickle', 'lift'),
     'v3': ('idle', 'working', 'pinch', 'pat', 'knock', 'tickle', 'lift'),
 }
 WARMUP = 3.0
@@ -67,12 +65,10 @@ def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
-    if renderer == 'v2':
-        from shion.pet_window import PetWindow
-        win = PetWindow(height=height, debug=False)
-    else:
-        from shion.v3_window import V3PetWindow
-        win = V3PetWindow(height=height, debug=False)
+    if renderer != 'v3':
+        raise SystemExit('the V2 window was removed; only "v3" can be measured (old v2 rows stay in results.jsonl)')
+    from shion.v3_window import V3PetWindow
+    win = V3PetWindow(height=height, debug=False)
     avail = QGuiApplication.primaryScreen().availableGeometry()
     win.move(avail.center().x() - win.width() // 2, avail.bottom() - win.height())
     # 'state:<名字>'：只切到该状态、不互动（S6 抽查 slump / dizzy 等状态姿态）
@@ -105,10 +101,7 @@ def run_one(renderer, height, dpr, scenario, seconds, warmup=WARMUP):
     def drive():
         now = time.perf_counter()
         t = now - start
-        if renderer == 'v2':
-            drive_v2(win, drive_name, t, now)
-        else:
-            drive_v3(win, drive_name, t, state)
+        drive_v3(win, drive_name, t, state)
     driver = QTimer()
     driver.setInterval(16)
     driver.timeout.connect(drive)
@@ -198,24 +191,6 @@ def drive_v3(win, scenario, t, state):
             a.begin_lift((325., 586.), cheek=True)
         x = 130 * math.sin(t * math.tau * .8)
         a.move_lift((x, -120.), x * .4)
-
-
-def drive_v2(win, scenario, t, now):
-    if scenario == 'pinch':
-        win._pose = win._gesture_sprite('cheek', 1 + int(t * 2) % 2, 'stop')
-        win._cheek_pulling = True
-        win._pose_until = win._clock() + 10
-    elif scenario == 'tickle':
-        win._feed_tickle(win._clock())
-    elif scenario == 'lift':
-        from shion.behavior import DragPlayback
-        if not win._dragging:
-            win._dragging = True
-            win._last_drag_pos = win.pos()
-            win.set_state('drag', animate=False)
-            win._drag_playback = DragPlayback(win._clock())
-            win._base_x = win.x()
-        win.move(round(win._base_x + 130 * math.sin(t * math.tau * .8)), win.y())
 
 
 def matrix(args):

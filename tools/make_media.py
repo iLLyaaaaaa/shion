@@ -58,19 +58,10 @@ def size_limit(name: str) -> int:
 
 def _use_inline_prewarm() -> None:
     """配图要逐字节可重复：V3 的预热放在当前线程里做，免得后台线程的快慢决定哪一帧用上预热好的图。"""
-    from concurrent.futures import Future
     import shion.v3_window as v3_window
+    from shion.v3_prewarm import InlineExecutor
 
-    class Inline:
-        def submit(self, fn, *args):
-            future = Future()
-            try:
-                future.set_result(fn(*args))
-            except BaseException as error:  # noqa: BLE001 - 与线程池一样把异常交给 future
-                future.set_exception(error)
-            return future
-
-    v3_window.PREWARM_EXECUTOR = Inline()
+    v3_window.PREWARM_EXECUTOR = InlineExecutor()
 
 
 def media_application():

@@ -33,7 +33,7 @@ def hover(w):
 SCENARIOS = [
     "sleep", "night", "bed", "goodnight", "desk", "auto_desk", "neglect1", "neglect2",
     "working", "paused", "temporary", "idle_expression", "snack",
-    "jump", "auto_jump", "cheek", "tickle",
+    "jump", "auto_jump",
 ] + ["fixed_" + name for name in EXPRESSIONS]
 
 
@@ -71,12 +71,6 @@ def prepare(e, scenario):
     elif scenario == "snack":
         assert e.state.start_snack(e.now)
         e.ctl.sync()
-    elif scenario == "cheek":
-        e.win._pose = "cheek_3"
-        e.win._pose_until = e.mono[0] + 2
-        e.win.advance_to(e.mono[0])
-    elif scenario == "tickle":
-        e.win._feed_tickle(e.mono[0])
     else:
         automatic = scenario.startswith("auto_")
         name = scenario.removeprefix("auto_")
@@ -89,8 +83,7 @@ def snapshot(e):
         asdict(e.data), e.state.current(e.now), e.state._last_activity, e.state._woken_date,
         e.state._menu_sleep, e.state._resting, e.state._resting_auto, e.state._idle_expression,
         e.win.sprite_name, e.win.displayed_sprite, e.win.frame, e.win.geometry(),
-        e.win._jump_start, e.win._pose, e.win._pose_until,
-        e.win._tickle_start, e.win._tickle_last, e.ctl._idle.next_at, list(e.said),
+        e.win._jump_start, e.ctl._idle.next_at, list(e.said),
     )
 
 

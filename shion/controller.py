@@ -156,9 +156,8 @@ class PetController(QObject):
         w.gesture.connect(self._on_gesture)
         w.clicked.connect(self._on_click)
         w.double_clicked.connect(self._on_double_click)
-        if hasattr(w, "knocked"):  # 只有 V3 窗口有敲头、拎脸颊
-            w.knocked.connect(self._on_knock)
-            w.drag_ignored.connect(self._on_drag_ignored)
+        w.knocked.connect(self._on_knock)  # 敲头、被忽略的拖动（要捏着脸颊往上提）都是 V3 窗口的信号
+        w.drag_ignored.connect(self._on_drag_ignored)
         w.drag_started.connect(self._on_drag_started)
         w.drag_finished.connect(self._on_drag_finished)
         w.menu_requested.connect(self.show_menu)
@@ -440,8 +439,8 @@ class PetController(QObject):
         return True
 
     def arm_lift_hint(self) -> None:
-        """V3 窗口首次启动的提示：约 10 秒后说一次；被气泡门控挡住就 30 秒后再试，说成功才记住。"""
-        if not hasattr(self.window, "knocked") or self.state.save.v3_lift_hint_shown:
+        """首次启动的“捏着脸颊往上提”提示：约 10 秒后说一次；被气泡门控挡住就 30 秒后再试，说成功才记住。"""
+        if self.state.save.v3_lift_hint_shown:
             return
         QTimer.singleShot(self.LIFT_HINT_DELAY_MS, self._first_lift_hint)
 
@@ -458,7 +457,7 @@ class PetController(QObject):
         self.window.stop_motion()
         self._on_pressed()
         self._status_timer.stop()
-        line = "cheek_lift" if getattr(self.window, "lifting", False) else "drag"
+        line = "cheek_lift" if self.window.lifting else "drag"
         self.react(self.state.drag_start(self._now(), line), category="drag")
         self.sync()
         self._try_time_speech()

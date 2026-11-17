@@ -15,29 +15,10 @@ IDLE_ACTIONS = ("jump", "expression")
 IDLE_ACTION_WEIGHTS = (1, 2)
 IDLE_EXPRESSIONS = ("happy", "idle")
 IDLE_EXPRESSION_WEIGHTS = (1, 1)
-CHEEK_RELEASE_SECONDS = 2.0
-CHEEK_LIFT_DISTANCE = 80.0
-TICKLE_CLICK_WINDOW = 1.5
-TICKLE_CLICK_COUNT = 3
 TICKLE_STOP_SECONDS = 1.0
-TICKLE_FRAME_SECONDS = 0.200
-TICKLE_TWIST_DEGREES = 2.5
-TICKLE_TWIST_PERIOD = 0.60
 TICKLE_SPEECH_SECONDS = 4.0
 BELLY_LIFT_DISTANCE = 40.0
-RUB_DISTANCE = 8.0
-RUB_REVERSALS = 2
-RUB_WINDOW = 1.5
-TICKLE_MOVE_DISTANCE = 2.0
-JUMP_CROUCH_DURATION = 0.15
-JUMP_RISE_DURATION = 0.09
-JUMP_HOLD_DURATION = 0.20
-JUMP_FALL_DURATION = 0.11
-JUMP_AIR_DURATION = JUMP_RISE_DURATION + JUMP_HOLD_DURATION + JUMP_FALL_DURATION
-JUMP_PHASES = (JUMP_CROUCH_DURATION, JUMP_RISE_DURATION, JUMP_HOLD_DURATION, JUMP_FALL_DURATION)
-JUMP_CROUCH_DEPTH = 0.10
-JUMP_HEIGHT = 45.0
-JUMP_DURATION = JUMP_CROUCH_DURATION + JUMP_AIR_DURATION
+JUMP_HEIGHT = 45.0  # 只用来给窗口顶部留出跳起的空间（MARGIN_TOP）；实际跳高是 LEGACY_JUMP_HEIGHT
 LEGACY_JUMP_HEIGHT = 18.0
 LEGACY_JUMP_DURATION = 0.5
 DRAG_FRAME_SECONDS = 0.110
@@ -122,21 +103,6 @@ class PropPlayback:
         return self.active[0] if now + 1e-9 < self.active[1] else "desk_1"
 
 
-def jump_sample(elapsed: float) -> tuple[float, float, float]:
-    """(升空高度, 四阶段归一化帧进度, sy)，与刷新次数无关。"""
-    elapsed = max(0.0, elapsed)
-    start = 0.0
-    for stage, duration in enumerate(JUMP_PHASES):
-        if elapsed + 1e-9 < start + duration:
-            p = max(0.0, min(1.0, (elapsed - start) / duration))
-            height = (0.0, JUMP_HEIGHT * (1 - (1 - p) ** 3),
-                      JUMP_HEIGHT, JUMP_HEIGHT * (1 - p * p))[stage]
-            sy = 1 - JUMP_CROUCH_DEPTH * math.sin(math.pi * p) if stage == 0 else 1.0
-            return height, (stage + p) / len(JUMP_PHASES), sy
-        start += duration
-    return 0.0, 1.0, 1.0
-
-
 class DragPlayback:
     """连续相位；帧速率指数缓动，用解析积分避免掉帧改变播放进度。"""
 
@@ -216,38 +182,3 @@ class IdleBehavior:
             self.last_talk = now
             return "talk"
         return self.rng.choices(IDLE_ACTIONS, weights=IDLE_ACTION_WEIGHTS, k=1)[0]
-
-
-class TickleGesture:
-    """滑动点击窗口和有效往返；单向长拖或小抖动不会当成挠痒。"""
-
-    def __init__(self):
-        self.clicks: deque[float] = deque()
-        self.begin_rub(0.0)
-
-    def click(self, now: float) -> bool:
-        while self.clicks and now - self.clicks[0] > TICKLE_CLICK_WINDOW + 1e-9:
-            self.clicks.popleft()
-        self.clicks.append(now)
-        return len(self.clicks) >= TICKLE_CLICK_COUNT
-
-    def begin_rub(self, x: float) -> None:
-        self.extreme = x
-        self.direction = 0
-        self.reversals: deque[float] = deque()
-
-    def rub(self, x: float, now: float) -> bool:
-        delta = x - self.extreme
-        if not self.direction:
-            if abs(delta) >= RUB_DISTANCE:
-                self.direction = 1 if delta > 0 else -1
-                self.extreme = x
-        elif delta * self.direction >= 0:
-            self.extreme = x
-        elif abs(delta) >= RUB_DISTANCE:
-            self.direction *= -1
-            self.extreme = x
-            self.reversals.append(now)
-        while self.reversals and now - self.reversals[0] > RUB_WINDOW + 1e-9:
-            self.reversals.popleft()
-        return len(self.reversals) >= RUB_REVERSALS

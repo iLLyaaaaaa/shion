@@ -306,7 +306,7 @@ def test_new_poses_preserve_feet_and_mask_without_clipping(env, state, height):
 
 
 @pytest.mark.parametrize("args", [["--state", "sleep"], ["--state", "bed"],
-    ["--state", "working", "--nod"], ["--state", "desk", "--desk-blink", "double"]])
+    ["--state", "working", "--nod"], ["--state", "desk"]])
 def test_snapshot_supports_new_effects(qapp, tmp_path, args):
     from shion.__main__ import main
     out = tmp_path / "motion.png"
