@@ -493,10 +493,10 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
 - **状态机是纯 Python**：`state.py` 不能 import Qt。时间通过参数传入（例如 `now: datetime`），不能在内部直接调用 `datetime.now()`，这样“2 小时后进入冷落”可以在测试里瞬间模拟。
 - 测试用 `pytest`，放在 `tests/` 下。运行方式：`.venv\Scripts\python -m pytest -q`，只看失败的输出。
 - **调试截图模式**：`python -m shion --snapshot out.png [--state happy] [--bubble "文字"]`，离屏渲染一帧存成 PNG 后退出。`--from-state idle --state happy --at 0.06` 可检查淡化中间帧；不传 `--from-state` 时直接显示目标状态。CC 需要检查画面时，生成截图再打开看，**只看截图，不要打开 assets 里的原始素材**。
-- 截图动作参数互斥：`--cheek left|right|release` 检查捏脸与松手；`--tickle --at 0/0.2/0.4` 模拟持续挠痒；`--jump --at 0/0.15/0.24/0.44`、`--drag --at 0/0.11/0.22/0.33` 继续检查跳跃与拖动。可组合状态、三语气泡。移除旧的 --mirror / --walk / --face。截图不创建 FPS 窗口，也不计实际绘制次数。
-- idle 动作截图在 `--at 0` 保留原待机图，`--at 0.05` 为进入淡化的中点，`--at 0.10` 已完成进入；可用 `--jump --at 0.60` 或 `--cheek release --at 2.05` 检查自然退出的中点。不增加截图参数；可配合 `--activity quiet` 隔离待机摇摆。
-- 截图新增 `--weight-shift crouch|left|right --at 0～0.6` 确定性触发换重心；`--height 160|200|260|320` 和 `--activity quiet|normal|lively` 检查四档大小/活跃度。常规 `--at 1.125/3.375` 检查慢摇摆两端，`--state neglect1 --at 1.5` 检查呼吸峰值，`--state working --at 2` 检查工作呼吸。
-- 睡眠截图自动合成 Z：`--state sleep|bed --at 0/.9/1.8/2.2` 检查单枚/多枚、漂移与淡出，截图重建历史发射时刻但正式运行不补发。`--state working --nod --at 0/.2/.4` 检查点头，`--state neglect2 --at .875/2.625` 检查慢摇两端；`--state desk --desk-blink single|double --at 0/.15/.4/.55` 检查双眨与间隔。`--nod`、`--desk-blink` 与其他截图动作参数互斥。
+- 截图动作参数互斥：`--jump`（原地小跳，`--at 0～0.5`）、`--nod`、`--gesture pinch|pat|knock|tickle|lift`（让 V3 动画器按确定性输入走到手势的第 `--at` 秒，输入来自 `v3proto` 的 `*_scenario`）；`--side left|right` 指定鼓脸颊的一侧且不自动换边。可组合状态、三语气泡。已移除 `--mirror` / `--walk` / `--face`，以及 v3.0.0 起的 `--cheek` / `--tickle` / `--drag` / `--weight-shift` / `--desk-blink` / `--renderer`（传了会被 argparse 拒绝）。截图不创建 FPS 窗口，也不计实际绘制次数。
+- `--from-state idle --state happy --at 0.1` 检查表情交叉淡化的中间帧（V3 在 0 秒仍是旧表情的脸）；可配合 `--activity quiet` 隔离待机摇摆。
+- `--height 160|200|260|320` 和 `--activity quiet|normal|lively` 检查四档大小/活跃度。常规 `--at 1.125/3.375` 检查慢摇摆两端，`--state neglect1 --at 1.5` 检查呼吸峰值，`--state working --at 2` 检查工作呼吸。
+- 睡眠截图自动合成 Z：`--state sleep|bed --at 0/.9/1.8/2.2` 检查单枚/多枚、漂移与淡出，截图重建历史发射时刻但正式运行不补发。`--state working --nod --at 0/.2/.4` 检查点头，`--state neglect2 --at .875/2.625` 检查慢摇两端；`--nod` 与其他截图动作参数互斥。
 - 截图 `--panel permission|input [--panel-text 内容] [--panel-more N] [--panel-expand] [--lang ja]` 只画遥控面板。
 - 截图 `--panel dialogue|snacks|eating [--lang zh|en|ja]` 检查对话首页、零食页或 happy 与碎屑效果；只查看此入口生成的截图，不打开精灵原图。
 - **README 媒体**：`.venv\Scripts\python tools\make_media.py` 在 `docs/images/` 生成 4 秒、20 fps、480×360 的 `hero.gif`，以及统一 720×420 的 `pat.png`（爱心）、`desk.png`、`permission.zh/en/ja.png`（带诗音，命令 `npm test`）、`sleep-bed.png`（Z）。其余场景无台词气泡。全部用不透明浅色圆角卡片，以 2 倍像素渲染再 Lanczos 缩小；文档引用使用相对路径。
@@ -876,10 +876,10 @@ V3 立绘改成“零件 + 转轴”，为以后的呼吸、眨眼、头发摆�
 
 ## V3 正式接入（V3 第 2 步 S1–S9，2026-11-09～11-16，开发预览）
 
-V3 纸偶渲染器接入真实桌宠窗口。入口 `python -m shion --renderer v3`（运行与 `--snapshot` 都支持），**默认仍是 V2**，不写存档里的渲染器选择。分支 `feature/v3-integrate`，未合并 master。
+V3 纸偶渲染器接入真实桌宠窗口。**v3.0.0 起 V3 是唯一外观**：`python -m shion`（运行与 `--snapshot`）直接用 V3，没有 `--renderer` 选项（传了会被 argparse 拒绝），存档里也从来没有渲染器字段，不需要迁移。分支 `feature/v3-integrate`，未合并 master。
 
 ### 结构
-- `shion/v3_window.py`：`V3PetWindow(PetWindow)`，窗口属性、状态机接口、V2 程序动作帧（压扁/倾斜/跳）、拖动/下落/夹边和所有信号沿用父类，只换“画什么”和手势命中。`app.window_class()` 按 `--renderer` 选窗口类。
+- `shion/v3_window.py`：`V3PetWindow(PetWindow)`。`PetWindow`（`shion/pet_window.py`）只剩窗口骨架：窗口属性、信号、拖动（阈值 6px，阈内一律不算拖动）/慢放停留/快甩下落/落地/夹边、`set_height`、暂停标签、FPS 浮层、原地小跳（正弦 `LEGACY_JUMP_*`）；怎么画（`_load_sprites` / `_draw_sprite` / `_mask_for` / `_refresh` / `_sync_sleep_z`）是留给子类的接口，`PetWindow` 不能单独实例化。R2 已删除 V2 的贴图与帧序列、动作边界淡化、遮罩缓存、V2 手势分区（捏脸/肚子/摸头区）和 `TickleGesture`、`jump_sample` 及对应截图参数。窗口随机种子（截图/配图的固定 seed）同时决定发丝轻摆的时刻，同种子逐帧可重复。
 - `shion/v3_display.py`：状态→表情映射 `STATE_EXPRESSIONS`、状态姿态 `STATE_POSES` / 周期动作 `StateMotion`、帧间隔 `frame_interval`、换边判断 `desired_side`、绘制量化键 `draw_key`。
 - `shion/v3_layers.py`：两条渲染路径与待机头发间歇轻摆 `SwayEnvelope`。
 - `shion/v3_prewarm.py`：眨眼开合度量化（0.05 一档，19 档）与后台预热线程。
