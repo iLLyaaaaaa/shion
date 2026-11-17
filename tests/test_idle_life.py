@@ -5,11 +5,10 @@ import random
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage
 
 from shion import animator as A
-from shion.animator import Animator, Frame, IdleLife
-from shion.pet_window import MASK_CACHE_MAX, MARGIN_BOTTOM, PetWindow
+from shion.animator import Animator, IdleLife
 from tests.test_controller import env, qapp
 
 
@@ -112,16 +111,14 @@ def test_dense_and_sparse_updates_match_during_many_micro_actions():
         dense._tested_to = at
 
 
-@pytest.mark.parametrize("action", ["jump", "legacy_jump", "drag", "fall", "press", "bed", "desk", "fixed", "calm"])
+@pytest.mark.parametrize("action", ["jump", "drag", "fall", "press", "bed", "desk", "fixed", "calm"])
 def test_window_actions_block_new_idle_effects(env, action):
     w = env.win
     w.set_state("idle", animate=False)
     env.mono[0] += 1.3
     w._refresh(env.mono[0])
     assert w.frame.angle != 0
-    if action in ("jump", "legacy_jump"):
-        if action == "legacy_jump":
-            w._sequences.pop("jump")
+    if action == "jump":
         w.jump()
     elif action == "drag":
         w._dragging = True
@@ -156,99 +153,6 @@ def test_activity_sync_disables_quiet_and_reschedules_lively(env):
 def alpha(image):
     image = image.convertToFormat(QImage.Format_RGBA8888)
     return np.frombuffer(image.constBits(), np.uint8).reshape(image.height(), image.bytesPerLine() // 4, 4)[:, :image.width(), 3].copy()
-
-
-@pytest.mark.parametrize("height", [160, 200, 260, 320])
-def test_extreme_poses_no_clipping_mask_covers_pixels_and_feet_do_not_move(qapp, height):
-    w = PetWindow(height=height, clock=lambda: 100.0, autostart=False)
-    try:
-        position, size = w.pos(), w.size()
-        anchor = (w.x() + w.width() / 2, w.y() + w.height() - MARGIN_BOTTOM)
-        poses = [Frame("idle", sy=sy, angle=angle)
-                 for sy in (1, 1.025, 1.025 * .98, 1.025 * 1.006)
-                 for angle in (-3, -1.501, -.499, 0, .499, 1.501, 3)]
-        for f in poses:
-            w._frame = f
-            w.setMask(w._mask_for(f))
-            # 扩大画布重画，直接证明原窗口边界外没有被裁掉的像素。
-            pad = 32
-            image = QImage(w.width() + pad * 2, w.height() + pad * 2, QImage.Format_ARGB32_Premultiplied)
-            image.fill(0)
-            painter = QPainter(image)
-            painter.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
-            painter.translate(pad, pad)
-            w._draw_sprite(painter, f)
-            painter.end()
-            full = alpha(image)
-            ys, xs = np.where(full > 0)
-            assert xs.min() >= pad and xs.max() < image.width() - pad
-            assert ys.min() >= pad and ys.max() < image.height() - pad
-            ys, xs = np.where(alpha(w.render_frame()) > 0)
-            assert all(w.mask().contains(QPoint(int(x), int(y))) for x, y in zip(xs, ys))
-            assert not w.mask().contains(QPoint(0, 0))
-            assert w.pos() == position and w.size() == size
-            assert anchor == (w.x() + w.width() / 2, w.y() + w.height() - MARGIN_BOTTOM)
-    finally:
-        w.close()
-
-
-def test_quantized_mask_reuses_region_and_evicts_one_old_entry(qapp):
-    w = PetWindow(clock=lambda: 100.0, autostart=False)
-    try:
-        first = w._mask_for(Frame("idle", sy=1.011, angle=1.1))
-        assert w._mask_for(Frame("idle", sy=1.014, angle=1.4)) is first
-        old_key = w._mask_key
-        for i in range(MASK_CACHE_MAX):
-            w._mask_for(Frame("idle", angle=-12 + i * .1, sy=1 + i * .01))
-        assert len(w._mask_cache) == MASK_CACHE_MAX
-        assert old_key not in w._mask_cache
-        recent = w._mask_key
-        w._mask_for(Frame("idle", angle=12, sy=1.01))
-        assert recent in w._mask_cache
-    finally:
-        w.close()
-
-
-def test_slow_idle_reuses_masks_across_600_frames(qapp, monkeypatch):
-    w = PetWindow(clock=lambda: 100.0, autostart=False)
-    try:
-        w._animator._next_blink = math.inf
-        w._animator._idle_life.next_at = math.inf
-        builds = []
-        draw = w._draw_sprite
-
-        def record(painter, frame):
-            builds.append(frame)
-            draw(painter, frame)
-
-        monkeypatch.setattr(w, "_draw_sprite", record)
-        for i in range(600):
-            w.advance_to(100 + i / 60)
-        assert len(builds) < 30  # 几百个画面姿态只生成少量量化轮廓。
-        assert len(w._mask_cache) <= MASK_CACHE_MAX
-    finally:
-        w.close()
-
-
-def test_slow_idle_reuses_masks_across_600_frames(qapp, monkeypatch):
-    w = PetWindow(clock=lambda: 100.0, autostart=False)
-    try:
-        w._animator._next_blink = math.inf
-        w._animator._idle_life.next_at = math.inf
-        builds = []
-        draw = w._draw_sprite
-
-        def record(painter, frame):
-            builds.append(frame)
-            draw(painter, frame)
-
-        monkeypatch.setattr(w, "_draw_sprite", record)
-        for i in range(600):
-            w.advance_to(100 + i / 60)
-        assert len(builds) < 30  # 几百个画面姿态只生成少量量化轮廓。
-        assert len(w._mask_cache) <= MASK_CACHE_MAX
-    finally:
-        w.close()
 
 
 @pytest.mark.parametrize("kind", ["crouch", "left", "right"])

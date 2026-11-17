@@ -118,6 +118,9 @@ class V3PetWindow(PetWindow):
 
     def __init__(self, *args, initial_side: str | None = None, **kwargs):
         self._v3_initial_side = initial_side
+        # 给了 rng（截图/配图的固定种子）时，发丝轻摆的时刻也由它决定，同一个种子逐帧可重复；不消耗 rng，别处的随机序列不变。
+        rng = kwargs.get("rng")
+        self._v3_sway_seed = None if rng is None else hash(rng.getstate()) & 0xFFFFFFFF
         super().__init__(*args, **kwargs)
 
     # ---- 尺寸与渲染器 ----
@@ -555,7 +558,7 @@ class V3PetWindow(PetWindow):
         self._v3_clock = now
         animator = self._v3_animator
         if self._v3_sway is None:
-            self._v3_sway = SwayEnvelope(now)
+            self._v3_sway = SwayEnvelope(now, seed=self._v3_sway_seed)
         if animator.interaction_active:
             self._v3_sway.force(now)
         self._v3_settings.sway_degrees = SWAY_DEGREES * self._v3_sway.value(now)

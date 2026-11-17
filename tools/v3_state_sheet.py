@@ -24,7 +24,8 @@ def main(argv=None):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
-    from shion.pet_window import PROP_STATES, STATES, PetWindow
+    from shion.pet_window import PROP_STATES, STATES
+    from shion.v3_window import V3PetWindow as PetWindow
     from shion.v3_window import V3PetWindow, shared_rig
     from v3proto.render import to_pil
 

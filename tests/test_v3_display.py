@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from PySide6.QtCore import Qt
 
-from shion.pet_window import MARGIN_BOTTOM, PROP_STATES, SEQUENCE_GROUPS, STATES, PetWindow
-from shion.v3_display import (STATE_EXPRESSIONS, V2_VISIBLE_RATIO, expression_for,
+from shion.pet_window import MARGIN_BOTTOM, MARGIN_TOP, PROP_STATES, SEQUENCE_GROUPS, STATES
+from shion.v3_display import (STATE_EXPRESSIONS, V2_FOOT_GAP_RATIO, V2_VISIBLE_RATIO, expression_for,
                               logical_scale, texture_scale)
 
 V3_FACES = {"smug", "neutral", "happy", "surprised", "teary", "angry", "sleep", "dizzy", "tired", "bored", "yawn"}
@@ -51,28 +51,20 @@ def test_texture_follows_display_height_times_dpr():
 
 @pytest.mark.parametrize("height", (160, 200, 260, 320))
 def test_v3_visible_height_matches_v2(qapp, height):
+    """V3 的可见身高 = 显示高度 × V2_VISIBLE_RATIO，脚底落在 V2 时代的同一条地面线上（V2 窗口已删除，改为对常数断言）。"""
     from v3proto.render import to_pil
     v3, t = make(qapp, height)
     s = v3._v3_settings
     s.breath = s.blink = s.sway = False  # measure the rest pose, not breathing or hair sway
     t[0] += .3
     v3.advance_to(t[0])
-    alpha = np.asarray(to_pil(v3.render_frame(1)))[..., 3]
-    v2 = PetWindow(height=height, clock=lambda: t[0], autostart=False, debug=False, pixel_ratio=1.0)
-    v2.set_state("idle", animate=False)
-
-    def extent(window):
-        # Downscaling leaves a faint halo; compare the silhouettes as seen.
-        a = np.asarray(to_pil(window.render_frame(1)))[..., 3]
-        ys = np.nonzero((a > 32).any(1))[0]
-        return ys.min(), ys.max()
-
-    top3, bottom3 = extent(v3)
-    top2, bottom2 = extent(v2)
-    assert v3.height() == v2.height()  # same window height, same floor line
-    assert abs(bottom3 - bottom2) <= 2
-    assert abs((bottom3 - top3) - (bottom2 - top2)) <= max(2, height * .01)
-    v2.close(); v3.close()
+    a = np.asarray(to_pil(v3.render_frame(1)))[..., 3]
+    ys = np.nonzero((a > 32).any(1))[0]  # downscaling leaves a faint halo; measure the silhouette as seen
+    assert v3.height() == height + MARGIN_TOP + MARGIN_BOTTOM
+    floor = v3.height() - MARGIN_BOTTOM
+    assert abs(ys.max() + 1 - floor) <= 2 * (1 + height * V2_FOOT_GAP_RATIO)  # feet on the floor line, allowing the V2 foot gap
+    assert abs((ys.max() - ys.min()) - height * V2_VISIBLE_RATIO) <= max(3, height * .02)
+    v3.close()
 
 
 def test_dpr_changes_texture_not_logical_size(qapp):

@@ -220,7 +220,7 @@ def test_scene_snapshot_contains_pet_and_panel(qapp, tmp_path, kind):
     out = tmp_path / f"{kind}.png"
     assert snapshot_panel(str(out), kind, with_pet=True) == 0
     img = QImage(str(out))
-    assert not img.isNull() and img.width() >= 400 and img.height() >= 200
+    assert not img.isNull() and img.width() >= 340 and img.height() >= 200  # V3 的身体比 V2 窄一些
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")

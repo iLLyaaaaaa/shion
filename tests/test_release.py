@@ -39,7 +39,7 @@ def test_generated_icons_are_repeatable_and_ico_keeps_each_custom_frame(tmp_path
 
 def test_application_identity_and_inherited_window_icons(qapp, monkeypatch):
     from shion import app
-    from shion.pet_window import PetWindow
+    from shion.v3_window import V3PetWindow as PetWindow
 
     previous = (qapp.applicationName(), qapp.applicationVersion(), qapp.windowIcon())
     monkeypatch.setattr(app.SingleInstance, "acquire", lambda _: False)

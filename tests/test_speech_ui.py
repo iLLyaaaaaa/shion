@@ -2,6 +2,7 @@
 import pytest
 
 from shion.speech import Priority
+from shion.behavior import LEGACY_JUMP_DURATION, LEGACY_JUMP_HEIGHT
 from tests.test_controller import env, qapp, work
 
 
@@ -86,7 +87,7 @@ def test_poke_variants_and_shaken_drag_use_source_cooldowns(env, monkeypatch):
     assert env.said[-1] in env.ctl.lines._lines["drag"]
     accepted = list(env.said)
     env.advance(2.5)
-    env.win._shake.shaken = True
+    env.win.consume_shaken = lambda: True  # V3 的“晃晕”由 V3 窗口自己判断，这里只验证控制器收到后的台词冷却
     env.win.drag_finished.emit()
     assert env.win.sprite_name == "dizzy" and env.said == accepted
 
@@ -124,17 +125,17 @@ def test_plan_ready_jumps_once_even_when_muted_and_ignores_content(env, lang, te
     env.said.clear()
     env.ctl.handle_event("plan_ready", "私密计划")
     assert env.said == ([] if muted else [text])
-    assert env.win.motion_active and env.win.displayed_sprite == "jump_1"
+    assert env.win.motion_active and env.win._jump_offset == 0  # 刚起跳（V3 没有跳跃帧，表情不变）
     assert not env.win.idle_motion_active  # 安静档/固定表情也不会取消事件小跳
     assert not env.state.is_working(env.now)
     assert env.data.stats["claude_tasks"] == 0
     assert len(env.ctl.activity) == 1  # 只有先前的 working，不存计划
     assert "私密计划" not in caplog.text
     pos = env.win.pos()
-    env.advance(0.35)
-    assert env.win.displayed_sprite == "jump_3" and env.win._jump_offset == pytest.approx(45)
+    env.advance(LEGACY_JUMP_DURATION / 2)
+    assert env.win._jump_offset == pytest.approx(LEGACY_JUMP_HEIGHT)
     assert env.win.pos() == pos
-    env.advance(0.5)
+    env.advance(LEGACY_JUMP_DURATION / 2 + 0.05)
     assert not env.win.motion_active and env.win._jump_offset == 0
 
 
@@ -171,9 +172,9 @@ def test_plan_jump_survives_calm_sync(env, mode):
     else:
         env.data.fixed_expression = "proud"
     env.ctl.handle_event("plan_ready")
-    env.advance(0.35)
-    assert env.win.motion_active and env.win._jump_offset == pytest.approx(45)
-    env.advance(0.5)
+    env.advance(LEGACY_JUMP_DURATION / 2)
+    assert env.win.motion_active and env.win._jump_offset == pytest.approx(LEGACY_JUMP_HEIGHT)
+    env.advance(LEGACY_JUMP_DURATION / 2 + 0.05)
     assert env.win.sprite_name == ("proud" if mode == "fixed" else "idle")
 
 

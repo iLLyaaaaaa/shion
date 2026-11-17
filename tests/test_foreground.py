@@ -564,7 +564,7 @@ def test_native_controlled_group_z_order_without_changing_real_foreground(qapp):
         pytest.skip("requires native Windows Qt")
     from shion.bubble import BubbleWindow
     from shion.effects import CrumbOverlay, HeartOverlay
-    from shion.pet_window import PetWindow
+    from shion.v3_window import V3PetWindow as PetWindow
     from shion.windowing import set_topmost
 
     # 目标窗口/进程识别用替身；真实 Win32 只操作本测试创建的窗口。
@@ -611,7 +611,7 @@ def test_native_controlled_group_z_order_without_changing_real_foreground(qapp):
 def test_native_system_hidden_pet_restores_geometry_and_mask_without_activation(qapp, shell_show_state):
     if not F._native_windows():
         pytest.skip("requires native Windows Qt")
-    from shion.pet_window import PetWindow
+    from shion.v3_window import V3PetWindow as PetWindow
     from shion.windowing import set_topmost
 
     target = QWidget(None, Qt.Tool | Qt.WindowDoesNotAcceptFocus)

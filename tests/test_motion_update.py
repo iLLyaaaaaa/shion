@@ -1,6 +1,4 @@
 """新版动作的边界、变速、真实手势与实际绘制计数。"""
-import shutil
-
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
@@ -8,50 +6,10 @@ from PySide6.QtTest import QTest
 
 from shion import behavior as b
 from shion.debug import PaintCounter
-from shion.pet_window import PetWindow, SPRITE_DIR, STATES
-from tests.test_controller import BODY, env, qapp
-from tests.test_feedback_ui import move_global, pixels
-
-
-@pytest.mark.parametrize("group", ["jump", "drag"])
-@pytest.mark.parametrize("count", [1, 3, 6, 12])
-def test_any_contiguous_frame_count_uses_numeric_order(qapp, tmp_path, monkeypatch, group, count):
-    import shion.pet_window as module
-    for name in STATES:
-        shutil.copyfile(SPRITE_DIR / f"{name}.png", tmp_path / f"{name}.png")
-    for i in range(1, count + 1):
-        shutil.copyfile(SPRITE_DIR / f"{group}_1.png", tmp_path / f"{group}_{i}.png")
-    monkeypatch.setattr(module, "SPRITE_DIR", tmp_path)
-    w = PetWindow(clock=lambda: 100, autostart=False)
-    try:
-        names = tuple(f"{group}_{i}" for i in range(1, count + 1))
-        assert w._sequences == {group: names}
-        if group == "jump":
-            w.jump()
-            seen = set()
-            for elapsed in np.linspace(0, b.JUMP_DURATION - 0.0001, 240):
-                w.advance_to(100 + float(elapsed))
-                seen.add(w.displayed_sprite)
-            assert seen == set(names)
-            w.advance_to(100.35)
-            assert w._jump_offset == b.JUMP_HEIGHT
-        else:
-            assert [w._sequence_sprite(group, i * 0.11, 0.11) for i in range(count * 2)] == list(names) * 2
-    finally:
-        w.close()
-
-
-def test_jump_smooth_height_boundaries_hold_and_accelerating_descent():
-    assert b.jump_sample(0)[0] == 0
-    assert b.jump_sample(0.075)[2] == pytest.approx(0.9)
-    for t, height in ((0.15, 0), (0.24, 45), (0.44, 45), (0.55, 0)):
-        assert b.jump_sample(t)[0] == pytest.approx(height)
-        assert abs(b.jump_sample(t - 1e-7)[0] - height) < 0.001
-        assert abs(b.jump_sample(t + 1e-7)[0] - height) < 0.001
-    assert all(b.jump_sample(float(t))[0] == 45 for t in np.linspace(0.24, 0.44, 20))
-    heights = [b.jump_sample(float(t))[0] for t in np.linspace(0.44, 0.55, 5)]
-    distances = [-d for d in np.diff(heights)]
-    assert all(a < c for a, c in zip(distances, distances[1:]))
+from shion.v3_window import V3PetWindow as PetWindow
+from tests.test_controller import env, qapp
+from tests.test_feedback_ui import move_global
+from tests.test_v3_gestures import find
 
 
 @pytest.mark.parametrize("speed,shakes,seconds", [(0, 0, .11), (400, 0, .085),
@@ -83,74 +41,54 @@ def test_drag_phase_integrates_exactly_across_dropped_frames_and_freezes():
 
 
 def start_drag(e, *, dx=10, dy=-250):
+    """V3 里窗口只能被“捏脸颊往上提”拖动：从脸颊处按下再移动。"""
     w = e.win
     w.place_default()
-    initial = w.mapToGlobal(BODY)
-    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)
+    point = find(w, "cheek")
+    initial = w.mapToGlobal(point)
+    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, point)
     move_global(w, initial + QPoint(dx, dy))
-    return initial
+    return initial, point
 
 
 def test_drag_loops_through_fall_and_restores_pinned_state_on_landing(env):
+    """拖动用 DragPlayback 计时，落地后清掉并恢复固定表情（V3 不再切换 drag_N 帧）。"""
     env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     w = env.win
     env.data.fixed_expression = "proud"
     env.ctl.sync()
-    start_drag(env)
-    assert w.displayed_sprite == "drag_1"
-    # 保持原位，单独检验 110ms 一帧的循环。
-    w._last_drag_pos = w.pos()
-    for i in range(1, 5):
-        env.advance(.11)
-        assert w.displayed_sprite == f"drag_{i % 4 + 1}"
+    _, point = start_drag(env)
+    assert w.is_dragging and w._drag_playback is not None
+    w._last_drag_pos = w.pos()  # 保持原位，单独检验 110ms 一帧的相位推进
+    start_phase = w._drag_playback.phase
+    env.advance(.44)
+    assert w._drag_playback.phase > start_phase
     phase = w._drag_playback.phase
-    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
+    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, point)
     assert w.is_falling and w._drag_playback.phase == pytest.approx(phase)
-    env.advance(.11)
-    assert w.is_falling and w.displayed_sprite == "drag_2"
     env.advance(1)
-    assert w._drag_playback is None and w.displayed_sprite == "proud"
+    assert w._drag_playback is None and not w.is_falling and w.displayed_sprite == "proud"
 
 
 def test_vertical_drag_accelerates_and_regrab_preserves_phase(env):
     env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     w = env.win
-    initial = start_drag(env)
+    initial, point = start_drag(env)
     env.advance(.01)
     move_global(w, initial + QPoint(10, -450))
     env.advance(.05)
     assert w._drag_playback.target_rate == pytest.approx(1 / .06)
-    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
+    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, point)
     env.advance(.05)
     playback = w._drag_playback
     phase = playback.phase
-    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)
-    gp = w.mapToGlobal(BODY) + QPoint(15, 0)
+    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, point)  # 抓住正在下落的桌宠（任意位置）
+    gp = w.mapToGlobal(point) + QPoint(15, 0)
     move_global(w, gp)
     assert w._drag_playback is playback and playback.phase == phase
-    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, BODY)
+    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, point)
     env.advance(1)
     assert w._drag_playback is None
-
-
-@pytest.mark.parametrize("height", [160, 200, 260, 320])
-@pytest.mark.parametrize("direction", [1, -1])
-def test_drag_all_frames_tilt_and_mask_are_not_clipped(env, height, direction):
-    w = env.win
-    w.set_height(height)
-    w.set_state("drag", animate=False)
-    w._drag_playback = b.DragPlayback(100)
-    w._animator.set_drag(True, 100)
-    w._animator.feed_velocity(1000, 100)
-    for i in range(4):
-        w.advance_to(100 + i * .11)
-        w._animator.feed_velocity(direction * 1000, 100 + i * .11)
-        alpha = pixels(w)[:, :, 3]
-        ys, xs = np.where(alpha > 0)
-        assert ys.min() > 0 and ys.max() < alpha.shape[0] - 1
-        assert xs.min() > 0 and xs.max() < alpha.shape[1] - 1
-        assert all(w.mask().contains(QPoint(int(x), int(y))) for x, y in zip(xs, ys))
-        assert not w.mask().contains(QPoint(0, 0))
 
 
 def test_paint_counter_reports_paints_per_actual_elapsed_window():

@@ -168,11 +168,13 @@ def test_mouth_anchor_sits_on_the_face_and_follows_the_head(qapp):
 
 
 def test_v2_mouth_anchor_unchanged(qapp):
+    """父类的嘴部锚点（V3 在没有 rig 数据时的回退）仍是 V2 时代的比例位置。"""
     from shion.effects import MOUTH_FRACTION
-    from shion.pet_window import PetWindow
+    from shion.pet_window import PetWindow as Base
+    from shion.v3_window import V3PetWindow as PetWindow
     w = PetWindow(autostart=False, debug=False)
     x, y, bw, bh = w.body_rect()
-    assert w.mouth_anchor() == QPoint(x + bw // 2, y + round(bh * MOUTH_FRACTION))
+    assert Base.mouth_anchor(w) == QPoint(x + bw // 2, y + round(bh * MOUTH_FRACTION))
     w.start_chewing(2.0)  # V2 什么也不做
     w.close()
 

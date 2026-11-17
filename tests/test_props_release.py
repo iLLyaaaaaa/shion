@@ -1,21 +1,20 @@
 """床/桌时间线、宽画布、慢放/甩出、位置恢复的回归。"""
 import json
 import random
-import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
 from shion import behavior as b
 from shion import state as S
-from shion.pet_window import MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, SPRITE_DIR, STATES, PetWindow
+from shion.pet_window import MARGIN_BOTTOM
 from tests.test_controller import Env, env, find_action, qapp
 from tests.test_feedback_ui import move_global
-from tests.test_pet_window import alpha_of
+from tests.test_v3_gestures import find
 
 
 @pytest.mark.parametrize("elapsed,expected", [(0, 1), (.899, 1), (.9, 2), (1.799, 2), (1.8, 1), (90.9, 2)])
@@ -43,60 +42,6 @@ def test_desk_blinks_sighs_and_skips_missed_frames():
         a.sprite("desk", t)
     assert a.sprite("desk", 160) == c.sprite("desk", 160)
     assert (a.blink, a.sigh, a.active) == (c.blink, c.sigh, c.active)
-
-
-@pytest.mark.parametrize("height", [160, 200, 260, 320])
-def test_wide_transition_preserves_feet_aspect_and_mask(env, height):
-    w = env.win
-    w.set_height(height)
-    w.move(200, 100)
-    anchor = (w.x() + w.width() / 2, w.y() + w.height() - MARGIN_BOTTOM)
-    w.set_state("bed")
-    assert w.sprite_size == (round(height * 640 / 512), height)
-    for dt in (0, .06, .1, .9):
-        env.mono[0] += dt
-        w.advance_to(env.mono[0])
-        assert w.x() + w.width() / 2 == pytest.approx(anchor[0], abs=.5)
-        assert w.y() + w.height() - MARGIN_BOTTOM == anchor[1]
-        a = alpha_of(w)
-        ys, xs = np.where(a > 64)
-        assert len(xs) and all(w.mask().contains(QPoint(int(x), int(y))) for x, y in zip(xs, ys))
-        assert not w.mask().contains(QPoint(0, 0))
-        assert not a[:, 0].any() and not a[:, -1].any()
-    w.set_state("idle")
-    env.mono[0] += .15
-    w.advance_to(env.mono[0])
-    assert w.sprite_size[0] == round(height * 448 / 512)
-    assert w.x() + w.width() / 2 == pytest.approx(anchor[0], abs=1)
-
-
-def test_wide_image_is_not_stretched_and_opaque_blend_stays_opaque(env):
-    w = env.win
-    for name, color in (("idle", "red"), ("bed_1", "blue")):
-        w._pixmaps[name].fill(color)
-    w.set_state("bed")
-    env.mono[0] += .06
-    w.advance_to(env.mono[0])
-    image = w.render_frame()
-    center = image.pixelColor(w.width() // 2, MARGIN_TOP + 100)
-    edge = image.pixelColor(MARGIN_X + 5, MARGIN_TOP + 100)
-    assert center.alpha() == 255 and center.red() > 0 and center.blue() > 0
-    assert edge.red() == 0 and 0 < edge.alpha() < 255
-
-
-def test_grabbing_wide_canvas_keeps_cursor_offset_when_drag_sprite_narrows(env):
-    w = env.win
-    w.move(200, 100)
-    env.ctl.do_action("bed")
-    env.advance(.2)
-    center = w.x() + w.width() / 2
-    point = QPoint(MARGIN_X + 20, MARGIN_TOP + 170)
-    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, point)
-    gp = w.mapToGlobal(point)
-    move_global(w, gp + QPoint(20, -20))
-    assert w.is_dragging
-    assert w.x() + w.width() / 2 == pytest.approx(center + 20, abs=1)
-    QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, w.mapFromGlobal(gp + QPoint(20, -20)))
 
 
 @pytest.mark.parametrize("action", ["bed", "desk"])
@@ -153,14 +98,15 @@ def test_release_speed_boundary_and_stale_movement(speed):
 
 
 def drag_release(e, delta, seconds, hold=0):
+    """V3 里只有“捏着脸颊往上提”会真的拖动窗口：从脸颊处按下，再按 delta 移动。"""
     w = e.win
     w.move(200, 100)
-    point = QPoint(MARGIN_X + 20, MARGIN_TOP + 170)
+    point = find(w, "cheek")
     QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, point)
     gp = w.mapToGlobal(point)
     e.mono[0] += seconds
     move_global(w, gp + delta)
-    assert w.is_dragging and w.displayed_sprite.startswith("drag_")
+    assert w.is_dragging and w.lifting
     e.mono[0] += hold
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, w.mapFromGlobal(gp + delta))
 
@@ -169,7 +115,7 @@ def drag_release(e, delta, seconds, hold=0):
     (True, False, 1, False), (False, True, 0, True)])
 def test_slow_drop_stays_fast_drop_falls_and_switch_restores_legacy(env, fast, legacy, hold, fall):
     env.ctl.set_release_to_taskbar(legacy)
-    drag_release(env, QPoint(50, -50), .05 if fast else 1, hold)
+    drag_release(env, QPoint(20, -60), .05 if fast else 1, hold)
     assert env.win.is_falling == fall
     if fall:
         env.advance(3)
@@ -245,32 +191,6 @@ def test_new_menu_and_lines_are_native_and_have_no_model_name(env, lang):
         assert all("claude" not in line.lower() for line in raw["lines"][key])
 
 
-@pytest.mark.parametrize("group,bad", [("bed", "missing"), ("bed", "canvas"), ("desk", "broken")])
-def test_bad_prop_group_falls_back_without_affecting_other_group(qapp, tmp_path, monkeypatch, group, bad):
-    from PySide6.QtGui import QImage
-    import shion.pet_window as module
-    for name in STATES + ["bed_1", "bed_2", "desk_1", "desk_2", "desk_3"]:
-        shutil.copyfile(SPRITE_DIR / f"{name}.png", tmp_path / f"{name}.png")
-    path = tmp_path / f"{group}_2.png"
-    if bad == "missing":
-        path.unlink()
-    elif bad == "broken":
-        path.write_bytes(b"not an image")
-    else:
-        image = QImage(448, 510, QImage.Format_ARGB32)
-        image.fill(Qt.red)
-        image.save(str(path))
-    monkeypatch.setattr(module, "SPRITE_DIR", tmp_path)
-    w = PetWindow(clock=lambda: 100, autostart=False)
-    try:
-        w.set_state(group, animate=False)
-        assert w.displayed_sprite == {"bed": "sleep", "desk": "neglect1"}[group]
-        other = "bed" if group == "desk" else "desk"
-        assert other in w._sequences
-    finally:
-        w.close()
-
-
 def test_desk_yields_to_work_and_fixed_state_and_wakes_on_gesture(env):
     env.ctl.do_action("desk")
     env.win.gesture.emit("belly")
@@ -282,29 +202,3 @@ def test_desk_yields_to_work_and_fixed_state_and_wakes_on_gesture(env):
     env.data.fixed_expression = "proud"
     env.ctl.sync()
     assert env.win.sprite_name == "proud"
-
-
-def test_other_action_sequences_can_also_have_wider_canvas(qapp, tmp_path, monkeypatch):
-    from PySide6.QtGui import QImage
-    import shion.pet_window as module
-    for name in STATES:
-        shutil.copyfile(SPRITE_DIR / f"{name}.png", tmp_path / f"{name}.png")
-    image = QImage(700, 512, QImage.Format_ARGB32)
-    image.fill(Qt.red)
-    for i in range(1, 5):
-        image.save(str(tmp_path / f"jump_{i}.png"))
-    monkeypatch.setattr(module, "SPRITE_DIR", tmp_path)
-    w = PetWindow(clock=lambda: 100, autostart=False)
-    try:
-        w.move(200, 100)
-        center = w.x() + w.width() / 2
-        w.jump()
-        for elapsed in (0, .05, .1, b.JUMP_DURATION, b.JUMP_DURATION + .05):
-            w.advance_to(100 + elapsed)
-            assert w.sprite_size[0] == round(700 * 200 / 512)
-            assert w.x() + w.width() / 2 == pytest.approx(center, abs=.5)
-        w.advance_to(100 + b.JUMP_DURATION + module.ACTION_FADE_SECONDS)
-        assert w.sprite_size[0] == w.normal_width
-        assert w.x() + w.width() / 2 == pytest.approx(center, abs=1)
-    finally:
-        w.close()

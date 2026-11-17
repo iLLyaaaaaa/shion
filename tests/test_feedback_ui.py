@@ -10,7 +10,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
 
-from shion.behavior import JUMP_DURATION
+from shion.behavior import LEGACY_JUMP_DURATION
 from shion.state import EXPRESSIONS, load
 from tests.test_controller import Env, BODY, env, find_action, qapp
 
@@ -113,7 +113,7 @@ def test_idle_actions_keep_final_window_position(env, action, monkeypatch):
     env.ctl.tick()
     if action == "talk":
         assert env.said[-1] in env.ctl.lines._lines["time_noon"]
-    env.win.advance_to(env.mono[0] + JUMP_DURATION + 0.1)
+    env.win.advance_to(env.mono[0] + LEGACY_JUMP_DURATION + 0.1)
     assert env.win.pos() == original
 
 
@@ -132,16 +132,17 @@ def test_jump_does_not_clip_changes_mask_and_returns_to_same_feet(env):
     w.set_state("done", animate=False)  # 静止基准，working 有轻呼吸，neglect2 有慢摇。
     original = pixels(w)
     w.jump()
-    env.mono[0] += JUMP_DURATION / 2
+    env.mono[0] += LEGACY_JUMP_DURATION / 2
     w.advance_to(env.mono[0])
     raised = pixels(w)
     assert not np.any(raised[0, :, 3])
     ys, xs = np.where(raised[:, :, 3] > 0)
     assert all(w.mask().contains(QPoint(int(x), int(y))) for x, y in zip(xs, ys))
     assert ys.max() < np.where(original[:, :, 3] > 0)[0].max()
-    env.mono[0] += JUMP_DURATION / 2
+    env.mono[0] += LEGACY_JUMP_DURATION / 2
     w.advance_to(env.mono[0])
-    assert np.array_equal(original, pixels(w))
+    # V3 的发丝/呼吸会让像素有细微差别，这里比脚底位置：落回原处
+    assert np.where(pixels(w)[:, :, 3] > 0)[0].max() == np.where(original[:, :, 3] > 0)[0].max()
 
 
 def move_global(w, gp):
@@ -151,32 +152,32 @@ def move_global(w, gp):
 
 
 def test_real_drag_reversals_trigger_dizzy_only_after_landing(env):
+    """V3：捏脸颊上提并被判定为“晃过”（判定本身见 test_v3_gestures 的三次晃动用例）→ 松手落地后才晕，晕不抢掉拖动台词。"""
+    from tests.test_v3_gestures import find
     w = env.win
     w.release_to_taskbar = True
     w.place_default()
-    initial = w.mapToGlobal(BODY)
-    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, BODY)
-    for dx in (60, 0, 60, 0):
-        env.now += timedelta(seconds=0.2)
-        env.mono[0] += 0.2
-        move_global(w, initial + QPoint(dx, -150))
-    assert w._shake.shaken
+    w.consume_shaken = lambda: True
+    point = find(w, "cheek")
+    initial = w.mapToGlobal(point)
+    QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, point)
+    move_global(w, initial + QPoint(0, -150))
+    env.advance(0.2)
     gp = initial + QPoint(0, -150)
     QTest.mouseRelease(w, Qt.LeftButton, Qt.NoModifier, w.mapFromGlobal(gp))
     assert w.is_falling and w.sprite_name == "drag"
     env.advance(0.1)
     assert w.sprite_name == "drag"
-    env.advance(0.5)
+    env.advance(0.9)
     assert not w.is_falling and w.sprite_name == "dizzy"
-    assert len(env.said) == 1 and env.said[-1] in env.ctl.lines._lines["drag"]
-    # 落地表情不受气泡冷却影响，晃晕台词不会抢掉刚说的拖动台词。
+    assert len(env.said) == 1 and env.said[-1] in env.ctl.lines._lines["cheek_lift"]
     env.advance(2.5)
     assert w.sprite_name == "idle"
 
 
 def test_working_interrupts_an_already_started_idle_jump(env):
     env.win.jump(automatic=True)
-    env.win.advance_to(env.mono[0] + JUMP_DURATION / 2)
+    env.win.advance_to(env.mono[0] + LEGACY_JUMP_DURATION / 2)
     assert env.win._jump_offset > 0
     env.ctl.handle_event("working")
     assert not env.win.motion_active and env.win._jump_offset == 0

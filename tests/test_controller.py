@@ -14,7 +14,8 @@ from shion import state as S
 from shion.controller import PetController, pick_screen_rect
 from shion.effects import HeartOverlay
 from shion.lines import Lines
-from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
+from shion.pet_window import MARGIN_TOP, MARGIN_X
+from shion.v3_window import V3PetWindow as PetWindow
 
 T0 = datetime(2026, 10, 19, 12, 0, 0)  # 白天，避开夜间睡眠
 BODY = QPoint(MARGIN_X + 60, MARGIN_TOP + 170)  # 普通身体区，肚子由专用手势测试覆盖
@@ -168,12 +169,14 @@ def test_drag_signals_switch_sprite_and_save_position(env):
 
 def test_real_mouse_drag_keeps_drag_sprite_while_falling(env):
     env.win.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
+    from tests.test_v3_gestures import find  # V3：只有捏着脸颊往上提才会拖动窗口
     env.win.place_default()
     env.win.show()
-    QTest.mousePress(env.win, Qt.LeftButton, Qt.NoModifier, BODY)
-    QTest.mouseMove(env.win, BODY + QPoint(0, -300))
+    cheek = find(env.win, "cheek")
+    QTest.mousePress(env.win, Qt.LeftButton, Qt.NoModifier, cheek)
+    QTest.mouseMove(env.win, cheek + QPoint(0, -300))
     assert env.win.sprite_name == "drag"
-    QTest.mouseRelease(env.win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(0, -300))
+    QTest.mouseRelease(env.win, Qt.LeftButton, Qt.NoModifier, cheek + QPoint(0, -300))
     assert env.win.is_falling
     env.advance(0.05)
     assert env.win.sprite_name == "drag"  # 下落途中仍是 drag

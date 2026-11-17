@@ -122,9 +122,10 @@ def test_repeated_hover_does_not_postpone_idle_sleep(env):
 
 def test_enter_leave_during_drag_keep_closed_hand_and_dragging(env):
     w = env.win
-    point = QPoint(MARGIN_X + 60, MARGIN_TOP + 170)
+    from tests.test_v3_gestures import find  # V3：捏着脸颊往上提才会拖动
+    point = find(w, "cheek")
     QTest.mousePress(w, Qt.LeftButton, Qt.NoModifier, point)
-    gp = w.mapToGlobal(point) + QPoint(20, -20)
+    gp = w.mapToGlobal(point) + QPoint(10, -40)
     move_global(w, gp)
     assert w.is_dragging and w.cursor().shape() == Qt.ClosedHandCursor
     QApplication.sendEvent(w, QEvent(QEvent.Leave))

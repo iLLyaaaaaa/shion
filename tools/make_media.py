@@ -56,6 +56,23 @@ def size_limit(name: str) -> int:
     return GIF_LIMIT if name.endswith(".gif") else WEEKLY_LIMIT if name.startswith("weekly.") else PNG_LIMIT
 
 
+def _use_inline_prewarm() -> None:
+    """配图要逐字节可重复：V3 的预热放在当前线程里做，免得后台线程的快慢决定哪一帧用上预热好的图。"""
+    from concurrent.futures import Future
+    import shion.v3_window as v3_window
+
+    class Inline:
+        def submit(self, fn, *args):
+            future = Future()
+            try:
+                future.set_result(fn(*args))
+            except BaseException as error:  # noqa: BLE001 - 与线程池一样把异常交给 future
+                future.set_exception(error)
+            return future
+
+    v3_window.PREWARM_EXECUTOR = Inline()
+
+
 def media_application():
     """在导入 GUI 前固定环境；复用既有 QApplication，不启动事件循环。"""
     if sys.platform == "win32":
@@ -79,6 +96,7 @@ def media_application():
     font = QFont(FONTS["en"])
     font.setPixelSize(13)
     app.setFont(font)
+    _use_inline_prewarm()
     return app
 
 

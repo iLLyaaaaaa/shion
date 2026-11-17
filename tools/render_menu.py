@@ -69,7 +69,7 @@ def worker(source: Path, out: Path) -> int:
     from shion.controller import PetController
     from shion.effects import HeartOverlay
     from shion.lines import Lines
-    from shion.pet_window import PetWindow
+    from shion.v3_window import V3PetWindow as PetWindow
     from shion.startup import Startup
     from tools.hooks_config import HookConnection
 

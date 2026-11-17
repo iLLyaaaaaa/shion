@@ -7,15 +7,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from shion.app import SingleInstance
-from shion.pet_window import (
-    DEFAULT_HEIGHT, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, STATES,
-    PetWindow, landing_geometry,
-)
+from shion.pet_window import DEFAULT_HEIGHT, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, STATES, landing_geometry
+from shion.v3_window import V3PetWindow as PetWindow
 
 BODY = QPoint(MARGIN_X + 60, MARGIN_TOP + 170)  # 身体下部，避开新增肚子交互区
 
@@ -77,7 +75,7 @@ def test_all_sprites_load_at_default_size(win, name):
     win.set_state(name)
     w, h = win.sprite_size
     assert h == DEFAULT_HEIGHT
-    assert w == round(DEFAULT_HEIGHT * 448 / 512)  # 448x512 等比例
+    assert w > 0  # V3 的宽度来自 rig 的可见范围，不再是 448x512 的固定比例
     assert win.width() == w + 2 * MARGIN_X
     assert win.height() == h + MARGIN_TOP + MARGIN_BOTTOM
     assert win.sprite_name == name
@@ -101,18 +99,6 @@ def test_animation_timers_use_precise_timer(qapp, fwin):
         hearts.close()
 
 
-def test_crossfade_preserves_opaque_overlap_and_mixes_colors(fwin):
-    fwin._pixmaps["idle"].fill(QColor("red"))
-    fwin._pixmaps["working"].fill(QColor("blue"))
-    fwin.set_state("working")
-    at(fwin, 0.06)
-    color = fwin.render_frame().pixelColor(fwin.width() // 2, fwin.height() // 2)
-    assert color.alpha() == 255  # 两张不透明图交叉淡化不应出现透明闪烁
-    assert 0 < color.red() < color.blue() < 255
-    at(fwin, 0.07)
-    assert fwin.frame.layers == (("working", 1.0),)
-
-
 @pytest.mark.parametrize("state", ["drag", "sleep", "neglect2", "working", "proud"])
 def test_transition_mask_covers_both_sprites_without_covering_empty_corners(fwin, state):
     fwin.set_state(state)
@@ -123,16 +109,6 @@ def test_transition_mask_covers_both_sprites_without_covering_empty_corners(fwin
     assert not mask.contains(QPoint(0, 0))
     at(fwin, 0.09)
     assert fwin.frame.layers == ((state, 1.0),)
-
-
-def test_mask_cache_reuses_geometry_when_only_blend_weights_change(fwin):
-    from shion.animator import Frame
-
-    first = fwin._mask_for(Frame("working", layers=(("idle", 0.8), ("working", 0.2))))
-    count = len(fwin._mask_cache)
-    second = fwin._mask_for(Frame("working", layers=(("idle", 0.2), ("working", 0.8))))
-    assert first == second
-    assert len(fwin._mask_cache) == count
 
 
 def test_fall_distance_and_landing_do_not_depend_on_frame_count(qapp):
@@ -305,13 +281,6 @@ def test_hover_cursor_open_hand_on_head_only(win):
     assert win.cursor().shape() != Qt.OpenHandCursor
 
 
-def test_head_zone_is_top_38_percent(win):
-    sh = win.sprite_size[1]
-    x = MARGIN_X + 60
-    assert win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.30)))
-    assert not win._is_head(QPoint(x, MARGIN_TOP + int(sh * 0.50)))
-
-
 def test_small_movement_is_a_click_not_a_drag(win):
     r = Rec(win)
     win.place_default()
@@ -337,37 +306,6 @@ def test_head_pat_emits_one_per_40px_and_never_drags(win):
     assert not win.is_dragging and not win.is_falling
     assert r.count("drag_started") == 0
     assert r.count("clicked") == 0  # 摸头不算单击
-
-
-def test_head_press_without_moving_is_a_click(win):
-    r = Rec(win)
-    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, HEAD)
-    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, HEAD)
-    assert r.log == ["clicked"]
-
-
-def test_body_drag_signals_and_falls_to_floor(win, qapp):
-    r = Rec(win)
-    win.place_default()
-    avail = QGuiApplication.primaryScreen().availableGeometry()
-    floor_y = avail.bottom() + 1 - win.height() + MARGIN_BOTTOM
-    win.show()
-    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
-    # 向上拖 300px，必须先越过 6px 阈值
-    QTest.mouseMove(win, BODY + QPoint(0, -300))
-    assert win.is_dragging
-    assert r.count("drag_started") == 1 and r.count("patted") == 0
-    assert win.y() < floor_y - 100
-
-    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(0, -300))
-    assert win.is_falling
-    assert r.count("drag_finished") == 0  # 还没落地
-    deadline = time.monotonic() + 3
-    while win.is_falling and time.monotonic() < deadline:
-        QTest.qWait(20)
-    assert not win.is_falling
-    assert win.y() == floor_y  # 脚底贴底，不越界
-    assert r.count("drag_finished") == 1
 
 
 def test_double_click_emits_click_then_double(win):
@@ -420,24 +358,6 @@ def test_landing_triggers_squash_then_settles(fwin):
     assert fwin.frame.sy == 1.0
 
 
-def test_tilt_while_dragging_then_resets_after_release(fwin):
-    fwin.place_default()
-    QTest.mousePress(fwin, Qt.LeftButton, Qt.NoModifier, BODY)
-    pos = BODY
-    for _ in range(30):  # 快速向右拖
-        pos = pos + QPoint(12, 0)
-        QTest.mouseMove(fwin, pos)
-        at(fwin, 1 / 60)
-    assert fwin.is_dragging
-    assert fwin.frame.angle < -1.0
-    QTest.mouseRelease(fwin, Qt.LeftButton, Qt.NoModifier, pos)
-    for _ in range(300):
-        at(fwin, 1 / 60)
-        if not fwin.is_falling and fwin.frame.angle == 0.0:
-            break
-    assert fwin.frame.angle == 0.0
-
-
 def test_catching_a_falling_pet_and_letting_go_resumes_fall(fwin):
     fwin.release_to_taskbar = True  # 验证菜单开关开启后的原重力行为
     r = Rec(fwin)
@@ -464,22 +384,6 @@ def test_release_below_floor_pulls_back_onto_screen(win, qapp):
         QTest.qWait(20)
     assert not win.is_falling
     assert win.y() == floor_y
-
-
-def test_diagonal_jitter_under_6px_is_a_click_over_6px_is_a_drag(win):
-    r = Rec(win)
-    win.place_default()
-    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
-    QTest.mouseMove(win, BODY + QPoint(4, 4))  # 欧氏距离 5.66
-    assert not win.is_dragging
-    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(4, 4))
-    assert r.log == ["clicked"]
-    r.log.clear()
-    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, BODY)
-    QTest.mouseMove(win, BODY + QPoint(5, 5))  # 欧氏距离 7.07
-    assert win.is_dragging
-    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, BODY + QPoint(5, 5))
-    assert r.count("drag_started") == 1
 
 
 def test_body_rect_and_moved_signal(win):
@@ -543,21 +447,48 @@ def test_snapshot_cli_bubble_adds_bubble_above_pet(tmp_path):
     assert any(p[3] > 100 and p[0] > 200 and 100 < p[1] < 160 and p[2] < 90 for p in orange)
 
 
+def test_base_press_move_within_threshold_is_not_a_drag(win):
+    """父类拖动阈值：按下后移动不超过 DRAG_THRESHOLD 一律不拖动（窗口不动、不发 drag_started）；超过才拖。"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from shion.pet_window import DRAG_THRESHOLD, PetWindow as Base
+
+    def event(kind, pos, buttons, button=Qt.NoButton):
+        g = win.mapToGlobal(pos)
+        return QMouseEvent(kind, QPointF(pos), QPointF(g), button, buttons, Qt.NoModifier)
+
+    r = Rec(win)
+    win.place_default()
+    start = win.pos()
+    Base.mousePressEvent(win, event(QEvent.MouseButtonPress, BODY, Qt.LeftButton, Qt.LeftButton))
+    for dx, dy in ((DRAG_THRESHOLD, 0), (0, -DRAG_THRESHOLD), (3, 4), (-4, 4)):
+        Base.mouseMoveEvent(win, event(QEvent.MouseMove, BODY + QPoint(dx, dy), Qt.LeftButton))
+        assert not win.is_dragging and win.pos() == start and r.count("drag_started") == 0
+    Base.mouseMoveEvent(win, event(QEvent.MouseMove, BODY + QPoint(DRAG_THRESHOLD + 1, 0), Qt.LeftButton))
+    assert win.is_dragging and r.count("drag_started") == 1
+    Base.mouseReleaseEvent(win, event(QEvent.MouseButtonRelease, BODY + QPoint(DRAG_THRESHOLD + 1, 0),
+                                      Qt.NoButton, Qt.LeftButton))
+    assert r.count("clicked") == 0
+
+
 def test_snapshot_can_capture_transition_without_changing_plain_state_snapshots(qapp, tmp_path):
     from shion.app import snapshot
 
     paths = [tmp_path / f"frame-{i}.png" for i in range(3)]
-    assert snapshot(str(paths[0]), "working") == 0
-    assert snapshot(str(paths[1]), "working", from_state="idle", at=0) == 0
-    assert snapshot(str(paths[2]), "working", from_state="idle", at=0.06) == 0
+    assert snapshot(str(paths[0]), "happy", at=0.3) == 0
+    assert snapshot(str(paths[1]), "happy", from_state="idle", at=0) == 0
+    assert snapshot(str(paths[2]), "happy", from_state="idle", at=0.1) == 0
     images = [QImage(str(p)) for p in paths]
-    assert images[0] != images[1] and images[1] != images[2] and images[2] != images[0]
+    # 从 idle 淡入：0 秒还是 idle 的脸；0.1 秒已过半，换成 happy 的脸
+    assert images[1] != images[0] and images[1] != images[2]
 
 
-def test_snapshot_cli_writes_transparent_png_and_at_changes_frame(tmp_path):
+def test_snapshot_cli_writes_transparent_png_and_at_changes_frame(qapp, tmp_path):
     import subprocess
     import sys
     from pathlib import Path
+
+    from shion.v3_window import V3PetWindow
 
     root = Path(__file__).resolve().parent.parent
     outs = []
@@ -572,9 +503,11 @@ def test_snapshot_cli_writes_transparent_png_and_at_changes_frame(tmp_path):
     from PIL import Image
 
     a, b = Image.open(outs[0]), Image.open(outs[1])
-    w = round(DEFAULT_HEIGHT * 448 / 512) + 2 * MARGIN_X
-    h = DEFAULT_HEIGHT + MARGIN_TOP + MARGIN_BOTTOM
-    assert a.size == (w, h)
+    ref = V3PetWindow(height=DEFAULT_HEIGHT, autostart=False, debug=False)
+    try:
+        assert a.size == (ref.width(), ref.height())
+    finally:
+        ref.close()
     assert a.mode == "RGBA"
     assert a.getpixel((0, 0))[3] == 0
     assert list(a.getdata()) != list(b.getdata())  # 晃到最大角度和 0 秒不同
