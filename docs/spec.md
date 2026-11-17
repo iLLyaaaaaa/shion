@@ -37,15 +37,11 @@ shion/
 
 ## 素材
 
-`assets/sprites/` 里有 16 张状态图（含 V2.1 的 yawn / slump / collapse / cheer）和动作帧（jump 4、drag 4、tickle 3、cheek 3、bed 2、desk 3）。普通图和 desk 为 448×512，bed 为 640×512；脚底基线一致。walk_1～8 及源图保留在仓库，运行时不加载、不播放。idle 人物 alpha 边界约为 (43, 24)～(401, 504)，实际交互区按下面的画布比例划分。
+运行时角色是 V3（`assets/sprites/v3/`，见 V3 各章）；`assets/sprites/` 顶层只剩睡觉 Z 的 `fx_z.png`。V2 的 43 张精灵图、`tools/process_sprites.py` 与 `tools/process_sheets.py` 已在 v3.0.0 删除（R3），旧图在 git 历史里。
 
-处理脚本 `tools/process_sprites.py`：不依赖固定坐标，把 `raw/` 的原图清理 alpha 去毛边；以 idle 为基准把站立图的人物高度统一到 480，坐着/悬空的图（sleep/drag/neglect2）用站立图的平均缩放比例；脚底贴底，水平按头部（上部 40%）重心居中，切换表情时头不跳；个别图用 `EXTRA_SCALE` 手动微调。
+周报立绘（R3）：`assets/weekly/{idle,happy,done,cheer,yawn,slump,collapse}.png`，由 `python -m tools.v3_weekly_sprites` 用 `Rig.rest(表情)`（idle→neutral、happy/done/cheer→happy、yawn→yawn、slump→tired）和 collapse scene 角色层生成，透明底、裁到可见范围、高 860；文件名即 `weekly_titles.json` 的 `sprite` 键。
 
-`tools/process_sheets.py` 处理 raw 下 walk / jump / drag / tickle / cheek / bed / desk 分帧图，预期帧数为 8 / 4 / 4 / 3 / 3 / 2 / 3；普通状态脚本跳过 `*_sheet`。raw 里的 turn_sheet.png 保留但不再处理，也不再生成 turn_1～8（转身与朝向鼠标已删除）；运行时不加载 turn 帧，旧目录里残留的 turn_*.png 被忽略。运行时 jump / drag 继续按实际连续数字编号加载任意帧数；tickle / cheek 分别必须完整提供 3 / 3 帧，且整组可解码、组内画布一致、高度与 idle 一致（允许不同宽度）。每组独立回退：捏脸回退 stop，挠痒回退 happy 加左右扭动；不生成镜像。
-
-同一脚本也处理 bed / desk（2 / 3 帧），带道具按整体边界居中，`WIDE` 指定各自画布宽度。运行时同组帧须完整、同尺寸且高度与 idle 相同，宽度允许不同；bed 缺图/坏图回退 sleep，desk 回退 neglect1，互不影响。
-
-sleep 在 alpha 清理后仅保留面积最大的连通块；bed 先分帧，每帧再仅保留最大连通块，然后计算缩放/对齐，去除素材内漂浮的 Z。`fx_z.png` 为清理后的 raw/sleep.png 中除人物外面积最大的连通块，保留原像素、透明底裁边，供程序动画使用。`tools/process_sprites.py --only sleep` 只写 sleep 与 fx_z；`--only yawn cheer slump collapse` 只写这四张（yawn、cheer 按站立图缩放，slump、collapse 按站立平均比例；宽于画布时整体贴进画布而不是头居中）；`tools/process_sheets.py --only bed` 只写 bed_1 / bed_2，不覆盖其他素材或 raw。
+下表是状态的含义（原 V2 精灵文件名，现在对应 V3 表情 / 姿势）：
 
 | 文件 | 用途 |
 |---|---|
@@ -545,7 +541,7 @@ CC 看不到屏幕，所以设计上必须让大部分东西能**不靠人眼**�
 1. **打包成 exe**（建议交给 Codex）
    - 用 PyInstaller 的 onedir 模式（启动比 onefile 快，也不容易被杀毒软件误报），输出 `dist/Shion/Shion.exe`
    - `assets/` 跟随打包；代码里查找资源路径要同时兼容源码运行和打包运行（`sys._MEIPASS` / exe 所在目录）
-   - `tools/make_icon.py` 从现有 idle 精灵裁出头部，生成 `assets/icon/shion.ico`（256/64/48/32/16）及对应 PNG；16/32 单独锐化和描边。exe 使用 ICO，窗口使用同组多尺寸 PNG，不使用 Anthropic / Claude 标志；图标预览用 `python -m shion --snapshot docs/images/icon-preview.png --icon-preview`
+   - `tools/make_icon.py` 从 V3 neutral 静止图（`Rig.rest("neutral")`，按头发整团包围盒 `v3_scene.standing_head_box()` 裁）裁出头部，生成 `assets/icon/shion.ico`（256/64/48/32/16）及对应 PNG；16/32 单独锐化和描边。exe 使用 ICO，窗口使用同组多尺寸 PNG，不使用 Anthropic / Claude 标志；图标预览用 `python -m shion --snapshot docs/images/icon-preview.png --icon-preview`
    - exe 版本资源从 `shion.__version__` 生成；ProductName / FileDescription 为 Shion，CompanyName 为 iLLyaaaaaa
    - `tools/build.py` 一条命令完成构建、复制目录自检及 ZIP 完整性验证，生成 `dist/Shion-2.0.0-win64.zip`；ZIP 根目录包含 `Shion/` 完整运行目录、`LICENSE` 和 `assets/LICENSE`。大小与 SHA-256 写入 `build/release-report.json`，并记录到 progress
    - 现已预留 `sys.frozen` → 当前 `Shion.exe --hook <事件名>`，入口在加载 GUI 前分派到原 hook 的标准库逻辑，SessionStart 拉起当前 exe；源码命令仍沿用 `.venv/Scripts/python.exe` + 绝对 hook 路径。实际打包后还需验证标准流、资源路径、启动耗时；如需独立 `shion-hook.exe`，再按实测决定

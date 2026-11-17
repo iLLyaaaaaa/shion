@@ -154,12 +154,13 @@ def test_lower_tiers_use_dedicated_sprites(env):
     assert e.state.stamina_level==2 and e.state.current(e.now)=='slump'
 
 
-def test_new_stamina_sprites_exist_with_canvas_size():
+def test_weekly_sprites_exist_and_are_cropped_v3_images():
+    from pathlib import Path
     from PIL import Image
-    from shion.pet_window import SPRITE_DIR
-    for name in ('yawn','slump','collapse','cheer'):
-        with Image.open(SPRITE_DIR/f'{name}.png') as img:
-            assert img.size==(448,512)
+    folder=Path(__file__).parents[1]/'assets/weekly'
+    for name in ('idle','happy','done','cheer','yawn','slump','collapse'):
+        with Image.open(folder/f'{name}.png') as img:
+            assert img.mode=='RGBA' and img.height==860 and img.getchannel('A').getextrema()==(0,255)
 
 
 def test_seven_day_last_known_shows_age_until_reset(env):

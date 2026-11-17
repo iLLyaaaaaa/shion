@@ -13,6 +13,7 @@ for directory in ("lines", "menu"):
     datas += [(str(p), f"assets/{directory}") for p in sorted((assets / directory).glob("*.json"))]
 # 只带运行图；不递归收集 raw、草稿、备份等素材源文件。
 datas += [(str(p), "assets/sprites") for p in sorted((assets / "sprites").glob("*.png"))]
+datas += [(str(p), "assets/weekly") for p in sorted((assets / "weekly").glob("*.png"))]
 datas += [(str(p), "assets/icon") for p in sorted((assets / "icon").glob("*.png"))]
 
 a = Analysis(

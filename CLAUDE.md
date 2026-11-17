@@ -13,7 +13,7 @@
 - 每个步骤结束时：跑测试 → 让用户按验收清单验收 → 更新 `docs/progress.md`（做了什么、下一步、踩过的坑）→ `git commit`
 - **未经用户同意不 push**，不建远程仓库；引入新依赖、做大的结构调整前先问
 - **不要打开 PNG 图片**（很费 token）。需要检查画面时用 `python -m shion --snapshot` 生成截图，只看截图
-- 不要修改 `reference/`、`assets/sprites/raw/`；精灵图只能通过 `tools/process_sprites.py` 重新生成
+- 不要修改 `reference/`、`assets/sprites/raw/`；V3 素材只能通过 `tools/v3_*.py` 重新生成
 - 主平台 Windows：路径用 `pathlib`；命令用 `.venv\Scripts\python`
 - 在 worktree 里创建的 `.venv`、`assets/sprites/raw` 等 junction，任务结束前必须先单独解除（仅移除链接，不递归删除目标）；移除任何 worktree 前，先扫描其中是否有 reparse point，有就先解除再移除。
 - 测试：`.venv\Scripts\python -m pytest -q`。长日志写进文件，不要整段输出到对话里
@@ -24,5 +24,5 @@
 - `docs/spec.md` 完整规格（窗口、交互、状态机、通信协议、开发步骤）
 - `docs/progress.md` 进度与交接记录
 - `shion/` 主程序 · `tests/` 测试 · `hooks/` CC hook 脚本
-- `assets/sprites/` 12 张精灵图（448x512，已对齐）· `assets/lines/zh.json` 台词
-- `tools/process_sprites.py` 素材处理脚本
+- `assets/sprites/v3/` V3 角色素材 · `assets/weekly/` 周报立绘 · `assets/lines/zh.json` 台词
+- `tools/v3_*.py` 素材处理脚本

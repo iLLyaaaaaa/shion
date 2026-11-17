@@ -28,7 +28,13 @@
   - **踩坑**：①Qt 回调（`paintEvent`、`enterEvent`、`contextMenuEvent`）离屏测试里次数为 0 但真实窗口会调，不能按“0 次”删；②引用搜索用 PCRE 边界，别用 `\b`（`_v3_pose` 会被当成 `_pose`）；③同一进程里“互不相同”的测试会被热缓存骗过，V3 的后台预热让截图要在新进程里验；④`SwayEnvelope` 默认无种子导致同种子的整条时间线都不可重复；⑤`behavior.py` 删除脚本里 `"JUMP_DURATION" not in s` 会被 `LEGACY_JUMP_DURATION` 误伤；⑥bash 里用 here-doc 写带中文和引号的长脚本容易整段失败，改用 Write 工具写文件再运行；⑦不要在改动中途 `git stash`（这次手快 stash 又 pop 过一次，没丢东西，但很危险）。
   - **真机验收项（用户已确认没问题）**（源码运行，在 worktree 里 `.\.venv\Scripts\python -m shion`；主目录 `claude pet` 是 v2.2 分支，别在那里启动）：启动默认就是 V3（无参数）；捏脸 / 拎起 / 摸头 / 敲头 / 挠痒；落地、夹边、慢放停留；右键菜单、各类面板位置、暂停标签；左半屏存档位置启动直接是右鼓；`--snapshot` 新参数的截图（见 `build/v300/r2/shots/`）。
   - **下一步**：R3 周报立绘与图标换 V3，随后删 V2 精灵 PNG 与 `tools/process_sprites.py`（【停点 R3】）。
-- [ ] R3 周报立绘与图标换 V3，随后删 V2 精灵 PNG——【停点 R3】
+- [x] R3 周报立绘与图标换 V3，随后删 V2 精灵 PNG 与 `tools/process_sprites.py`（2026-11-17，本地提交，停在【停点 R3】等用户看图确认；不满意可回退本提交）
+  - **周报**：新增 `tools/v3_weekly_sprites.py`（`Rig.rest(表情)` + collapse scene 角色层，透明、裁到可见范围、高 860），生成 `assets/weekly/` 7 张（idle→neutral，happy/done/cheer→happy，yawn，slump→tired，collapse）；`weekly_ui.py` 改读 `assets/weekly/`；`weekly_titles.json` 不变；`Shion.spec` 加了一行打包 `assets/weekly`（R4 还要整体收 V3 素材）。三语预览在 `build/v300/r3/weekly-{zh,en,ja}.png`。
+  - **图标**：`tools/make_icon.py` 改为从 V3 neutral 静止图按 `v3_scene.standing_head_box()` 裁头部，重出 5 个尺寸、`shion.ico`、`docs/images/icon-preview.png`。
+  - **删除**：`assets/sprites/` 顶层 43 张 V2 精灵（留 `fx_z.png`）、`tools/process_sprites.py`。CLAUDE.md、spec“素材”章节已同步；三语 README“从源码运行”里提到 `process_sprites.py` 的句子留到 R6。
+  - **测试**：`test_weekly`、`test_release`（改验 rig.json 不被改动）、`test_stamina_ui`（改验周报立绘）已迁移。全仓 `-X faulthandler`：1 failed、2885 passed、9 skipped（35 分钟，日志 `build/v300/r3/full.log`）；唯一失败 `test_interrupt::test_find_cc_process_on_this_machine_matches_claude_pid` 依赖运行环境里的 Claude 进程，单独复跑该文件 84 passed，与本步无关。
+  - **踩坑**：命令里误带 `git stash`，立刻 `stash pop` 恢复，无丢失（V2 精灵删除由已暂存变成未暂存，不影响结果）。
+  - **下一步**：用户确认周报与图标后做 R4 打包。
 - [ ] R4 打包：Shion.spec 收 V3 素材与依赖、bundle_smoke 加 V3 自检、ZIP 体积前后对比
 - [ ] R5 reviewer 审查——【停点 R5】
 - [ ] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】

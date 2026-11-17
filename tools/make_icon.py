@@ -1,4 +1,4 @@
-"""从现有 idle 精灵裁取头部；不修改精灵或 raw，使用已有 Pillow。"""
+"""从 V3 neutral 静止图裁取头部（呆毛、花饰、两侧头发）；不修改素材或 raw，使用已有 Pillow。"""
 from __future__ import annotations
 
 import argparse
@@ -13,15 +13,23 @@ if str(ROOT) not in sys.path:
 
 from shion.icons import ICON_SIZES
 
-# 当前 448×512 的 idle：包含呆毛、发饰与两侧头发，止于头部下缘。
-HEAD_BOX = (44, 22, 395, 286)
+
+
+def head_image() -> Image.Image:
+    """V3 neutral 静止图按头发整团包围盒（rig 坐标）裁切，再收到可见像素。"""
+    from tools.v3_scene import standing_head_box
+    from v3proto.render import Rig
+
+    rig = Rig()
+    box = standing_head_box()
+    if not (0 <= box[0] < box[2] <= rig.size[0] and 0 <= box[1] < box[3] <= rig.size[1]):
+        raise ValueError("头部包围盒超出 rig 画布，请先检查 rig.json")
+    head = rig.rest("neutral").crop(box)
+    return head.crop(head.getbbox())
 
 
 def generate_icons(output: Path) -> None:
-    with Image.open(ROOT / "assets/sprites/idle.png") as source:
-        if source.size != (448, 512):
-            raise ValueError("idle 精灵尺寸已改变，请先重新确认 HEAD_BOX")
-        head = source.convert("RGBA").crop(HEAD_BOX)
+    head = head_image()
     output.mkdir(parents=True, exist_ok=True)
     frames = {}
     for size in ICON_SIZES:

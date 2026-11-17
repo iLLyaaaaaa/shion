@@ -506,7 +506,7 @@ def test_titles_have_new_comments_sprites_and_no_product_name():
     for rule in rules:
         sprite, zh = EXPECTED_TITLES[rule['id']]
         assert rule['sprite'] == sprite and rule['comment']['zh'] == zh
-        assert (Path(__file__).parents[1] / 'assets/sprites' / (sprite + '.png')).is_file()
+        assert (Path(__file__).parents[1] / 'assets/weekly' / (sprite + '.png')).is_file()
         for lang in ('zh', 'en', 'ja'):
             assert rule['name'][lang] and rule['comment'][lang]
     quota = next(r for r in rules if r['id'] == 'quota')

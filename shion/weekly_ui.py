@@ -224,9 +224,9 @@ def paint_card(painter, data, branding=True):
         text(64, 222, 620, 140, data['title']['name'], 128, ACCENT, True, hero=True)
         wrapped(64, 372, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
         sprite_name = data['title']['sprite']
-    sprite = QImage(str(ROOT / 'assets/sprites' / (sprite_name + '.png')))
+    sprite = QImage(str(ROOT / 'assets/weekly' / (sprite_name + '.png')))
     if sprite.isNull():
-        sprite = QImage(str(ROOT / 'assets/sprites/idle.png'))
+        sprite = QImage(str(ROOT / 'assets/weekly/idle.png'))
     if not sprite.isNull():
         size = sprite.size().scaled(QSize(int(SPRITE_RECT.width()), int(SPRITE_RECT.height())), Qt.KeepAspectRatio)
         painter.drawImage(QRectF(SPRITE_RECT.x() + (SPRITE_RECT.width() - size.width()) / 2, SPRITE_RECT.y(),

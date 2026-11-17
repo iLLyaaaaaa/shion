@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_generated_icons_are_repeatable_and_ico_keeps_each_custom_frame(tmp_path):
-    idle = ROOT / "assets/sprites/idle.png"
-    before = hashlib.sha256(idle.read_bytes()).digest()
+    rig = ROOT / "assets/sprites/v3/rig.json"
+    before = hashlib.sha256(rig.read_bytes()).digest()
     first, second = tmp_path / "first", tmp_path / "second"
     generate_icons(first)
     generate_icons(second)
@@ -34,7 +34,7 @@ def test_generated_icons_are_repeatable_and_ico_keeps_each_custom_frame(tmp_path
                 assert frame.getchannel("A").getextrema() == (0, 255)
                 assert ico.ico.getimage((size, size)).convert("RGBA").tobytes() == frame.tobytes()
     assert (first / "shion.ico").read_bytes() == (second / "shion.ico").read_bytes() == (ICON_DIR / "shion.ico").read_bytes()
-    assert hashlib.sha256(idle.read_bytes()).digest() == before
+    assert hashlib.sha256(rig.read_bytes()).digest() == before
 
 
 def test_application_identity_and_inherited_window_icons(qapp, monkeypatch):
