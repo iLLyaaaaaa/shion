@@ -35,7 +35,25 @@
   - **测试**：`test_weekly`、`test_release`（改验 rig.json 不被改动）、`test_stamina_ui`（改验周报立绘）已迁移。全仓 `-X faulthandler`：1 failed、2885 passed、9 skipped（35 分钟，日志 `build/v300/r3/full.log`）；唯一失败 `test_interrupt::test_find_cc_process_on_this_machine_matches_claude_pid` 依赖运行环境里的 Claude 进程，单独复跑该文件 84 passed，与本步无关。
   - **踩坑**：命令里误带 `git stash`，立刻 `stash pop` 恢复，无丢失（V2 精灵删除由已暂存变成未暂存，不影响结果）。
   - **下一步**：用户确认周报与图标后做 R4 打包。
-- [ ] R4 打包：Shion.spec 收 V3 素材与依赖、bundle_smoke 加 V3 自检、ZIP 体积前后对比
+- [x] R4 打包（2026-11-17，本地提交，停在 R4 结果给用户过目；THIRD_PARTY_NOTICES 待用户看）
+  - **取证**（`tools/v3_runtime_trace.py`，新进程里跑 16 状态×两侧、5 手势×两侧、周报三语 + 每个称号立绘、图标）：用 `sys.addaudithook` 的 open 事件加 QImage / QPixmap / QIcon 子类（记录路径构造与 load / addFile，Qt 在 C++ 里读的 `fx_z.png`、周报立绘、图标都抓到了）。运行期读 176 个 assets 文件，与 spec 清单（175 个 + `weekly_titles.json` 由别处收）逐项相等。运行期**不读**：`parts/`、`parts_map.json`、`sources.json`、`scene_map.json`、整脸源图 `expr_<表情>.png`（7 张，rig.json 的 `expression_sources` 只记来源）、旧 `pink_cleanup.png`（实际用 `manual_reference_patch.png`），都不收。清单只在 `tools/v3_bundle_files.py` 一处，spec / 测试 / smoke 共用。`tests/test_v3_runtime_files.py` 6 项，约 4.5 分钟。
+  - **scipy 裁剪**：不逐条试。全状态运行后 sys.modules 里实际加载的 scipy 模块共 198 个，只落在 `_lib / linalg / ndimage / sparse / special`（清单 `build/v300/r4/trace.json`，不入库）；`cluster constants datasets differentiate fft fftpack integrate interpolate io misc odr optimize signal spatial stats` 15 个从未加载的子包加入 excludes，测试断言排除项与已加载模块不重叠。Pillow 只加载了 PNG 插件，排除 `_avif / _webp / _imagingtk / ImageTk`（`_avif` 一个就近 8 MB）。依赖固定为 scipy 1.15.3 / pillow 12.3.0，`build.py` 的 versions 报告加上这两项。`THIRD_PARTY_NOTICES.md` 追加 SciPy、Pillow 全文（取自 dist-info，各 47 KB / 78 KB）。
+  - **自检**：`shion.exe --self-check-v3`（`shion/bundle_check_v3.py`）冻结 exe 里 29 项：16 状态渲染非空、捏脸帧与静止不同且动画器姿态拉伸 >30 像素、松手 6 秒后回弹 <1 像素、左右 neutral 不同且可见高度 / 脚底一致、`_v3_drop_side` 后 `_RIGS` 不含旧侧、bed / desk / collapse 三个 scene 真载入且窗口宽度符合公式（desk 比站姿窄所以不变宽，collapse 同宽，只有 bed 加宽 132→158）。`bundle_smoke` 新增：素材清单反查（包内 assets/sprites + weekly = 清单 175 个；无 V2 精灵 / raw / parts；无 tests / build / .venv）、V3 截图（`--gesture pinch`、`--side right`，desk 去掉 `--desk-blink`）、真实窗口隔离启动（独立 HOME / 数据目录 / 端口 / 单实例名，原生平台，约 30 秒在桌面上显示诗音）：25 秒后取 5 次工作集中位数，再对所有线程投 `WM_QUIT` 走正常退出路径，要求退出码 0、`shion.log` 无 Traceback / ERROR、存档已写；另核对真实 `~/.claude/settings.json` 哈希前后不变。
+  - **结果**（两次构建，日志 `build/v300/r4/build{1,2}.log`、`bundle-report-*.json`、`size-report-*.json`）：126 项检查全过。第一次（只改 scipy）177.08 MB / 410 文件、ZIP 79,575,691 字节；第二次（再去掉 Pillow 三个扩展）**168.75 MB / 407 文件、ZIP 75,028,566 字节**（SHA-256 `c3d56c01…e1af1814`，注意 ZIP 文件名仍是 2.2.0，R6 才改版本号）。**仍超过 150 MB**（build.py 的提示线）：大头是两份 OpenBLAS（numpy.libs 20.4 MB + scipy.libs 20.2 MB，各自随 wheel 带，不能删）、Qt 51.5 MB、scipy 27.1 MB、V3 素材 17.8 MB。未再往下裁。
+  - **体积对比**：
+
+    | | v2.2.0 | v3.0.0（R4） |
+    |---|---|---|
+    | ZIP | 46,380,724 字节 | 75,028,566 字节 |
+    | 解压目录 | 105.75 MB / 230 文件 | 168.75 MB / 407 文件 |
+    | 新增最大 | — | numpy.libs OpenBLAS 20.4 MB（numpy 自带，非新增）、scipy.libs OpenBLAS 20.2 MB、scipy 27.1 MB、assets 17.8 MB（V3 素材 +17 MB，V2 精灵 −8 MB）、numpy / PIL 变大 |
+
+    （推算，未逐项对 v2.2.0 目录实测：numpy 2.2.6 的 wheel 本来就带 numpy.libs 的 OpenBLAS，净新增主要是 scipy 27.1 + scipy.libs 20.2 MB、V3 素材按总计划估算净增约 9 MB。）
+  - **打包版工作集**（原生窗口隔离启动，启动 25 秒后 5 次中位数）：第一次构建 221.8 MB（峰值 254.2 MB）、第二次 226.4 MB（峰值 255.1 MB），都低于 260 MB；对照源码 R1 同法 254.8 MB。专用内存（`PrivateUsage`，是提交量不是常驻）约 1.7 GB 不作比较。两次差别在噪声内，不是裁剪造成。
+  - **全仓测试**（`-X faulthandler`，日志 `build/v300/r4/full.log`）：**2892 passed、9 skipped、2 条既有 Pillow 弃用警告，退出码 0**（43 分钟，无崩溃输出）。
+  - **踩坑**：①待机的呼吸 / 眨眼本身让相邻两帧差约一万像素，“捏脸回弹”只能用动画器的姿态判断，帧差只做兜底；②捏脸回弹的弹簧积分一步跳 6 秒不收敛，要按 0.1 秒一步走；③desk scene 比站姿窄，窗口宽度检查要按 `extra_half_width` 公式，不能写“一律变宽”；④`PostThreadMessageW(WM_QUIT)` 能让 Qt 走 `app.quit`，是外部触发正常退出的办法（诗音没有别的外部退出入口）；⑤`bundle_smoke` 的 `isolated_environment` 已有唯一的 `SHION_INSTANCE_NAME`（互斥锁和管道名）与 `SHION_PORT`、隔离 APPDATA / CLAUDE_CONFIG_DIR，所以和正在用的 Shion-dev 不会冲突；单实例第二个进程只是直接退出，不转发任何东西。
+  - **留下的问题**：①NumPy 已随 v2.2.0 分发，但 `THIRD_PARTY_NOTICES.md` 里没有它的许可，这次没加（范围外），建议 R6 补；②包还是 168 MB，若要再瘦只能动 Qt 或二选一 OpenBLAS，风险大，没做；③spec 里 `datas` 还带 `assets/icon` 的 `*.png`（icon 目录文件都被运行时读，已由取证确认）。
+  - **下一步**：用户过目 THIRD_PARTY_NOTICES 与体积表后进 R5 reviewer 审查。
 - [ ] R5 reviewer 审查——【停点 R5】
 - [ ] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】
 - [ ] R7 打包版真机验收（exe）与替换 Shion-dev——【停点 R7】

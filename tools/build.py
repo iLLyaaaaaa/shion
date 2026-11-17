@@ -133,7 +133,7 @@ def main() -> int:
                   "over_150_MB": total > 150_000_000, "files": len(files),
                   "largest": [{"path": p.relative_to(bundle).as_posix(), "bytes": p.stat().st_size} for p in files[:10]],
                   "groups": dict(sorted(groups.items(), key=lambda pair: pair[1], reverse=True)),
-                  "versions": {name: version(name) for name in ("PyInstaller", "pyinstaller-hooks-contrib", "PySide6", "numpy")}}
+                  "versions": {name: version(name) for name in ("PyInstaller", "pyinstaller-hooks-contrib", "PySide6", "numpy", "scipy", "pillow")}}
         (build / "size-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"Bundle: {report['MB']} MB / {report['MiB']} MiB ({total} bytes, {len(files)} files)", flush=True)
         if report["over_150_MB"]:

@@ -5,25 +5,39 @@ import sys
 root = Path(SPECPATH)
 sys.path.insert(0, str(root))
 from tools.build import windows_version_info
+from tools.v3_bundle_files import spec_datas
 
 assets = root / "assets"
 datas = [(str(assets / name), "assets") for name in ("affection.json", "pricing.json", "weekly_titles.json")]
 datas.append((str(root / "THIRD_PARTY_NOTICES.md"), "."))
 for directory in ("lines", "menu"):
     datas += [(str(p), f"assets/{directory}") for p in sorted((assets / directory).glob("*.json"))]
-# 只带运行图；不递归收集 raw、草稿、备份等素材源文件。
-datas += [(str(p), "assets/sprites") for p in sorted((assets / "sprites").glob("*.png"))]
-datas += [(str(p), "assets/weekly") for p in sorted((assets / "weekly").glob("*.png"))]
+# 运行期素材按 tools/v3_bundle_files.py 的清单显式收（V3 零件 / scene、fx_z、周报立绘）；
+# 不递归收集 raw、parts、草稿、备份等素材源文件。清单由 tests/test_v3_runtime_files.py 取证核对。
+datas += spec_datas(root)
 datas += [(str(p), "assets/icon") for p in sorted((assets / "icon").glob("*.png"))]
 
 a = Analysis(
     [str(root / "shion" / "__main__.py")],
     pathex=[str(root)],
     binaries=[], datas=datas,
-    hiddenimports=["hooks.shion_hook", "hooks.shion_statusline", "tools.hooks_config", "shion.console_send", "shion.bundle_check"],
+    hiddenimports=[
+        "hooks.shion_hook", "hooks.shion_statusline", "tools.hooks_config", "shion.console_send", "shion.bundle_check",
+        # V3：多数在函数内导入
+        *[f"shion.v3_{name}" for name in ("window", "display", "layers", "prewarm", "memory", "scene", "scene_view")],
+        *[f"v3proto.{name}" for name in ("render", "animation", "cheek", "face", "mirror", "motion", "reaction",
+                                         "reaction_face", "sampling", "stars", "surface", "head_touch", "tickle", "lift")],
+    ],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=[
-        "scipy", "PIL", "pytest", "tkinter", "matplotlib",
+        # 运行期只用 scipy.ndimage（及其依赖 _lib / linalg / sparse / special）；
+        # 下面这些子包在 build/v300/r4/trace.json 的全状态运行里一个模块都没加载过。
+        "scipy.cluster", "scipy.constants", "scipy.datasets", "scipy.differentiate", "scipy.fft", "scipy.fftpack",
+        "scipy.integrate", "scipy.interpolate", "scipy.io", "scipy.misc", "scipy.odr", "scipy.optimize",
+        "scipy.signal", "scipy.spatial", "scipy.stats",
+        # Pillow 只读写 PNG：去掉 AVIF / WebP / Tk 的原生扩展（_avif 一个就近 8 MB）
+        "PIL._avif", "PIL._webp", "PIL._imagingtk", "PIL.ImageTk",
+        "pytest", "tkinter", "matplotlib",
         "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
         "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets", "PySide6.QtQuick3D",
         "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "PySide6.QtPdf", "PySide6.QtPdfWidgets",

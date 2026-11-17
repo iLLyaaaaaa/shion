@@ -29,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["--console-send"]:
         from shion.console_send import main as console_send
         return console_send(argv[1:])
+    if argv[:1] == ["--self-check-v3"]:
+        from shion.bundle_check_v3 import main as check_v3
+        return check_v3(argv[1:])
     if argv[:1] == ["--self-check-connection"]:
         from shion.bundle_check import main as check_connection
         return check_connection(argv[1:])

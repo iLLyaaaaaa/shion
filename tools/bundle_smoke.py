@@ -184,6 +184,83 @@ def own_processes(exe: Path, terminate=False) -> list[int]:
     return result
 
 
+def process_memory(pid: int) -> dict:
+    """进程当前工作集 / 专用内存（字节），用 psapi，标准库即可。"""
+    class Counters(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+                    ("PrivateUsage", ctypes.c_size_t)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        counters = Counters()
+        counters.cb = ctypes.sizeof(counters)
+        if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return {"working_set": counters.WorkingSetSize, "peak_working_set": counters.PeakWorkingSetSize,
+                "private": counters.PrivateUsage}
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def quit_gracefully(pid: int, timeout: float = 20.0) -> int:
+    """给目标进程的所有线程投 WM_QUIT（Qt 的 Windows 事件循环收到后走 QCoreApplication.quit，即正常退出路径），
+    等它退出并返回退出码。超时抛错，不强制结束（由调用方的 finally 清理）。"""
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    user = ctypes.WinDLL("user32", use_last_error=True)
+
+    class ThreadEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ThreadID", wintypes.DWORD),
+                    ("th32OwnerProcessID", wintypes.DWORD), ("tpBasePri", wintypes.LONG),
+                    ("tpDeltaPri", wintypes.LONG), ("dwFlags", wintypes.DWORD)]
+
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.Thread32First.argtypes = kernel.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    user.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    handle = kernel.OpenProcess(0x100000 | 0x1000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        snapshot = kernel.CreateToolhelp32Snapshot(0x4, 0)  # TH32CS_SNAPTHREAD
+        entry = ThreadEntry()
+        entry.dwSize = ctypes.sizeof(entry)
+        posted = 0
+        try:
+            more = kernel.Thread32First(snapshot, ctypes.byref(entry))
+            while more:
+                if entry.th32OwnerProcessID == pid and user.PostThreadMessageW(entry.th32ThreadID, 0x0012, 0, 0):
+                    posted += 1
+                more = kernel.Thread32Next(snapshot, ctypes.byref(entry))
+        finally:
+            kernel.CloseHandle(snapshot)
+        if not posted:
+            raise RuntimeError("没有投递成功任何 WM_QUIT")
+        if kernel.WaitForSingleObject(handle, int(timeout * 1000)) != 0:
+            raise RuntimeError("正常退出超时")
+        code = wintypes.DWORD()
+        kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        return code.value
+    finally:
+        kernel.CloseHandle(handle)
+
+
 class MockHooks:
     def __init__(self):
         self.events = []
@@ -286,6 +363,8 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
         cwd.mkdir()
         env = isolated_environment(base / "home")
         before = manifest(relocated)
+        real_settings = Path(os.environ.get("USERPROFILE", "")) / ".claude" / "settings.json"
+        settings_before = hashlib.sha256(real_settings.read_bytes()).hexdigest() if real_settings.is_file() else None
 
         def run(args, payload=None, expected=0, timeout=30, environment=None):
             started = time.monotonic()
@@ -331,13 +410,40 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
             # 护栏拒绝不匹配的 HOME，且不尝试读取用户配置。
             run(["--self-check-connection", str(base)], expected=1)
 
+            # V3 渲染链路（冻结 exe 里的 scipy / Pillow / V3 素材）：全部状态、捏脸、换边、三个 scene，
+            # 见 shion/bundle_check_v3.py。结果 JSON 另存证据。
+            v3_json = base / "v3-selfcheck.json"
+            started = time.monotonic()
+            run(["--self-check-v3", str(v3_json)], timeout=300)
+            v3 = json.loads(v3_json.read_text(encoding="utf-8"))
+            require(v3["frozen"] and v3["checks"] and v3["states"] == 16, "frozen-v3-self-check")
+            require(v3["scipy"] and v3["pillow"] and any(m.startswith("scipy.ndimage") for m in v3["scipy_modules"]),
+                    "frozen-scipy-pillow-load")
+            shutil.copy2(v3_json, evidence / v3_json.name)
+            report["v3"] = {key: v3[key] for key in ("scipy", "pillow", "opened_count", "scene_widths")}
+            report["v3"]["seconds"] = round(time.monotonic() - started, 1)
+
+            # 包内素材清单反查：只有 spec 清单里的文件，没有 V2 精灵 / raw / parts / 工具素材。
+            from tools.v3_bundle_files import runtime_files
+            expected_assets = set(runtime_files(Path(__file__).resolve().parent.parent))
+            internal = relocated / "_internal"
+            packed = {p.relative_to(internal).as_posix() for sub in ("sprites", "weekly")
+                      for p in (internal / "assets" / sub).rglob("*") if p.is_file()}
+            require(packed == expected_assets, "bundle-v3-assets-equal-list")
+            require(not (internal / "assets/sprites/raw").exists() and not (internal / "assets/sprites/v3/parts").exists()
+                    and {p.name for p in (internal / "assets/sprites").glob("*.png")} == {"fx_z.png"}, "no-v2-sprites-raw-parts")
+            require(not any((internal / name).exists() for name in ("tests", "build", ".venv")), "no-tests-build-venv")
+            report["v3_asset_files"] = len(packed)
+
             # 原生平台负责字体回退与实际发布画面；另保留一张 offscreen 验证平台插件。
             native_env = {**env, "QT_QPA_PLATFORM": "windows"}
             snapshots = [
                 ("offscreen-idle", []), ("idle", []),
                 ("working", ["--state", "working", "--nod", "--at", "0.2"]),
                 ("bed", ["--state", "bed", "--at", "1"]),
-                ("desk", ["--state", "desk", "--desk-blink", "double", "--at", "0.2"]),
+                ("desk", ["--state", "desk", "--at", "0.2"]),
+                ("gesture-pinch", ["--gesture", "pinch", "--at", "0.3"]),
+                ("side-right", ["--side", "right"]),
                 *[(name, ["--state", name]) for name in ("yawn", "slump", "collapse", "cheer")],
                 ("snacks", ["--panel", "snacks", "--lang", "ja"]),
                 *[(f"connection-{lang}", ["--panel", "connection", "--with-pet", "--lang", lang])
@@ -434,6 +540,41 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
                 shutil.copy2(data / name, evidence / name)
             own_processes(exe, terminate=True)
             require(not own_processes(exe), "own-process-cleanup")
+
+            # 真实窗口隔离启动：独立 HOME / 数据目录 / 端口 / 单实例名（不会和正在用的 Shion-dev 冲突，
+            # 也不碰真实 ~/.claude）；等预热做完（R1 口径：启动 25 秒后）记工作集，再正常退出一次检查退出码。
+            # 用原生平台（会在桌面上显示约半分钟的诗音）才和真实内存可比，offscreen 没有窗口表面。
+            live_env = isolated_environment(base / "home-live")
+            live_env.update(QT_QPA_PLATFORM="windows", SHION_PORT=str(free_port()))
+            require(live_env["SHION_INSTANCE_NAME"] != env["SHION_INSTANCE_NAME"] and "SHION_DATA_DIR" not in live_env
+                    and str(base) in live_env["APPDATA"] and str(base) in live_env["CLAUDE_CONFIG_DIR"], "live-isolated")
+            live_data = Path(live_env["APPDATA"]) / "Shion"
+            live = subprocess.Popen([str(exe)], cwd=cwd, env=live_env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                wait_for(lambda: (live_data / "shion.log").is_file(), 30)
+                time.sleep(25)
+                require(live.poll() is None, "live-v3-still-running-after-prewarm")
+                samples = []
+                for _ in range(5):
+                    samples.append(process_memory(live.pid))
+                    time.sleep(1)
+                middle = sorted(samples, key=lambda item: item["working_set"])[2]
+                report["live_memory_mb"] = {"working_set": round(middle["working_set"] / 1e6, 1),
+                                            "private": round(middle["private"] / 1e6, 1),
+                                            "peak_working_set": round(max(x["peak_working_set"] for x in samples) / 1e6, 1)}
+                exit_code = quit_gracefully(live.pid)
+                report["live_exit_code"] = exit_code
+                require(exit_code == 0, "live-graceful-exit-code-0")
+            finally:
+                if live.poll() is None:
+                    live.kill()
+            live_log = (live_data / "shion.log").read_text(encoding="utf-8", errors="replace")
+            require("Traceback" not in live_log and "ERROR" not in live_log, "live-log-clean")
+            require((live_data / "state.json").is_file(), "live-saved-state-on-exit")
+            shutil.copy2(live_data / "shion.log", evidence / "shion-live.log")
+            settings_after = hashlib.sha256(real_settings.read_bytes()).hexdigest() if real_settings.is_file() else None
+            require(settings_before == settings_after, "real-claude-settings-untouched")
             require(before == manifest(relocated), "program-directory-unchanged")
             require(not list(relocated.rglob(".claude")), "no-config-in-program-directory")
             require(not list(relocated.rglob("python.exe")), "no-external-python-interpreter")
