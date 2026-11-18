@@ -31,7 +31,7 @@ STILL_SIZE = (720, 420)
 FONTS = {"zh": "Microsoft YaHei UI", "en": "Cascadia Mono", "ja": "Yu Gothic UI"}
 WEEKLY_SIZE = (600, 750)
 STAMINA_SIZE = (720, 330)
-NAMES = ("hero.gif", "pat.png", "pinch.png", "lift.png", "working.png", "side.png", "desk.png",
+NAMES = ("hero.gif", "pat.png", "pinch.png", "lift.png", "working.png", "side.zh.png", "side.en.png", "side.ja.png", "desk.png",
          "permission.zh.png", "permission.en.png", "permission.ja.png", "sleep-bed.png",
          "weekly.zh.png", "weekly.en.png", "weekly.ja.png",
          "stamina.zh.png", "stamina.en.png", "stamina.ja.png")
@@ -42,6 +42,14 @@ STAMINA_NAMES = {"zh": ("精神", "打哈欠", "趴下", "倒地"),
                  "en": ("Fresh", "Yawning", "Slumped", "Collapsed"),
                  "ja": ("元気", "あくび", "ぐったり", "ダウン")}
 WEEKLY_SEVEN_DAY_PEAK = 68  # 合成的 7 天额度峰值
+LIFT_GAP = 40 * SCALE  # lift.png：脚底到“地面”（影子）的距离
+CHEEK_POINTS = {"left": (325.0, 586.0), "right": (543.0, 586.0)}  # 脸颊按下点（rig 坐标，同 apply_snapshot_gesture）
+# 靠屏幕左半时脸鼓向右（右脸颊鼓），靠右半时鼓向左：左格 = 在屏幕左边 = side "right"。
+SIDE_PANELS = (("right", 0), ("left", 1))
+SIDE_LABELS = {"zh": ("在屏幕左边", "在屏幕右边"),
+               "en": ("Near the left edge", "Near the right edge"),
+               "ja": ("画面の左側", "画面の右側")}
+ARROW_COLOR = "#B5654A"
 
 
 def image_size(name: str) -> tuple[int, int]:
@@ -240,21 +248,101 @@ def working_image():
         return scene.render()
 
 
-def side_image():
-    """靠屏幕左 / 右半边时脸鼓向另一侧：两个窗口并排，脚底对齐。"""
+def lift_image():
+    """被拎起：人物整体离开“地面”LIFT_GAP 像素，地面处留一个淡影子（窗口移动不在截图里，所以在这里补）。"""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter, QRadialGradient
+
+    pet = gesture_image("lift", 1.0).copy()
+    pet.setDevicePixelRatio(1)  # 按像素拼接
+    left, _, right, bottom = pil_image(pet).getchannel("A").getbbox()
+    canvas = QImage(pet.width(), pet.height() + LIFT_GAP, QImage.Format_ARGB32_Premultiplied)
+    canvas.fill(Qt.transparent)
+    painter = QPainter(canvas)
+    try:
+        painter.setRenderHint(QPainter.Antialiasing)
+        radius = (right - left) * .22
+        shadow = QRadialGradient(QPointF(0, 0), radius)
+        shadow.setColorAt(0, QColor(60, 45, 40, 80))
+        shadow.setColorAt(1, QColor(60, 45, 40, 0))
+        painter.save()
+        painter.translate((left + right) / 2, bottom + LIFT_GAP)
+        painter.scale(1.0, 7 * SCALE / radius)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(shadow)
+        painter.drawEllipse(QPointF(0, 0), radius, radius)
+        painter.restore()
+        painter.drawImage(0, 0, pet)
+    finally:
+        painter.end()
+    return canvas
+
+
+def cheek_pixel(win, image_size: tuple[int, int], side: str) -> tuple[float, float]:
+    """脸颊按下点在渲染图里的像素位置（窗口：脚底中心 = 画布水平中心；脚底在底边上方 边距 + 脚距）。"""
+    from shion.pet_window import MARGIN_BOTTOM
+    from shion.v3_display import V2_FOOT_GAP_RATIO
+
+    rx, ry = CHEEK_POINTS[side]
+    foot_x, foot_y = win._v3_rig.v3_foot
+    ts, dpr = win.v3_texture_scale, win._v3_dpr
+    return (image_size[0] / 2 + (rx - foot_x) * ts,
+            image_size[1] - (MARGIN_BOTTOM + win._height * V2_FOOT_GAP_RATIO) * dpr + (ry - foot_y) * ts)
+
+
+def side_panel(side: str):
+    """一格：渲染图（1:1 像素）、人物 alpha 外框、鼓起脸颊处的外轮廓 x 和脸颊 y。"""
     from shion.app import SnapshotScene
 
-    pieces = []
-    for side in ("left", "right"):
-        with SnapshotScene("idle", height=260, activity="quiet", seed=SEED, scale=SCALE, side=side) as scene:
-            scene.advance_to(.3)
-            pieces.append(pil_image(scene.render()))
-    gap = 24 * SCALE
-    canvas = Image.new("RGBA", (sum(p.width for p in pieces) + gap, max(p.height for p in pieces)))
-    x = 0
-    for piece in pieces:
-        canvas.alpha_composite(piece, (x, canvas.height - piece.height))
-        x += piece.width + gap
+    with SnapshotScene("idle", height=260, activity="quiet", seed=SEED, scale=SCALE, side=side) as scene:
+        scene.advance_to(.3)
+        image = scene.render().copy()
+        win = scene.win
+        cheek = cheek_pixel(win, (image.width(), image.height()), side)
+    image.setDevicePixelRatio(1)
+    alpha = pil_image(image).getchannel("A")
+    box = alpha.getbbox()
+    if not (box[0] <= cheek[0] <= box[2] and box[1] <= cheek[1] <= box[3]):
+        raise ValueError(f"脸颊点 {cheek} 不在人物外框 {box} 内")
+    row = [x for x in range(alpha.width) if alpha.getpixel((x, round(cheek[1]))) > 0]
+    edge = max(row) if side == "right" else min(row)
+    return image, box, edge, cheek[1]
+
+
+def side_image(lang: str):
+    """靠屏幕左 / 右半边时脸鼓向另一侧：两个人物并排，下方标注位置，箭头从中间指向各自鼓起的脸颊。"""
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter, QPen
+    from shion.weekly_ui import card_font
+
+    panels = [side_panel(side) for side, _ in SIDE_PANELS]
+    width = panels[0][0].width()
+    bottom = max(p[1][3] for p in panels)
+    canvas = QImage(width * 2, bottom + 90 * SCALE, QImage.Format_ARGB32_Premultiplied)
+    canvas.fill(Qt.transparent)
+    painter = QPainter(canvas)
+    try:
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(ARROW_COLOR), 5 * SCALE)
+        pen.setCapStyle(Qt.RoundCap)
+        for (side, slot), (image, box, edge, cheek_y), label in zip(SIDE_PANELS, panels, SIDE_LABELS[lang]):
+            offset = slot * width
+            painter.drawImage(offset, 0, image)
+            # 箭头：尖端贴着鼓起一侧的外轮廓，尾巴伸向两个人物之间的空隙。
+            direction = 1 if side == "right" else -1
+            tip = QPointF(offset + edge + direction * 8 * SCALE, cheek_y)
+            tail = QPointF(tip.x() + direction * 54 * SCALE, cheek_y)
+            painter.setPen(pen)
+            painter.drawLine(tail, tip)
+            for dy in (-14 * SCALE, 14 * SCALE):
+                painter.drawLine(tip, QPointF(tip.x() + direction * 18 * SCALE, cheek_y + dy))
+            painter.setPen(QColor("#4A3B36"))
+            painter.setFont(card_font(lang, 36, True))
+            centre = offset + (box[0] + box[2]) / 2
+            painter.drawText(QRectF(centre - 320 * SCALE, bottom + 14 * SCALE, 640 * SCALE, 56 * SCALE),
+                             Qt.AlignHCenter | Qt.AlignTop, label)
+    finally:
+        painter.end()
     return canvas
 
 
@@ -263,9 +351,10 @@ def still_images():
 
     yield "pat.png", pat_image()
     yield "pinch.png", gesture_image("pinch", .6)
-    yield "lift.png", gesture_image("lift", 1.0)
+    yield "lift.png", lift_image()
     yield "working.png", working_image()
-    yield "side.png", side_image()
+    for lang in FONTS:
+        yield f"side.{lang}.png", side_image(lang)
     with SnapshotScene("desk", height=260, seed=SEED, scale=SCALE) as scene:
         scene.advance_to(.3)
         yield "desk.png", scene.render()

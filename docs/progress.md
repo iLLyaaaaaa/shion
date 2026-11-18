@@ -70,7 +70,8 @@
     - **体积**：`hero.gif` 1,975,678 字节（上限 2,000,000，**余量只有约 2.4%**，以后再加内容要先降色或删段）；静态图 55～72 KB，周报 183～193 KB，体力 102～106 KB；17 张共 3,498,762 字节，连 menu / icon 目录总计 3,969,483（上限 6,000,000）。逐帧差异曲线显示每一段都有动作；画面本身我按规矩没打开，等用户看。
     - **与计划不同**：①`working.png` 没带工作气泡——`--snapshot` 的气泡合成只支持 1x，配图是 2x；②hero 从 4 秒 / 80 帧改为 5 秒 / 100 帧（四段动作 4 秒放不下），`GIF_DURATION_MS` 随帧数算，校验和测试同步；③`pil_image` 现在也接受 PIL 图（`side.png` 先在 PIL 里并排）。
     - **测试**：`test_make_media`（含原生整批 + 独立进程 CLI 逐字节比对，约 8 分钟）、`test_release`、`test_windowing`、`test_v3_default` 全过（先 77 passed、1 skipped、2 failed，两项是硬编码的“13 张”“版本 2.2”，已改，复跑通过）。没跑全仓（只改了版本号、文档和媒体工具，全仓留到 R6b 末尾）。
-    - **R6b 待做**：三语 README（开头演示图说明、日常互动含“只能捏着脸往上提”、体力四档、系统要求体积与内存、已知限制、从源码运行去掉 `process_sprites.py` / 加 scipy pillow、许可）、`THIRD_PARTY_NOTICES.md` 补 NumPy、`build/release-notes-3.0.0.md` 草稿、`docs/spec.md:731` 一带残余、R5 留下的 README 第 224 行措辞；README 要用上 `pinch / lift / working / side` 四张新图。
+    - **R6a 修订（用户看图后，hero / pinch / working 通过，改两张）**：①`lift.png`：整体离地 `LIFT_GAP`（80 像素 @2x），地面处加淡影子（`lift_image()`，窗口移动不在截图里，所以在配图里补）；②`side` 改按语言出三张 `side.{zh,en,ja}.png`（`side.png` 删除，`NAMES` 17→19）：左格 = “在屏幕左边”（右脸颊鼓）、右格 = “在屏幕右边”（左脸颊鼓），下方各有标签，箭头从两格之间指向鼓起一侧的外轮廓。箭头位置由 rig 坐标 `(325,586)` / `(543,586)` 经 `cheek_pixel()` 换算，并断言脸颊点落在人物外框内；两个箭头尾巴之间留 48 像素空隙（第一版长度 80 会在中间连成一条线，已缩到 54）。测试加 2 项几何断言（离地有整行透明 + 影子半透明；轮廓边缘在鼓起一侧、箭头不重叠），三语标签用 `SIDE_LABELS` 文字是否不同判断（测试用 qapp 没有固定字体，中日缺字都是方块）。其余 15 张与上一版逐字节一致；19 张共 3,663,341 字节，连 menu / icon 总计 4,134,062（上限 6,000,000）。
+    - **R6b 待做**：三语 README（开头演示图说明、日常互动含“只能捏着脸往上提”、体力四档、系统要求体积与内存、已知限制、从源码运行去掉 `process_sprites.py` / 加 scipy pillow、许可）、`THIRD_PARTY_NOTICES.md` 补 NumPy、`build/release-notes-3.0.0.md` 草稿、`docs/spec.md:731` 一带残余、R5 留下的 README 第 224 行措辞；README 要用上 `pinch / lift / working / side.{zh,en,ja}` 新图。
 - [ ] R7 打包版真机验收（exe）与替换 Shion-dev——【停点 R7】
 - [ ] R8 推送前审查、合并 master、标签、Release——【停点 R8a】，用户同意后才 push
 

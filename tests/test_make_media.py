@@ -91,6 +91,40 @@ def test_hero_uses_one_scene_v3_blink_pinch_pat_work_jump_and_returns_to_identic
     assert not isValid(scenes[0].win)
 
 
+def alpha_of(image):
+    return media.pil_image(image).getchannel("A")
+
+
+def test_lift_image_floats_above_a_soft_shadow(qapp):
+    image = media.lift_image()
+    alpha = alpha_of(image)
+    box = alpha.getbbox()
+    rows = [alpha.crop((0, y, alpha.width, y + 1)).getbbox() for y in range(alpha.height)]
+    shadow = [y for y in range(box[3] - 1, 0, -1) if rows[y]]
+    # 最下面是影子：半透明、不是实心；影子与人物脚底之间有整行透明（人物确实离地）。
+    assert max(alpha.getpixel((x, box[3] - 1)) for x in range(alpha.width)) < 255
+    pet_bottom = max(y for y in range(alpha.height) if rows[y] and max(alpha.getpixel((x, y)) for x in range(alpha.width)) == 255)
+    assert any(rows[y] is None for y in range(pet_bottom + 1, box[3])) and shadow
+    assert box[3] - pet_bottom >= media.LIFT_GAP
+
+
+def test_side_images_label_both_panels_and_point_arrows_at_the_bulging_cheek(qapp):
+    from shion.app import SnapshotScene
+    images = {lang: media.side_image(lang) for lang in media.FONTS}
+    assert len(set(media.SIDE_LABELS.values())) == 3 and pixels(images["zh"]) != pixels(images["en"])  # 三语标签不同（测试用 qapp 没有固定字体，中日缺字时都是方块，不比 zh/ja 像素）
+    assert [side for side, _ in media.SIDE_PANELS] == ["right", "left"]  # 在屏幕左边 = 右脸颊鼓
+    panels = [media.side_panel(side) for side, _ in media.SIDE_PANELS]
+    assert pixels(panels[0][0]) != pixels(panels[1][0])  # 两格人物不同
+    for (side, _), (image, box, edge, cheek_y) in zip(media.SIDE_PANELS, panels):
+        assert box[1] < cheek_y < box[3]
+        assert (edge >= (box[0] + box[2]) / 2) == (side == "right")  # 轮廓边缘在鼓起的一侧
+    # 箭头不互相重叠：两个箭头尾巴之间留有空隙（右格的尾巴在左格尾巴的右边）。
+    width = panels[0][0].width()
+    tail0 = panels[0][2] + 8 * media.SCALE + 54 * media.SCALE
+    tail1 = width + panels[1][2] - 8 * media.SCALE - 54 * media.SCALE
+    assert tail1 - tail0 >= 16 * media.SCALE
+
+
 def small_batch(directory):
     directory.mkdir()
     for name in media.NAMES:
@@ -167,7 +201,7 @@ print(json.dumps(first))
                             capture_output=True, timeout=600)  # V3 的预热放在当前线程做，整套约 2 分钟/批
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     report = json.loads(result.stdout)
-    assert len(report) == len(media.NAMES) == 17
+    assert len(report) == len(media.NAMES) == 19
     other = tmp_path / "second"
     result = subprocess.run([sys.executable, "tools/make_media.py", "--output-dir", str(other)],
                             cwd=root, capture_output=True, timeout=600)
