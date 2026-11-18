@@ -117,7 +117,7 @@
 ## 安装
 
 1. 到 [Releases](../../releases) 下载 `Shion-3.0.0-win64.zip`
-2. 解压到一个**固定的位置**，例如 `D:\Apps\Shion`（挪动后可右键 → “AI 连接” → “Claude Code” → “连接 / 查看配置”重新连接）
+2. 解压到一个**固定的位置**，例如 `D:\Apps\Shion`（以后挪动位置要重新连接：Claude Code 右键 → “AI 连接” → “Claude Code” → “连接 / 查看配置”；Claude 桌面版聊天要先断开再连接）
 3. 双击 `Shion.exe`
 4. 第一次启动时，诗音会问你要不要连接 Claude Code，点 **连接**
 
@@ -252,6 +252,8 @@ start.bat
 | 代码及其他内容（诗音角色图片除外，包括台词和菜单数据） | [MIT](LICENSE) | 几乎随意使用，包括商用，须保留版权及许可声明 |
 | 诗音的角色图片（目前包括 `assets/sprites/`、`assets/weekly/`、`docs/images/`、`assets/icon/`） | [CC BY-NC 4.0](assets/LICENSE) | 可转载、修改，须署名、附许可证链接并注明修改，且**不能商用** |
 
+诗音用到的第三方库（tomlkit、NumPy、SciPy、Pillow）的许可见[第三方许可声明](THIRD_PARTY_NOTICES.md)。
+
 Shion / 诗音为 iLLyaaaaaa 原创角色。诗音的角色图片，目前包括 `assets/sprites/`、`assets/weekly/`（周报立绘）、`docs/images/`（截图、`hero.gif` 和图标预览）、`assets/icon/`，使用 CC BY-NC 4.0；以后新增的诗音角色图标（`.ico` / `.png`）也适用。台词、菜单数据等其他内容与代码一样使用 MIT。你可以拿代码做自己的桌宠，诗音的角色图片仅限非商业使用。
 
 ## 致谢
@@ -264,5 +266,3 @@ Shion / 诗音为 iLLyaaaaaa 原创角色。诗音的角色图片，目前包括
 <div align="center">
 <sub>Shion 是非官方的个人作品，与 Anthropic、OpenAI 无关。</sub>
 </div>
-
-诗音用到的第三方库（tomlkit、NumPy、SciPy、Pillow）的许可见[第三方许可声明](THIRD_PARTY_NOTICES.md)。
