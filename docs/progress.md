@@ -61,7 +61,16 @@
   - **留给 R6 的文档措辞**：`docs/spec.md` 第 25、731 行仍写 `tools/process_sprites.py`；三语 README 第 224 行“`process_sprites.py` 需要未公开原图”；`docs/v3-integration-plan.md` 第 17、74 行的 `--renderer v3` / “默认仍为旧版”；CLAUDE.md 与 spec 的“12 张精灵图”；NumPy 许可补进 `THIRD_PARTY_NOTICES.md`。
   - **踩坑**：worktree 没有 `.venv` 和 `assets/sprites/raw`，跑全仓要临时建 junction，任务结束前单独解除；`test_install_hooks` 的 gbk 偶发是候选的测试修复（给 `run_script` 加 `encoding='utf-8'`）。
   - **下一步**：用户确认 R5 后做 R6（版本 3.0.0、README 三语、spec / CLAUDE.md、V3 配图与 hero.gif、发布说明）。
-- [ ] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】
+- [~] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】拆成两个会话
+  - **R6a（2026-11-18，本地提交，停在【停点 R6a】等用户看图；不满意可回退本提交）**
+    - **前置小提交** `842f34c`：`test_install_hooks.run_script` 按 UTF-8 解码并给子进程设 `PYTHONIOENCODING`（修 gbk 偶发）；`test_v3_mirror` 的 `painting` fixture 在 `assets/sprites/raw` 缺失时 `pytest.skip` 并写明原因（raw 不进公开仓库，别人克隆后不会报错）。
+    - **版本**：`shion/__init__.py` → 3.0.0；`test_release`（版本、ZIP 名 `Shion-3.0.0-win64.zip`、exe 版本资源 3.0.0.0）、`test_windowing` 断言同步。exe 版本资源由 `tools/build.py` 从 `__version__` 生成，没手改。
+    - **文档**：spec 的 V3 章节标题改“v3.0.0 发布”，新增“v3.0.0 打包版”一条（168.75 MB / 407 文件 / ZIP 75,028,566 字节、素材清单、scipy / Pillow 裁剪、打包版工作集约 222～226 MB、自检与烟测）；目录树去掉 `process_sprites.py`；V2 的“程序动画”章节加“V3 起仅作历史记录”；开发步骤里的 `process_sprites.py` 加注“已删除”。`docs/v3-integration-plan.md` 顶部标注已完成、`--renderer` 已删。CLAUDE.md 在 R2/R3 已改成 V3 说法，本次核对无需再改。
+    - **配图**（`tools/make_media.py`，种子 42、同步预热，两次生成与独立进程 CLI 逐字节一致）：`hero.gif` 重写为 5 秒 / 100 帧（编码后相同帧合并成 95 帧，总时长 5000 ms）：V3 自己的眨眼 → 捏左脸拉开 / 松手回弹 → 摸头冒爱心 → 抱电脑点头 → 开心小跳 → 淡回第一帧，首尾逐字节一致；输入全走真实窗口的动画器（`press / drag / release / stroke_head`），不再强塞 V2 的眨眼。新增 `pinch.png`、`lift.png`、`working.png`、`side.png`（左右鼓并排）；其余 12 张沿用原函数用 V3 重出。`menu-*.png` 只是菜单截图、图里没有诗音，没重出；`icon-preview.png` R3 已重出。
+    - **体积**：`hero.gif` 1,975,678 字节（上限 2,000,000，**余量只有约 2.4%**，以后再加内容要先降色或删段）；静态图 55～72 KB，周报 183～193 KB，体力 102～106 KB；17 张共 3,498,762 字节，连 menu / icon 目录总计 3,969,483（上限 6,000,000）。逐帧差异曲线显示每一段都有动作；画面本身我按规矩没打开，等用户看。
+    - **与计划不同**：①`working.png` 没带工作气泡——`--snapshot` 的气泡合成只支持 1x，配图是 2x；②hero 从 4 秒 / 80 帧改为 5 秒 / 100 帧（四段动作 4 秒放不下），`GIF_DURATION_MS` 随帧数算，校验和测试同步；③`pil_image` 现在也接受 PIL 图（`side.png` 先在 PIL 里并排）。
+    - **测试**：`test_make_media`（含原生整批 + 独立进程 CLI 逐字节比对，约 8 分钟）、`test_release`、`test_windowing`、`test_v3_default` 全过（先 77 passed、1 skipped、2 failed，两项是硬编码的“13 张”“版本 2.2”，已改，复跑通过）。没跑全仓（只改了版本号、文档和媒体工具，全仓留到 R6b 末尾）。
+    - **R6b 待做**：三语 README（开头演示图说明、日常互动含“只能捏着脸往上提”、体力四档、系统要求体积与内存、已知限制、从源码运行去掉 `process_sprites.py` / 加 scipy pillow、许可）、`THIRD_PARTY_NOTICES.md` 补 NumPy、`build/release-notes-3.0.0.md` 草稿、`docs/spec.md:731` 一带残余、R5 留下的 README 第 224 行措辞；README 要用上 `pinch / lift / working / side` 四张新图。
 - [ ] R7 打包版真机验收（exe）与替换 Shion-dev——【停点 R7】
 - [ ] R8 推送前审查、合并 master、标签、Release——【停点 R8a】，用户同意后才 push
 

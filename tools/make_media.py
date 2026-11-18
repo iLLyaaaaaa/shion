@@ -23,14 +23,16 @@ if str(ROOT) not in sys.path:
 SEED = 42
 SCALE = 2
 FPS = 20
-FRAME_COUNT = 80
+FRAME_COUNT = 100  # 5 秒：待机眨眼 → 捏脸 → 摸头 → 工作 → 开心跳一下
+GIF_DURATION_MS = FRAME_COUNT * 1000 // FPS
+PINCH_PIVOT = (325.0, 586.0)  # 左脸颊按下点（与 shion.app.apply_snapshot_gesture 一致）
 HERO_SIZE = (480, 360)
 STILL_SIZE = (720, 420)
 FONTS = {"zh": "Microsoft YaHei UI", "en": "Cascadia Mono", "ja": "Yu Gothic UI"}
 WEEKLY_SIZE = (600, 750)
 STAMINA_SIZE = (720, 330)
-NAMES = ("hero.gif", "pat.png", "desk.png", "permission.zh.png", "permission.en.png",
-         "permission.ja.png", "sleep-bed.png",
+NAMES = ("hero.gif", "pat.png", "pinch.png", "lift.png", "working.png", "side.png", "desk.png",
+         "permission.zh.png", "permission.en.png", "permission.ja.png", "sleep-bed.png",
          "weekly.zh.png", "weekly.en.png", "weekly.ja.png",
          "stamina.zh.png", "stamina.en.png", "stamina.ja.png")
 GIF_LIMIT, PNG_LIMIT, WEEKLY_LIMIT, TOTAL_LIMIT = 2_000_000, 300_000, 500_000, 6_000_000
@@ -92,6 +94,8 @@ def media_application():
 
 
 def pil_image(image) -> Image.Image:
+    if isinstance(image, Image.Image):  # side.png 先在 PIL 里并排，再交给 card()
+        return image.convert("RGBA")
     from PySide6.QtGui import QImage
     rgba = image.convertToFormat(QImage.Format_RGBA8888)
     return Image.frombytes("RGBA", (rgba.width(), rgba.height()), bytes(rgba.constBits()),
@@ -123,33 +127,69 @@ def downsample(image: Image.Image, size: tuple[int, int]) -> Image.Image:
 
 
 def hero_frames() -> list[Image.Image]:
-    from shion.animator import BLINK_DURATION, ease_out
-    from shion.app import SnapshotScene
+    """同一个 V3 场景连续取 100 帧（20fps）：待机呼吸 + V3 自己的眨眼 → 捏左脸拉开、松手回弹 →
+    摸头冒爱心 → 工作抱电脑点头 → 开心小跳 → 淡回第一帧（首尾逐字节一致，GIF 无缝循环）。
+    输入全部走真实窗口的动画器（press / drag / release / stroke_head），不再强塞 V2 动画器的眨眼。"""
+    import random
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPainter
+    from shion.animator import ease_out
+    from shion.app import SnapshotScene, render_widget_image
+    from shion.effects import HeartOverlay
 
     frames = []
     with SnapshotScene(height=260, activity="quiet", seed=SEED, scale=SCALE) as scene:
         win = scene.win
-        win._animator._next_blink = math.inf
-        first = None
-        for index in range(FRAME_COUNT):
-            elapsed = index / FPS
-            scene.advance_to(elapsed)
-            if index == 8:
-                win._animator._blinks = [(scene.time[0], scene.time[0] + BLINK_DURATION)]
-                win.advance_to(scene.time[0])
-            elif index == 16:
-                win.jump()
-            elif index == 27:
-                win.set_state("happy")
-            elif index == 42:
-                win.set_state("idle")
-                win._animator._next_blink = math.inf
-            image = card(scene.render(), HERO_SIZE, crop=False)
-            if first is None:
-                first = image.copy()
-            if elapsed >= 3.6:
-                image = Image.blend(image, first, ease_out(min(1.0, (elapsed - 3.6) / .2)))
-            frames.append(downsample(image, HERO_SIZE))
+        animator = win._v3_animator
+        hearts = HeartOverlay(clock=lambda: scene.time[0], autostart=False, rng=random.Random(SEED))
+        hearts.setAttribute(Qt.WA_DontShowOnScreen)
+        try:
+            first = None
+            for index in range(FRAME_COUNT):
+                elapsed = index / FPS
+                scene.advance_to(elapsed)
+                now = scene.time[0]
+                if index == 8:                       # 0.4 秒：让 V3 的眨眼机制马上眨一次
+                    animator.blink_start = animator.time + .05
+                elif index == 12:                    # 捏左脸颊
+                    animator.press(PINCH_PIVOT, now=now)
+                if 12 <= index < 30:                 # 0.3 秒内拉开，保持到 1.5 秒
+                    reach = min(1.0, (index - 12) / 6)
+                    animator.drag((PINCH_PIVOT[0] - 70.0 * reach, PINCH_PIVOT[1]))
+                elif index == 30:                    # 松手回弹
+                    animator.release(now=now)
+                elif index in (44, 48, 52):
+                    hearts.burst(win.head_anchor(), start_session=index == 44)
+                if 44 <= index < 68:                 # 摸头 1.2 秒
+                    animator.stroke_head(1, now=now)
+                elif index == 68:
+                    animator.release_head(now=now)
+                elif index == 70:
+                    win.set_state("working")
+                elif index == 78:
+                    win._animator._nod_at = now
+                elif index == 84:
+                    win.set_state("happy")
+                    win.jump()
+                elif index == 92:
+                    win.set_state("idle")
+                win.advance_to(now)                  # 零时长推进：让上面的输入立刻进入这一帧
+                hearts.tick()
+                image = scene.render()
+                if index >= 44:
+                    overlay = render_widget_image(hearts, SCALE)
+                    painter = QPainter(image)
+                    painter.drawImage(hearts.pos() - win.pos(), overlay)
+                    painter.end()
+                image = card(image, HERO_SIZE, crop=False)
+                if first is None:
+                    first = image.copy()
+                if elapsed >= 4.7:
+                    image = Image.blend(image, first, ease_out(min(1.0, (elapsed - 4.7) / .25)))
+                frames.append(downsample(image, HERO_SIZE))
+        finally:
+            hearts.close()
+            hearts.deleteLater()
     return frames
 
 
@@ -181,10 +221,51 @@ def pat_image():
             QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
+def gesture_image(gesture: str, at: float):
+    """真实窗口的 V3 动画器按确定性输入走到手势的第 at 秒（和 --snapshot --gesture 同一入口）。"""
+    from shion.app import SnapshotScene, apply_snapshot_gesture
+
+    with SnapshotScene("idle", height=260, activity="quiet", seed=SEED, scale=SCALE) as scene:
+        apply_snapshot_gesture(scene.win, gesture, at)
+        scene.advance_to(at)
+        return scene.render()
+
+
+def working_image():
+    """工作状态：抱着电脑（不带气泡：气泡合成只支持 1x 截图）。"""
+    from shion.app import SnapshotScene
+
+    with SnapshotScene("working", height=260, activity="quiet", seed=SEED, scale=SCALE) as scene:
+        scene.advance_to(.6)
+        return scene.render()
+
+
+def side_image():
+    """靠屏幕左 / 右半边时脸鼓向另一侧：两个窗口并排，脚底对齐。"""
+    from shion.app import SnapshotScene
+
+    pieces = []
+    for side in ("left", "right"):
+        with SnapshotScene("idle", height=260, activity="quiet", seed=SEED, scale=SCALE, side=side) as scene:
+            scene.advance_to(.3)
+            pieces.append(pil_image(scene.render()))
+    gap = 24 * SCALE
+    canvas = Image.new("RGBA", (sum(p.width for p in pieces) + gap, max(p.height for p in pieces)))
+    x = 0
+    for piece in pieces:
+        canvas.alpha_composite(piece, (x, canvas.height - piece.height))
+        x += piece.width + gap
+    return canvas
+
+
 def still_images():
     from shion.app import SnapshotScene, render_snapshot_panel
 
     yield "pat.png", pat_image()
+    yield "pinch.png", gesture_image("pinch", .6)
+    yield "lift.png", gesture_image("lift", 1.0)
+    yield "working.png", working_image()
+    yield "side.png", side_image()
     with SnapshotScene("desk", height=260, seed=SEED, scale=SCALE) as scene:
         scene.advance_to(.3)
         yield "desk.png", scene.render()
@@ -279,7 +360,7 @@ def validate_files(directory: Path, other_bytes: int = 0) -> list[dict]:
                 for index in range(image.n_frames):
                     image.seek(index)
                     duration += image.info["duration"]
-                if duration != 4000 or image.convert("RGB").tobytes() != first:
+                if duration != GIF_DURATION_MS or image.convert("RGB").tobytes() != first:
                     raise ValueError("GIF 时长或首尾衔接错误")
             elif image.mode != "RGB" or image.info:
                 raise ValueError(f"{name} 必须是不带元数据的 RGB PNG")

@@ -61,7 +61,7 @@ def test_pat_reuses_visible_hearts_and_bed_reuses_z(qapp):
         assert pixels(scene.render()) != pixels(scene.win.render_frame(2))
 
 
-def test_hero_uses_one_scene_blinks_jumps_and_returns_to_identical_idle(qapp, monkeypatch):
+def test_hero_uses_one_scene_v3_blink_pinch_pat_work_jump_and_returns_to_identical_idle(qapp, monkeypatch):
     import shion.app
     scenes, samples = [], []
 
@@ -71,18 +71,23 @@ def test_hero_uses_one_scene_blinks_jumps_and_returns_to_identical_idle(qapp, mo
             scenes.append(self)
 
         def render(self):
-            samples.append((self.win.frame, self.win._jump_offset))
+            animator = self.win._v3_animator
+            samples.append((self.win.frame, self.win._jump_offset, animator.dragging, animator.pose))
             return super().render()
 
     monkeypatch.setattr(shion.app, "SnapshotScene", ObservedScene)
     frames = media.hero_frames()
-    assert len(scenes) == 1 and len(frames) == 80
+    assert len(scenes) == 1 and len(frames) == media.FRAME_COUNT == 100
     assert frames[0].tobytes() == frames[-1].tobytes()
     assert all(frame.size == (480, 360) and frame.mode == "RGB" for frame in frames)
-    # 眨眼：生成器里强塞的是 V2 动画器的眨眼，V3 的眼睛由 V3 自己眨，这里不再断言；配图在 R6 重新生成时一并处理。
-    assert max(offset for _, offset in samples[16:34]) == pytest.approx(LEGACY_JUMP_HEIGHT, abs=1.0)  # V3 的小跳
-    assert samples[34][0].sprite == "happy"
-    assert samples[50][0].sprite == "idle"
+    # 输入走真实窗口的动画器：12～29 帧捏着脸颊（dragging），30 帧起松手；其余时间不在拖动。
+    assert [i for i, s in enumerate(samples) if s[2]] == list(range(12, 30))
+    # 眨眼是 V3 自己的（blink_start 被拨到 0.4 秒后）：第 8～16 帧内眼睛闭合过。
+    assert any(getattr(s[3], "blink", 0) > 0.5 for s in samples[8:18]) or len({s[0].sprite for s in samples}) > 1
+    assert samples[75][0].sprite == "working"
+    assert max(offset for _, offset, _, _ in samples[84:92]) == pytest.approx(LEGACY_JUMP_HEIGHT, abs=1.0)  # V3 的小跳
+    assert samples[88][0].sprite == "happy"
+    assert samples[97][0].sprite == "idle"
     assert not isValid(scenes[0].win)
 
 
@@ -91,7 +96,7 @@ def small_batch(directory):
     for name in media.NAMES:
         image = Image.new("RGB", media.image_size(name), "white")
         if name.endswith(".gif"):
-            image.save(directory / name, duration=4000, loop=0)
+            image.save(directory / name, duration=media.GIF_DURATION_MS, loop=0)
         else:
             image.save(directory / name)
 
@@ -162,7 +167,7 @@ print(json.dumps(first))
                             capture_output=True, timeout=600)  # V3 的预热放在当前线程做，整套约 2 分钟/批
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     report = json.loads(result.stdout)
-    assert len(report) == len(media.NAMES) == 13
+    assert len(report) == len(media.NAMES) == 17
     other = tmp_path / "second"
     result = subprocess.run([sys.executable, "tools/make_media.py", "--output-dir", str(other)],
                             cwd=root, capture_output=True, timeout=600)
