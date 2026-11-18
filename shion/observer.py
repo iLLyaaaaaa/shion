@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import queue
 import secrets
 import threading
@@ -127,13 +128,25 @@ class ObservationServer:
         self.thread.join(timeout=1)
 
 
+DEFAULT_OBSERVER_PORT = 47614
+
+
+def _default_port() -> int:
+    """新建凭据文件时的端口。只给测试/打包烟测隔离用：SHION_OBSERVER_PORT 必须是 1024～65535 的整数，否则用默认值。
+    已存在的文件不受影响，所以真实用户的端口不会被环境变量改动。"""
+    raw = os.environ.get("SHION_OBSERVER_PORT", "")
+    if raw.isascii() and raw.isdigit() and 1024 <= int(raw) <= 65535:
+        return int(raw)
+    return DEFAULT_OBSERVER_PORT
+
+
 def credentials(directory: Path):
     """User-local secret, separate from Claude. Never stored in Codex config."""
     from . import observer_files as secure
     secure.ensure_directory(directory)
     path = directory / "chatgpt-observer.json"
     if not path.exists():
-        value = {"token": secrets.token_hex(32), "port": 47614, "enabled": True}
+        value = {"token": secrets.token_hex(32), "port": _default_port(), "enabled": True}
         try:
             secure.write_new(path, json.dumps(value).encode("utf-8"))
         except FileExistsError:

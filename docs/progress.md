@@ -54,7 +54,13 @@
   - **踩坑**：①待机的呼吸 / 眨眼本身让相邻两帧差约一万像素，“捏脸回弹”只能用动画器的姿态判断，帧差只做兜底；②捏脸回弹的弹簧积分一步跳 6 秒不收敛，要按 0.1 秒一步走；③desk scene 比站姿窄，窗口宽度检查要按 `extra_half_width` 公式，不能写“一律变宽”；④`PostThreadMessageW(WM_QUIT)` 能让 Qt 走 `app.quit`，是外部触发正常退出的办法（诗音没有别的外部退出入口）；⑤`bundle_smoke` 的 `isolated_environment` 已有唯一的 `SHION_INSTANCE_NAME`（互斥锁和管道名）与 `SHION_PORT`、隔离 APPDATA / CLAUDE_CONFIG_DIR，所以和正在用的 Shion-dev 不会冲突；单实例第二个进程只是直接退出，不转发任何东西。
   - **留下的问题**：①NumPy 已随 v2.2.0 分发，但 `THIRD_PARTY_NOTICES.md` 里没有它的许可，这次没加（范围外），建议 R6 补；②包还是 168 MB，若要再瘦只能动 Qt 或二选一 OpenBLAS，风险大，没做；③spec 里 `datas` 还带 `assets/icon` 的 `*.png`（icon 目录文件都被运行时读，已由取证确认）。
   - **下一步**：用户过目 THIRD_PARTY_NOTICES 与体积表后进 R5 reviewer 审查。
-- [ ] R5 reviewer 审查——【停点 R5】
+- [x] R5 reviewer 审查（2026-11-18，本地提交，停在【停点 R5】等用户确认）
+  - **审查**：`reviewer` 子代理审 `master..HEAD`（重点 R1–R4）。**无严重问题**；中等 1、轻微 5，其余是文档措辞。死引用（AST 扫 `shion/ tools/ hooks/ tests/`）、`PetWindow` 无非 V3 实例化路径、打包清单三处共用一份、换边 / GC / 预热器关闭、`hooks/` `server.py` `loopback.py` `chat_mcp.py` `hooks_config.py` 相对 master 零改动、隐私 grep 都没问题；SciPy / Pillow 许可齐全，NumPy 缺（R6 补）。
+  - **用户选择全修 1～6**（计划已批准）：①`bundle_smoke` 没隔离 ChatGPT 观察端口（47614 写死）：`credentials()` 只在**首次新建**文件时读 `SHION_OBSERVER_PORT`（1024～65535 整数，否则 47614；已有文件不受影响），`isolated_environment` 给每个隔离环境一个独立端口，并新增检查 `live-observer-port-isolated`，spec 补一句；②`isolated_environment` 把 `CODEX_HOME` 设成隔离目录；③`live-log-clean` 改成 `log_errors()` 按级别字段匹配（正文里带 “ERROR” 的 INFO 行不再误报）；④`InlineExecutor` 改 `except Exception`；⑤`closeEvent` 先 `_v3_cancel_side()`；⑥周报立绘缺失记 warning。每项都补了测试（新增 `tests/test_bundle_smoke_env.py`，其余加进现有文件）。
+  - **测试**：相关 5 个文件 158 passed；全仓 `-X faulthandler`（`build/v300/r5/full.log`，44 分 48 秒）2891 passed、9 skipped、1 failed、6 errors，**原因都不是本次改动**：6 个 errors 是 worktree 里没有 gitignored 的 `assets/sprites/raw`（临时建 junction 后 `test_v3_mirror` 全过）；1 个 failed 是 `test_install_hooks.py::test_corrupt_json_not_touched`，子进程输出用 `text=True` 按 gbk 解码，读线程偶发 `UnicodeDecodeError` 使 `stderr` 为 None，单独复跑 3 次、与 mirror 组合复跑都过（偶发，未修，hooks 相关代码未动）。
+  - **留给 R6 的文档措辞**：`docs/spec.md` 第 25、731 行仍写 `tools/process_sprites.py`；三语 README 第 224 行“`process_sprites.py` 需要未公开原图”；`docs/v3-integration-plan.md` 第 17、74 行的 `--renderer v3` / “默认仍为旧版”；CLAUDE.md 与 spec 的“12 张精灵图”；NumPy 许可补进 `THIRD_PARTY_NOTICES.md`。
+  - **踩坑**：worktree 没有 `.venv` 和 `assets/sprites/raw`，跑全仓要临时建 junction，任务结束前单独解除；`test_install_hooks` 的 gbk 偶发是候选的测试修复（给 `run_script` 加 `encoding='utf-8'`）。
+  - **下一步**：用户确认 R5 后做 R6（版本 3.0.0、README 三语、spec / CLAUDE.md、V3 配图与 hero.gif、发布说明）。
 - [ ] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】
 - [ ] R7 打包版真机验收（exe）与替换 Shion-dev——【停点 R7】
 - [ ] R8 推送前审查、合并 master、标签、Release——【停点 R8a】，用户同意后才 push

@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import re
 import secrets
 import uuid
 
@@ -31,8 +32,16 @@ def isolated_environment(home: Path) -> dict[str, str]:
     env.update(HOME=str(home), USERPROFILE=str(home), HOMEDRIVE=drive, HOMEPATH=tail,
                APPDATA=str(home / "AppData" / "Roaming"), CLAUDE_CONFIG_DIR=str(home / ".claude"),
                PATH=os.pathsep.join((str(Path(windows) / "System32"), windows)),
+               CODEX_HOME=str(home / ".codex"), SHION_OBSERVER_PORT=str(free_port()),
                QT_QPA_PLATFORM="offscreen", SHION_INSTANCE_NAME=f"ShionBundle-{uuid.uuid4().hex}")
     return env
+
+
+def log_errors(text: str) -> list[str]:
+    """shion.log 里级别为 ERROR / CRITICAL 的行（格式：时间 日期 名称 级别 消息），加上 Traceback 行；
+    消息正文里碰巧带 “ERROR” 字样的 INFO 行不算。"""
+    pattern = re.compile(r"^\S+ \S+ \S+ (ERROR|CRITICAL) ")
+    return [line for line in text.splitlines() if pattern.match(line) or line.startswith("Traceback")]
 
 
 def wait_for(predicate, timeout=20):
@@ -570,7 +579,9 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
                 if live.poll() is None:
                     live.kill()
             live_log = (live_data / "shion.log").read_text(encoding="utf-8", errors="replace")
-            require("Traceback" not in live_log and "ERROR" not in live_log, "live-log-clean")
+            require(not log_errors(live_log), "live-log-clean")
+            observer_file = json.loads((live_data / "chatgpt-observer.json").read_text(encoding="utf-8"))
+            require(observer_file["port"] == int(live_env["SHION_OBSERVER_PORT"]) != 47614, "live-observer-port-isolated")
             require((live_data / "state.json").is_file(), "live-saved-state-on-exit")
             shutil.copy2(live_data / "shion.log", evidence / "shion-live.log")
             settings_after = hashlib.sha256(real_settings.read_bytes()).hexdigest() if real_settings.is_file() else None

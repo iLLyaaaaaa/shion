@@ -959,3 +959,13 @@ def test_bad_title_table_falls_back_instead_of_crashing(tmp_path, monkeypatch, r
     for lang, name in (('zh', '勤劳搭档'), ('en', 'Steady Partner'), ('ja', '働き者の相棒')):
         title = title_for({'tasks': 3}, lang, rules)
         assert title['name'] == name and title['sprite'] == 'done'
+
+
+def test_missing_weekly_sprite_logs_a_warning_and_still_renders(tmp_path, monkeypatch, caplog):
+    import logging
+    from shion import weekly_ui
+    monkeypatch.setattr(weekly_ui, 'ROOT', tmp_path)          # 没有 assets/weekly
+    with caplog.at_level(logging.WARNING, logger='shion.weekly_ui'):
+        image = render_card(preview())
+    assert not image.isNull()
+    assert any('weekly sprite missing' in r.getMessage() for r in caplog.records)

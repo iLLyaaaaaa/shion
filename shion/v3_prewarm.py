@@ -28,7 +28,7 @@ class InlineExecutor:
         future = Future()
         try:
             future.set_result(fn(*args))
-        except BaseException as error:  # noqa: BLE001 - 和线程池一样，把异常交给 future
+        except Exception as error:  # 和线程池一样把异常交给 future；KeyboardInterrupt / SystemExit 照常向上抛
             future.set_exception(error)
         return future
 

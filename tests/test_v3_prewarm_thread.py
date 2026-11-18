@@ -269,3 +269,16 @@ def test_deferral_is_capped_so_a_long_background_queue_cannot_freeze_the_display
         release_lock.set()
         holder.join(2)
     w.close()
+
+
+def test_inline_executor_puts_exceptions_in_the_future_but_lets_interrupts_through():
+    from shion.v3_prewarm import InlineExecutor
+
+    def boom(exc):
+        raise exc
+
+    future = InlineExecutor().submit(boom, ValueError("x"))
+    assert isinstance(future.exception(), ValueError)
+    assert InlineExecutor().submit(lambda a: a + 1, 1).result() == 2
+    with pytest.raises(KeyboardInterrupt):
+        InlineExecutor().submit(boom, KeyboardInterrupt())

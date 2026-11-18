@@ -359,3 +359,12 @@ def test_the_released_side_is_really_freed_and_gc_ran_once(qapp, monkeypatch):  
     assert rig_ref() is None and renderer_ref() is None
     w.close()
     vw.shared_rig("left")
+
+
+def test_closing_the_window_cancels_the_side_preparation(qapp):  # noqa: F811
+    w, t = _window(qapp, 650)
+    w.move(150 - w.width() // 2, 200)
+    _run(w, t, 0.6)
+    assert w._v3_side_target == "right"
+    w.close()
+    assert w._v3_side_target is None and w._v3_side_job is None

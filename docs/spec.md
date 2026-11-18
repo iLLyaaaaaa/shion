@@ -258,6 +258,7 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 - 安全：带 `Origin` 头的请求（来自网页）和 `Host` 不是 `127.0.0.1` / `localhost` 的请求一律返回 403，不触发任何回调；读请求体有 5 秒超时。hook 脚本是普通 HTTP 客户端，不受影响。
 - **令牌**（v2.0 发布前安全修复，`shion/loopback.py`）：所有路由（含 `/health`）都要带 `Authorization: Bearer <令牌>`，用 `hmac.compare_digest` 比对，不对就 403、不读请求体、不触发回调。令牌是每次启动新生成的 64 位小写十六进制（`secrets.token_hex(32)`），存在数据目录（`%APPDATA%\Shion`，`SHION_DATA_DIR` 可覆盖）的 `claude-link.json`：`{"token": "…", "pid": 诗音进程号, "created": 诗音进程创建时间(FILETIME)}`，继承数据目录的用户权限，同目录临时文件 + `os.replace` 原子写入。只检查**最后两层**（数据目录本身、令牌文件本身）是不是重解析点，上级目录不查（别的账户改不了上级目录；用 junction 搬过家的用户目录照常可用）。启动顺序（`server.start_linked`，返回 `ok` / `port_busy` / `token_failed`）：先删旧令牌文件 → 绑定 47613 → **绑定成功才写新令牌**；端口被占时不写；令牌写不进去时服务照常运行但 hook 连不上，界面说 `ui.link_token_failed`（端口被占仍说 `ui.port_busy`）。正常退出时先删令牌再停服务（`server.stop_linked`）。hook 用 `loopback.read_link`：令牌格式对、**而且写它的诗音进程还在运行**（`winproc.process_running`：创建时间对得上、退出码是 STILL_ACTIVE；只看创建时间不够，进程退出后别的进程握着句柄时内核对象还在）才算数，否则一个请求都不发——没有令牌（端口被占）或诗音崩溃留下的旧令牌，都不会把命令发给占着端口的进程，也不会采纳它的“同意”或反馈。hook 每个进程读一次令牌（读不到时每次请求前再试；SessionStart 拉起诗音后的 `/health` 探测会重新读；收到 403 时重读一次，令牌换了才用新令牌重试一次）。
 - **独占绑定**：47613 和 ChatGPT 观察端 47614 都不设 `SO_REUSEADDR`，Windows 上设 `SO_EXCLUSIVEADDRUSE`，诗音绑上以后别的 socket（即使设了 `SO_REUSEADDR`）不能再绑同一端口抢连接。
+- **观察端口隔离**（R5）：`chatgpt-observer.json` 只在**首次新建**时才读环境变量 `SHION_OBSERVER_PORT`（1024～65535 的整数，否则用 47614）；已有文件不受影响。只给打包烟测 / 测试隔离用，避免占用正在使用的诗音的 47614。
 
 ## Claude Code hooks（v0.2）
 

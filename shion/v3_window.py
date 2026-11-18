@@ -493,6 +493,8 @@ class V3PetWindow(PetWindow):
 
     # ---- 每帧 ----
     def closeEvent(self, e) -> None:
+        if hasattr(self, "_v3_side_job"):
+            self._v3_cancel_side()
         for prewarmer in getattr(self, "_v3_prewarmers", {}).values():
             prewarmer.close()
         overlay = getattr(self, "_v3_scene_overlay", None)

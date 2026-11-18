@@ -182,3 +182,16 @@ def test_corrupt_credentials_remain_neutral(tmp_path, config):
     (tmp_path / "chatgpt-observer.json").write_text(json.dumps(config))
     result = dispatch({"method": "tools/call", "params": {"name": "observe_lifecycle", "arguments": {"event": "Stop"}}}, tmp_path, "o")
     assert result == {"content": [{"type": "text", "text": "{}"}], "isError": False}
+
+
+def test_new_credentials_use_the_isolated_observer_port_only_for_new_files(tmp_path, monkeypatch):
+    from shion.observer import DEFAULT_OBSERVER_PORT, credentials
+    monkeypatch.setenv("SHION_OBSERVER_PORT", "51234")
+    assert credentials(tmp_path / "new")["port"] == 51234
+    monkeypatch.setenv("SHION_OBSERVER_PORT", "60000")      # 已有文件不被环境变量改写
+    assert credentials(tmp_path / "new")["port"] == 51234
+    for bad in ("", "80", "70000", "abc", "-1", "5e4", "５１２３４"):
+        monkeypatch.setenv("SHION_OBSERVER_PORT", bad)
+        assert credentials(tmp_path / f"bad-{abs(hash(bad))}")["port"] == DEFAULT_OBSERVER_PORT
+    monkeypatch.delenv("SHION_OBSERVER_PORT")
+    assert credentials(tmp_path / "unset")["port"] == DEFAULT_OBSERVER_PORT == 47614

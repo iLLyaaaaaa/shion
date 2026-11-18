@@ -1,5 +1,6 @@
 """QPainter report card and non-activating weekly report window."""
 from pathlib import Path
+import logging
 import os
 from datetime import date, timedelta
 
@@ -227,7 +228,9 @@ def paint_card(painter, data, branding=True):
     sprite = QImage(str(ROOT / 'assets/weekly' / (sprite_name + '.png')))
     if sprite.isNull():
         sprite = QImage(str(ROOT / 'assets/weekly/idle.png'))
-    if not sprite.isNull():
+    if sprite.isNull():
+        logging.getLogger(__name__).warning('weekly sprite missing: %s', sprite_name)
+    else:
         size = sprite.size().scaled(QSize(int(SPRITE_RECT.width()), int(SPRITE_RECT.height())), Qt.KeepAspectRatio)
         painter.drawImage(QRectF(SPRITE_RECT.x() + (SPRITE_RECT.width() - size.width()) / 2, SPRITE_RECT.y(),
                                  size.width(), size.height()), sprite)
