@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -75,8 +76,10 @@ def test_merge_rejects_bad_shapes():
 
 
 def run_script(name, path):
+    # 子进程按 UTF-8 输出、这里按 UTF-8 解码：默认的 gbk 解码偶发 UnicodeDecodeError，读线程崩掉后 stderr 变 None。
     return subprocess.run(
-        [sys.executable, str(TOOLS / name), "--settings", str(path)], capture_output=True, text=True
+        [sys.executable, str(TOOLS / name), "--settings", str(path)], capture_output=True, text=True,
+        encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 

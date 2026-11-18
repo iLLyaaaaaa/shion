@@ -185,7 +185,9 @@ def _on_white(image):
 
 @pytest.fixture(scope='module')
 def painting(rig):
-    from tools.v3_right_plate import load_source
+    from tools.v3_right_plate import SOURCE, load_source
+    if not SOURCE.is_file():
+        pytest.skip(f"{SOURCE.as_posix()} 不在公开仓库里（assets/sprites/raw 是本地原图），没有它就无法比对右脸新画稿")
     return load_source(rig)
 
 
