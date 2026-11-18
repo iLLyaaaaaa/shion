@@ -108,6 +108,7 @@
   - **推送**（用户同意后）：`git push origin master`（`e974526..5ec67ca`）、`git push origin v3.0.0`（附注标签 `35d547b` → `5ec67ca`，标签作者 noreply）；没推 backup，没用 --all / --mirror / --tags。上次登录过期的问题重现，用户在自己的终端重新登录 gh 后成功。
   - **Release**「Shion 3.0.0」：https://github.com/iLLyaaaaaa/shion/releases/tag/v3.0.0 ，Latest、非草稿、非预发布，发布时间 2026-11-18T09:48:09Z；正文与 `build/release-notes-3.0.0.md` 一致（仅多一个结尾空行）；附件 `Shion-3.0.0-win64.zip` 75,044,078 字节，从公开地址重新下载后 SHA-256 `db5f7428…` 与 R7 验收的包一致。
   - **踩坑**：`gh release create` 带大附件在 2 分钟工具超时里被打断，留下附件不全的**草稿**；用 `gh release upload --clobber`（后台）补传、核对大小后再 `gh release edit --draft=false --latest` 发布。以后大附件的 Release 先后台创建，再核对草稿状态。另：用 Python 文本模式改 progress.md 会把 CRLF 变成 LF，整个文件显示为改动，要用二进制模式保留 CRLF。
+  - **收尾清理**：本地旧分支已删（已合并的 13 个用 `-d`）；`feature/ui-menu-refresh`（`b3b40a2`，基于 `c6889c3`）是 10-29 菜单改版的早期尝试，已被 master 的 `provider_menu` 结构取代，删除时未合并（`-D`）。
   - **本地提交，未推送**：这条 R8 记录只在本地 master 提交，等下次有代码改动时一起推。
 
 ### 2026-11-16 S9 姿势变体（collapse / bed / desk）：第 5 步测量与文档收尾（本地提交，不 push）
