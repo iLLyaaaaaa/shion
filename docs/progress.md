@@ -61,7 +61,7 @@
   - **留给 R6 的文档措辞**：`docs/spec.md` 第 25、731 行仍写 `tools/process_sprites.py`；三语 README 第 224 行“`process_sprites.py` 需要未公开原图”；`docs/v3-integration-plan.md` 第 17、74 行的 `--renderer v3` / “默认仍为旧版”；CLAUDE.md 与 spec 的“12 张精灵图”；NumPy 许可补进 `THIRD_PARTY_NOTICES.md`。
   - **踩坑**：worktree 没有 `.venv` 和 `assets/sprites/raw`，跑全仓要临时建 junction，任务结束前单独解除；`test_install_hooks` 的 gbk 偶发是候选的测试修复（给 `run_script` 加 `encoding='utf-8'`）。
   - **下一步**：用户确认 R5 后做 R6（版本 3.0.0、README 三语、spec / CLAUDE.md、V3 配图与 hero.gif、发布说明）。
-- [~] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a、R6b】拆成两个会话
+- [x] R6 版本 3.0.0、README 三语、spec/CLAUDE.md、V3 配图与 hero.gif、发布说明——【停点 R6a 已过、R6b 待用户过目】拆成两个会话
   - **R6a（2026-11-18，本地提交，停在【停点 R6a】等用户看图；不满意可回退本提交）**
     - **前置小提交** `842f34c`：`test_install_hooks.run_script` 按 UTF-8 解码并给子进程设 `PYTHONIOENCODING`（修 gbk 偶发）；`test_v3_mirror` 的 `painting` fixture 在 `assets/sprites/raw` 缺失时 `pytest.skip` 并写明原因（raw 不进公开仓库，别人克隆后不会报错）。
     - **版本**：`shion/__init__.py` → 3.0.0；`test_release`（版本、ZIP 名 `Shion-3.0.0-win64.zip`、exe 版本资源 3.0.0.0）、`test_windowing` 断言同步。exe 版本资源由 `tools/build.py` 从 `__version__` 生成，没手改。
@@ -71,7 +71,14 @@
     - **与计划不同**：①`working.png` 没带工作气泡——`--snapshot` 的气泡合成只支持 1x，配图是 2x；②hero 从 4 秒 / 80 帧改为 5 秒 / 100 帧（四段动作 4 秒放不下），`GIF_DURATION_MS` 随帧数算，校验和测试同步；③`pil_image` 现在也接受 PIL 图（`side.png` 先在 PIL 里并排）。
     - **测试**：`test_make_media`（含原生整批 + 独立进程 CLI 逐字节比对，约 8 分钟）、`test_release`、`test_windowing`、`test_v3_default` 全过（先 77 passed、1 skipped、2 failed，两项是硬编码的“13 张”“版本 2.2”，已改，复跑通过）。没跑全仓（只改了版本号、文档和媒体工具，全仓留到 R6b 末尾）。
     - **R6a 修订（用户看图后，hero / pinch / working 通过，改两张）**：①`lift.png`：整体离地 `LIFT_GAP`（80 像素 @2x），地面处加淡影子（`lift_image()`，窗口移动不在截图里，所以在配图里补）；②`side` 改按语言出三张 `side.{zh,en,ja}.png`（`side.png` 删除，`NAMES` 17→19）：左格 = “在屏幕左边”（右脸颊鼓）、右格 = “在屏幕右边”（左脸颊鼓），下方各有标签，箭头从两格之间指向鼓起一侧的外轮廓。箭头位置由 rig 坐标 `(325,586)` / `(543,586)` 经 `cheek_pixel()` 换算，并断言脸颊点落在人物外框内；两个箭头尾巴之间留 48 像素空隙（第一版长度 80 会在中间连成一条线，已缩到 54）。测试加 2 项几何断言（离地有整行透明 + 影子半透明；轮廓边缘在鼓起一侧、箭头不重叠），三语标签用 `SIDE_LABELS` 文字是否不同判断（测试用 qapp 没有固定字体，中日缺字都是方块）。其余 15 张与上一版逐字节一致；19 张共 3,663,341 字节，连 menu / icon 总计 4,134,062（上限 6,000,000）。
-    - **R6b 待做**：三语 README（开头演示图说明、日常互动含“只能捏着脸往上提”、体力四档、系统要求体积与内存、已知限制、从源码运行去掉 `process_sprites.py` / 加 scipy pillow、许可）、`THIRD_PARTY_NOTICES.md` 补 NumPy、`build/release-notes-3.0.0.md` 草稿、`docs/spec.md:731` 一带残余、R5 留下的 README 第 224 行措辞；README 要用上 `pinch / lift / working / side.{zh,en,ja}` 新图。
+  - **R6b（2026-11-18，本地提交，停在【停点 R6b】等用户过目三语 README 与发布说明）**
+    - **三语 README**（`README.md` / `.zh.md` / `.ja.md`，结构逐段对齐：标题 22、行数 268、引用图片集合一致、无缺图）：开头 hero 说明与“她是谁”补纸偶立绘；“日常互动”改成 V3（捏脸、**只能捏着脸往上提来拎起**、敲头、挠肚子、换边、抱电脑、休息姿势）并加 pinch / lift / working / `side.{lang}` 四张图；体力一档补累瘫姿势；使用方法表改成 V3 手势（拖身体不会动，首次启动约 10 秒提示一次）；系统要求写“下载约 75 MB、解压约 170 MB、内存比 2.x 高、默认大小实测约 225 MB（R4 打包版 5 次中位数 221.8 / 226.4 MB）”，**不写 2.x 的数字**（185 MB 是源码运行值，不可比）；安装改 `Shion-3.0.0-win64.zip` 并加“从旧版升级”（覆盖原文件夹 → Claude Code 和聊天都不用重连；解压到新文件夹 → 两者都要重新连接；确认新版连接正常后可以删除旧文件夹）；已知限制只加两条用户会碰到的（内存更高；睡床 / 趴桌 / 累瘫时不能捏脸和挠痒），**没写** desk 摸头少画帧、scene 缓存挤掉后略卡；从源码运行去掉 `process_sprites.py`；第三方声明句改为 tomlkit / NumPy / SciPy / Pillow。
+    - **升级说明的依据**：`tools/hooks_config.py:runtime_command` 打包版写的是 `Path(sys.executable).resolve()`，即 Shion.exe 的绝对路径，聊天联动同样存 exe 绝对路径。读代码确认 `merge()` 先 `remove()` 再追加，`_is_shion` 按文件名 `shion.exe --hook <事件>` 识别、不看目录，所以从新文件夹重新连接是**替换**旧条目、不是追加；新增 `tests/test_connection_config.py::test_reconnect_from_a_new_folder_replaces_the_old_exe_entries` 证明（每个事件恰好一条、都指向新 exe、没有任何地方指向旧 exe、第三方 hook 保留、换文件夹后状态为 stale 再回 connected）。
+    - **许可范围核实**：`docs/images/`（含 hero.gif 和全部配图）与 `assets/sprites/`（含 `v3/`）本来就在 CC BY-NC 范围内；**`assets/weekly/`（周报立绘）不在，已补**——三语 README 许可表和说明段、根目录 `LICENSE`、`assets/LICENSE` 的 Scope 段（只加目录名，不改授权条款）。
+    - **`THIRD_PARTY_NOTICES.md`**：新增 NumPy 2.2.6 一节，许可全文用脚本逐字取自 `numpy-2.2.6.dist-info/LICENSE.txt`（含其捆绑库的许可），写法同 SciPy / Pillow。
+    - **发布说明草稿** `build/release-notes-3.0.0.md`（忽略目录，不入库），三语，体例同 2.2.0：全新外观 / 新互动 / **操作变化（重要）** / 体积与内存 / 已知限制 / 从 2.2.0 升级 / 许可。
+    - **测试**：`test_release`、`test_session_labels`、`test_connection_config`（含新增）、`test_connection_ui`、`test_install_hooks` 105 passed；没跑全仓（只改文档、许可和一个测试，全仓留到 R7 打包前）。README 里的相对链接和 docs/images 引用逐个核对存在。
+    - **R7 要做**：从本分支提交打包、bundle_smoke、替换 Shion-dev、真机验收（清单见总计划）；README / 发布说明里的“约 225 MB”要用打包版验收的内存数字再核一遍。
 - [ ] R7 打包版真机验收（exe）与替换 Shion-dev——【停点 R7】
 - [ ] R8 推送前审查、合并 master、标签、Release——【停点 R8a】，用户同意后才 push
 

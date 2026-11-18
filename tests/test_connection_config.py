@@ -419,3 +419,28 @@ def test_disconnect_removes_statusline_cache_and_empty_record(connection, tmp_pa
     c.disconnect()
     assert not any(cache.exists() for cache in caches) and not c.record.exists()
     assert (data / "usage.json").exists()
+
+
+def test_reconnect_from_a_new_folder_replaces_the_old_exe_entries(connection, monkeypatch):
+    """升级到新文件夹：用新 Shion.exe 重新连接，旧文件夹 exe 的 hook 条目被替换而不是追加。"""
+    c = connection
+    old, new = c.root / "old" / "Shion.exe", c.root / "new" / "Shion.exe"
+    for exe in (old, new):
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b"exe")
+    third_party = {"type": "command", "command": "keep.exe"}
+    put(c.user, {"hooks": {"Stop": [{"hooks": [third_party]}]}})
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(old))
+    c.connect()
+    assert {h["command"] for h in own(hc.load(c.user))} == {old.as_posix()}
+    monkeypatch.setattr(sys, "executable", str(new))
+    assert c.inspect().state == "stale"  # 换了文件夹：旧条目指向别处，诗音提示需要重新连接
+    c.connect()
+    installed = hc.load(c.user)
+    entries = own(installed)
+    assert len(entries) == len(hc.EVENTS)  # 每个事件恰好一条，没有追加
+    assert {h["command"] for h in entries} == {new.as_posix()}
+    assert old.as_posix() not in json.dumps(installed)  # 没有任何地方还指向旧 exe
+    assert third_party in installed["hooks"]["Stop"][0]["hooks"]  # 第三方 hook 保留
+    assert c.inspect().state == "connected"

@@ -4,7 +4,7 @@
 
 **A desktop companion that works alongside Claude Code — and keeps an eye on ChatGPT (Codex) too**
 
-<img src="docs/images/hero.gif" alt="Shion blinking, jumping and smiling on the desktop" width="360">
+<img src="docs/images/hero.gif" alt="Shion blinking, bouncing back from a cheek pinch, enjoying a headpat, working with a laptop and hopping happily" width="360">
 
 English · [中文](README.zh.md) · [日本語](README.ja.md)
 
@@ -17,7 +17,7 @@ English · [中文](README.zh.md) · [日本語](README.ja.md)
 
 ## Who is she?
 
-Shion is a little girl who lives on your desktop. She blinks, breathes, idles, and sometimes talks to herself.
+Shion is a little girl who lives on your desktop. She blinks, breathes, idles, and sometimes talks to herself. She is a paper-doll style character: she breathes, blinks, and her hair sways gently.
 While you work with Claude Code, Claude Desktop chat (or ChatGPT's Codex), she **keeps you company**: she gets serious when it starts working, lets you know when it's done, and brings permission requests right to you.
 
 She doesn't read your code, doesn't go online, and doesn't chat with the AI on your behalf. She's just there with you.
@@ -56,7 +56,7 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 <p align="center"><img src="docs/images/weekly.en.png" alt="Shion Weekly card: weekly title Night Owl, total tokens, API price estimate and a tokens-per-day chart (synthetic data)" width="360"><br>The weekly card (synthetic data).</p>
 
 ### Stamina
-- Four tiers based on Claude Code's **5-hour quota**: under 50% fresh, 50–80% yawning, 80–95% slumped, 95% and up collapsed. She says a line when entering each tier, and when the quota resets she bounces back with a jump
+- Four tiers based on Claude Code's **5-hour quota**: under 50% fresh, 50–80% yawning, 80–95% slumped, 95% and up collapsed (flat out on the floor in a dedicated pose). She says a line when entering each tier, and when the quota resets she bounces back with a jump
 - **The four tiers work in terminal Claude Code only**: the data comes from `rate_limits` in the statusLine input (Pro / Max subscriptions, after the first reply in a session)
 - **Code in the Claude desktop app** doesn't run the statusLine, so there are just two states: she collapses when you hit the limit (`StopFailure` hook) and recovers when the quota auto-resumes
 - Double-click Shion to see the **5-hour quota** (fresh data only) and the **7-day quota** (last known value, marked with its age when older, e.g. "73% (3 h ago)")
@@ -66,12 +66,26 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 <p align="center"><img src="docs/images/stamina.en.png" alt="Four stamina tiers: fresh, yawning, slumped and collapsed, for 5-hour quota under 50%, 50 to 80%, 80 to 95% and 95% or more" width="720"></p>
 
 ### Everyday interaction
-- Headpats (with hearts), pokes, cheek pinches, tickles, picking her up and shaking her (she gets dizzy)
+- Headpats (with hearts), head knocks (little stars; knock repeatedly and she protests), pokes, tummy tickles
+- **Cheek pinch**: pinch a cheek and pull sideways; she puffs it out and bounces back on release, and gets sulky if you pinch repeatedly. **Pinch her cheek and pull up to pick her up and move her** (dragging her body does nothing): she stays where you drop her, a hard fling or dropping her on the taskbar makes her fall, and shaking her makes her dizzy. A hint appears once, about 10 seconds after first launch
+- Her cheek puffs out toward the side away from the screen edge she is near: put her down on the other half of the screen and she blinks and switches sides
+- While Claude works she holds a laptop and nods now and then
 - Open **Talk → Give a snack**, or pick a preset conversation (no AI model involved)
 - **Actions**: **Jump**, **Go to bed**, or **Rest at the desk**
 - Time-aware greetings: asks about breakfast in the morning, tells you to sleep late at night
 - **Affection**: grows slowly through headpats, snacks and talks; five levels unlock new talks, snacks and lines
 - 中文 / English / 日本語
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/pinch.png" alt="Shion with one cheek pinched and pulled to the side" width="360"><br>Pinch a cheek and pull sideways; she bounces back with puffed cheeks.</td>
+    <td align="center"><img src="docs/images/lift.png" alt="Shion picked up by the cheek, floating above the ground with a faint shadow under her feet" width="360"><br>Pinch a cheek and pull up to pick her up.</td>
+  </tr>
+</table>
+
+<p align="center"><img src="docs/images/working.png" alt="Shion working while holding a laptop" width="360"><br>While Claude works she holds a laptop.</p>
+
+<p align="center"><img src="docs/images/side.en.png" alt="Two Shions side by side: near the left screen edge her right cheek puffs out, near the right edge her left cheek puffs out, with arrows pointing at the puffed cheek" width="600"><br>Her cheek puffs out toward the side away from the screen edge she is near.</p>
 
 ### Stays out of your way
 - Click-through on transparent areas
@@ -97,16 +111,19 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 ## Requirements
 
 - Windows 10 / 11 (macOS / Linux not supported yet)
+- Download about 75 MB (about 170 MB unpacked). Memory use is higher than in 2.x: about 225 MB measured at the default size, more at larger sizes
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (the CLI or Code in the desktop app), Claude Desktop (for chat) and/or Codex (the CLI or the desktop app). Shion also works as a plain desktop pet without either
 
 ## Install
 
-1. Download `Shion-2.2.0-win64.zip` from [Releases](../../releases)
+1. Download `Shion-3.0.0-win64.zip` from [Releases](../../releases)
 2. Extract it to a **permanent location**, e.g. `D:\Apps\Shion` (if you move it later, reconnect via right-click → **AI connections** → **Claude Code** → **Connect / inspect configuration**)
 3. Run `Shion.exe`
 4. On first launch Shion asks whether to connect to Claude Code — click **Connect**
 
 No Python required.
+
+**Upgrading from an older version**: your save data, affection and settings carry over. Extract **over the original folder** and neither Claude Code nor Claude Desktop chat needs reconnecting; extract to a **new folder** and you need to reconnect both from Shion (for Claude Desktop chat, disconnect first, then connect; see below). Once the new version shows as connected, you can delete the old folder.
 
 > [!TIP]
 > If Windows SmartScreen says "Windows protected your PC", click **More info → Run anyway**. This warning can appear because the app is not code-signed.
@@ -154,9 +171,10 @@ The ChatGPT integration is installed separately: right-click → **AI connection
 |---|---|
 | Left click | Poke |
 | Hold left button and move over her head | Headpat |
-| Drag a cheek sideways | Pinch her cheek |
-| Click her tummy 3 times / rub back and forth | Tickle |
-| Drag | Pick her up; she stays where you drop her. Shake hard and she gets dizzy |
+| Click her head | Head knock (stars; knock repeatedly and she protests) |
+| Pinch a cheek and pull sideways | Pinch her cheek; she puffs it out and bounces back on release |
+| Pinch a cheek and pull up | Pick her up; she stays where you drop her. A hard fling or the taskbar makes her fall, shaking makes her dizzy. **This is the only way to move her; dragging her body does nothing** (a hint appears once, about 10 seconds after first launch) |
+| Rub her tummy back and forth | Tickle (a single click on the tummy is just a poke) |
 | Double click | Status (time together, affection level, connection, quota) |
 | Right click | Menu: Interact, Work remote, Pet (Expression, Actions, Size…), AI connections, Settings (Language, Start with Windows)… |
 
@@ -201,6 +219,8 @@ Apps packaged with PyInstaller are occasionally misdetected. You can review the 
 
 ## Known limitations
 
+- Memory use is higher than in 2.x (about 225 MB measured at the default size, more at larger sizes)
+- While she is in bed, resting at the desk or collapsed (stamina), cheek pinches and tickles do nothing (headpats and knocks still work); dragging anywhere other than a cheek only shows a hint to "pinch her cheek and pull up"
 - The four stamina tiers (5-hour quota) work in terminal Claude Code only. The desktop app gets the two-state hook path (collapse at the limit, recover on auto-resume), and the 7-day quota can only show the last value received from a terminal. Desktop collapse / recovery hasn't been verified against a real limit hit yet
 - Weekly tokens count Claude Code only (regular chats aren't included); the API price is an estimate for reference
 - Your original status line command gets at most 1 second per refresh; if it times out, its previous output is shown. Without Git Bash it runs through PowerShell, whose cold start can exceed 1 second, so the first refresh may drop your original status line output
@@ -221,7 +241,7 @@ python -m venv .venv
 start.bat
 ```
 
-Requires Python 3.10+. The sprites are already processed; `tools/process_sprites.py` needs the unpublished original images, so regular users do not need to run it. Build: `.venv\Scripts\python tools\build.py` (output in `dist\Shion\`). Tests: `.venv\Scripts\python -m pytest -q`.
+Requires Python 3.10+. The character art is already generated (by `tools/v3_*.py`; the original images in `assets/sprites/raw` are not published), so regular users do not need to run those scripts. Build: `.venv\Scripts\python tools\build.py` (output in `dist\Shion\`). Tests: `.venv\Scripts\python -m pytest -q`.
 
 ## License
 
@@ -230,9 +250,9 @@ This project is licensed in two parts:
 | Content | License | What you can do |
 |---|---|---|
 | Code and other content (except Shion's character images; includes dialogue and menu data) | [MIT](LICENSE) | Almost anything, including commercial use, while retaining copyright and license notices |
-| Shion's character images (currently including `assets/sprites/`, `docs/images/` and `assets/icon/`) | [CC BY-NC 4.0](assets/LICENSE) | Share and adapt with attribution, a license link and change notices; **non-commercial only** |
+| Shion's character images (currently including `assets/sprites/`, `assets/weekly/`, `docs/images/` and `assets/icon/`) | [CC BY-NC 4.0](assets/LICENSE) | Share and adapt with attribution, a license link and change notices; **non-commercial only** |
 
-Shion / 诗音 is an original character by iLLyaaaaaa. Shion's character images, currently including `assets/sprites/`, `docs/images/` (screenshots, `hero.gif` and icon previews) and `assets/icon/`, use CC BY-NC 4.0. This also covers future Shion character icons (`.ico` / `.png`). Other content, including dialogue and menu data, uses MIT like the code. You may build your own desktop pet from the code; Shion's artwork is for non-commercial use only.
+Shion / 诗音 is an original character by iLLyaaaaaa. Shion's character images, currently including `assets/sprites/`, `assets/weekly/` (weekly card art), `docs/images/` (screenshots, `hero.gif` and icon previews) and `assets/icon/`, use CC BY-NC 4.0. This also covers future Shion character icons (`.ico` / `.png`). Other content, including dialogue and menu data, uses MIT like the code. You may build your own desktop pet from the code; Shion's artwork is for non-commercial use only.
 
 ## Credits
 
@@ -245,4 +265,4 @@ Shion / 诗音 is an original character by iLLyaaaaaa. Shion's character images,
 <sub>Shion is an unofficial personal project and is not affiliated with Anthropic or OpenAI.</sub>
 </div>
 
-The ChatGPT integration uses tomlkit (MIT); see [third-party notices](THIRD_PARTY_NOTICES.md).
+Third-party libraries used by Shion (tomlkit, NumPy, SciPy, Pillow) are listed in the [third-party notices](THIRD_PARTY_NOTICES.md).
