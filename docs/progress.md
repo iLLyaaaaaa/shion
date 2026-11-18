@@ -102,8 +102,13 @@
     - [x] 开机自启动在重启后仍能拉起诗音（先在设置里开启；注册表值应指向 `D:\desktop	ools\Shion-dev\Shion.exe`）
     - [x] 退出：菜单退出干净，无报错弹窗、无残留进程
   - **后续候选（本次不处理）**：OpenBLAS 专用内存约 1694 MB，留待之后评估与削减。
-  - **下一步**：R8 推送前审查、合并 master、标签、Release（【停点 R8a】，用户同意后才 push）。R7 之后只改了文档，R8 不重跑全仓测试和内存实测，沿用 R7 在 `d5df896` 上的结果；合并 master 若只是快进或只有文档就不跑测试，若引入 V3 分支没有的代码改动，只跑受影响文件。
-- [ ] R8 推送前审查、合并 master、标签、Release——【停点 R8a】，用户同意后才 push
+- [x] R8 推送前审查、合并 master、标签、Release——【停点 R8a 已过】（2026-11-18，用户同意后推送并发布）
+  - **推送前审查**（范围 `HEAD --not --remotes=origin`，50 个提交，推送时含 `5ec67ca`）：Author / Committer 邮箱全是 noreply，提交信息里只有 `noreply@anthropic.com`；逐提交 `check_private --ref` 50/50 无命中；用户名 / 机器名对完整补丁 0 命中；密钥正则只命中代码标识符（`secrets.token_hex`）和 Pillow 许可文本，手机号 / 证件号正则只命中一个浮点数；出现过的 436 个文件均为代码、测试、文档、台词、精灵图与图标（291 个 png），无字体 / 音频 / 字幕，无 >5 MB 文件，`ls-files -ci` 为空。未装 gitleaks，没用它扫描。
+  - **合并**：master 是 `feature/v3-integrate` 的祖先，纯快进（`8ed6de8..5ec67ca`），所以没跑测试；R7 的全仓与内存实测沿用 `d5df896` 上的结果。
+  - **推送**（用户同意后）：`git push origin master`（`e974526..5ec67ca`）、`git push origin v3.0.0`（附注标签 `35d547b` → `5ec67ca`，标签作者 noreply）；没推 backup，没用 --all / --mirror / --tags。上次登录过期的问题重现，用户在自己的终端重新登录 gh 后成功。
+  - **Release**「Shion 3.0.0」：https://github.com/iLLyaaaaaa/shion/releases/tag/v3.0.0 ，Latest、非草稿、非预发布，发布时间 2026-11-18T09:48:09Z；正文与 `build/release-notes-3.0.0.md` 一致（仅多一个结尾空行）；附件 `Shion-3.0.0-win64.zip` 75,044,078 字节，从公开地址重新下载后 SHA-256 `db5f7428…` 与 R7 验收的包一致。
+  - **踩坑**：`gh release create` 带大附件在 2 分钟工具超时里被打断，留下附件不全的**草稿**；用 `gh release upload --clobber`（后台）补传、核对大小后再 `gh release edit --draft=false --latest` 发布。以后大附件的 Release 先后台创建，再核对草稿状态。另：用 Python 文本模式改 progress.md 会把 CRLF 变成 LF，整个文件显示为改动，要用二进制模式保留 CRLF。
+  - **本地提交，未推送**：这条 R8 记录只在本地 master 提交，等下次有代码改动时一起推。
 
 ### 2026-11-16 S9 姿势变体（collapse / bed / desk）：第 5 步测量与文档收尾（本地提交，不 push）
 
