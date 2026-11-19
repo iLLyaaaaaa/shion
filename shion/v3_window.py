@@ -16,7 +16,7 @@ from collections import OrderedDict
 from dataclasses import replace
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBitmap, QGuiApplication, QImage, QPainter, QRegion, QTransform
 
 from shion.animator import (BREATH_AMP, BREATH_PERIOD, BREATH_STATES, CALM_BREATH_AMP,
@@ -115,6 +115,7 @@ class V3PetWindow(PetWindow):
     knocked = Signal(bool)
     # 在脸颊以外按住拖动超过点击容差（窗口不动）：控制器用它提示“捏着脸往上提”。
     drag_ignored = Signal()
+    visible_sprite_bounds_changed = Signal()
 
     def __init__(self, *args, initial_side: str | None = None, **kwargs):
         self._v3_initial_side = initial_side
@@ -813,7 +814,8 @@ class V3PetWindow(PetWindow):
         origin = local_origin(self, scene, s, images.pad)
         rw, rh = images.rig_size
         rect = QRectF(self.x() + origin.x(), self.y() + origin.y(), rw * s, rh * s)
-        overlay.set_scene(images.furniture, rect, w, bool(self.windowFlags() & Qt.WindowStaysOnTopHint))
+        overlay.set_scene(images.furniture, rect, w, bool(self.windowFlags() & Qt.WindowStaysOnTopHint),
+                          visible_fraction=images.furniture_bounds)
 
     def _v3_scene_follow(self) -> None:
         """窗口移动时家具覆盖窗跟着走。"""
@@ -1246,6 +1248,42 @@ class V3PetWindow(PetWindow):
         super().advance_to(now)
 
     # ---- 截图（家具在覆盖窗里，普通的 render_frame 只有诗音窗口那一层）----
+    def resting_sprite_bounds(self) -> QRect:
+        """Visual anchor for adjacent windows, in screen coordinates without animation."""
+        scene = v3_scene.scene_for(self.sprite_name, self._v3_scenes)
+        images = self._v3_scene_cache.get(self._v3_scene_key(scene)) if scene is not None else None
+        scale = self._v3_scale
+        if images is not None:
+            x0, y0, x1, y1 = scene.char_box
+            origin = local_origin(self, scene, scale, images.pad)
+            bounds = QRectF(origin.x() + (images.pad + x0) * scale,
+                            origin.y() + (images.pad + y0) * scale,
+                            (x1 - x0) * scale, (y1 - y0) * scale)
+            if not images.furniture_bounds.isEmpty():
+                furniture = images.furniture_bounds
+                width, height = (size * scale for size in images.rig_size)
+                bounds = bounds.united(QRectF(origin.x() + furniture.x() * width,
+                                              origin.y() + furniture.y() * height,
+                                              furniture.width() * width, furniture.height() * height))
+        else:
+            (x0, y0, x1, y1), (foot_x, foot_y) = self._v3_geometry
+            ground = self.height() - MARGIN_BOTTOM - self._height * V2_FOOT_GAP_RATIO
+            bounds = QRectF(self.width() / 2 + (x0 - foot_x) * scale, ground + (y0 - foot_y) * scale,
+                            (x1 - x0) * scale, (y1 - y0) * scale)
+            # The standing hair extends farther on the right when animated. Reserve
+            # its usual range at rest so adjacent windows don't chase the mask.
+            bounds.adjust(1, 0, MASK_GROW, 0)
+        return bounds.toAlignedRect().translated(self.pos())
+
+    def visible_sprite_bounds(self) -> QRect:
+        """Screen bounds of the painted character and furniture, before input mask expansion."""
+        bounds = getattr(self, "_v3_visible_bounds", QRect())
+        bounds = (QRect(*self.body_rect()) if bounds.isEmpty() else bounds.translated(self.pos()))
+        overlay = self._v3_scene_overlay
+        if overlay is not None and overlay.isVisible():
+            bounds = bounds.united(overlay.visible_bounds())
+        return bounds
+
     def render_frame(self, scale: int = 1) -> QImage:
         if self._v3_scene_w > 0.0:
             return self.render_scene_frame(scale, clip=False)
@@ -1314,6 +1352,9 @@ class V3PetWindow(PetWindow):
             self._v3_mask_pass = False
         p.end()
         base = QRegion(QBitmap.fromImage(img.createMaskFromColor(0, Qt.MaskInColor)))
+        bounds = base.boundingRect().intersected(self.rect())
+        bounds_changed = bounds != getattr(self, "_v3_visible_bounds", None)
+        self._v3_visible_bounds = bounds
         region = QRegion(base)
         g = MASK_GROW
         for dx, dy in ((g, 0), (-g, 0), (0, g), (0, -g), (g, g), (-g, g), (g, -g), (-g, -g),
@@ -1323,6 +1364,8 @@ class V3PetWindow(PetWindow):
         self._v3_stats["masks"] += 1
         self._v3_region = region
         self.setMask(region)
+        if bounds_changed:
+            self.visible_sprite_bounds_changed.emit()
 
     def _mask_for(self, f) -> QRegion:
         """父类改尺寸等路径会调用；V3 统一用当前帧的遮罩。"""

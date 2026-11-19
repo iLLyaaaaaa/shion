@@ -223,6 +223,7 @@ class SaveData:
     stats: dict = field(default_factory=lambda: {"date": "", "pats": 0, "claude_tasks": 0})
     window: dict = field(default_factory=lambda: dict(DEFAULT_WINDOW))
     bubble_muted: bool = False
+    show_task_chips: bool = True
     inject_praise: bool = True
     privacy_mode: bool = False  # 只显示状态，不显示文件名/命令/回复内容
     language: Optional[str] = None  # None = 还没选过，首次启动时跟随系统语言
@@ -263,6 +264,7 @@ class SaveData:
             "stats": dict(self.stats),
             "window": dict(self.window),
             "bubble_muted": self.bubble_muted,
+            "show_task_chips": self.show_task_chips,
             "inject_praise": self.inject_praise,
             "privacy_mode": self.privacy_mode,
             "language": self.language,
@@ -317,6 +319,7 @@ class SaveData:
             d.remote["pause_timeout"] = max(60, min(_int(remote.get("pause_timeout"), 1800), 1880))
             d.remote["permission_timeout"] = max(10, min(_int(remote.get("permission_timeout"), 120), 170))
         d.bubble_muted = _bool(raw.get("bubble_muted"), False)
+        d.show_task_chips = _bool(raw.get("show_task_chips"), True)
         d.inject_praise = _bool(raw.get("inject_praise"), True)
         d.privacy_mode = _bool(raw.get("privacy_mode"), False)
         d.release_to_taskbar = _bool(raw.get("release_to_taskbar"), False)

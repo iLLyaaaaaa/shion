@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QSize, QStandardPaths, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QLocale, QObject, QPoint, QPointF, QRect, QSize, QStandardPaths, Qt
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QImage, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
@@ -359,6 +359,9 @@ def _render_snapshot(
     nod: bool = False,
     gesture: str | None = None,
     side: str | None = None,
+    chips: str | None = None,
+    chips_side: str | None = None,
+    chips_overlays: str | None = None,
 ) -> QImage:
     """离屏渲染一帧并返回 QImage。不显示窗口，不做单实例检查。
 
@@ -389,6 +392,11 @@ def _render_snapshot(
         while index * Z_INTERVAL < at:
             win._sleep_z.advance(t[0] + index * Z_INTERVAL, win._sleep_z.state)
             index += 1
+    if chips == "demo":
+        try:
+            return render_task_chips_demo(scene, lang, chips_side, chips_overlays, bubble, badge, at)
+        finally:
+            scene.close()
     t[0] += at
     win.advance_to(t[0])
     img = scene.render()
@@ -435,16 +443,113 @@ def _render_snapshot(
     return img
 
 
+def render_task_chips_demo(scene, lang, side, overlays, bubble_text, badge, at):
+    """Compose live widgets on a fixed virtual screen so previews work on either side."""
+    from shion.badge import CheckpointPanel, PauseBadge
+    from shion.panel import ARM_DELAY, PermissionPanel
+    from shion.sessions import SessionNames
+    from shion.task_board import BoardInputs, TaskBoard
+    from shion.task_chips import TaskChips
+    from shion.tasks import TaskRecord
+
+    pet = scene.win
+    avail = QRect(0, 0, 1440, 900)
+    center_x = 940 if side == "left" else 500
+    pet.move(center_x - pet.width() // 2, 340)
+    pet.show()
+    scene.advance_to(at)
+
+    lines = Lines(lang)
+    ui = lines.ui
+    labels = SessionNames()
+    for key, label in (("review", "review"), ("build", "build"), ("docs", "docs"), ("tests", "tests")):
+        labels.note(key, label)
+    board = TaskBoard()
+    now = scene.time[0]
+    board.note_cc_stop("docs", ended_by_shion=False, now=now - 2)
+    board.note_cc_stop("tests", ended_by_shion=False, now=now - 1)
+    view = board.snapshot(BoardInputs(
+        cc_permissions=("review",), cc_working=("build",),
+        ledger_tasks={("chatgpt", "demo", "session", "turn"): TaskRecord("observed_working", now - 5)},
+    ), now=now, session_names=labels, ui=ui)
+
+    widgets = []
+    def hidden(widget):
+        widget.setAttribute(Qt.WA_DontShowOnScreen)
+        widgets.append(widget)
+        return widget
+
+    try:
+        if bubble_text or overlays:
+            bubble = hidden(BubbleWindow(clock=lambda: now, autostart=False))
+            bubble.set_font_fallback(lines.font_fallback)
+            bubble.follow(pet.body_rect())
+            bubble.say(bubble_text or ui("permission_title"), sticky=True)
+        if badge or overlays == "pause":
+            pause = hidden(PauseBadge(pet))
+            pause.set_texts(ui("pause_label"), ui("pause_label_hint"), lines.font_fallback)
+            pause.set_wanted(True)
+        if overlays == "checkpoints":
+            checkpoints = hidden(CheckpointPanel(pet, lines.font_fallback))
+            checkpoints.present([("docs", "docs"), ("tests", "tests")],
+                                {"title": ui("checkpoint_title"), "resume": ui("checkpoint_resume"),
+                                 "end": ui("checkpoint_end")})
+        if overlays:
+            permission_clock = [now]
+            permission = hidden(PermissionPanel(bubble.font_family, clock=lambda: permission_clock[0]))
+            permission.show_request("demo", "Bash", "git status", 0, {
+                key: ui("permission_" + key) for key in
+                ("title", "allow", "deny", "more", "expand", "collapse")
+            }, pet.body_rect())
+            permission_clock[0] += ARM_DELAY + 0.1
+            permission.refresh_enabled()
+        chips = hidden(TaskChips(pet, available=lambda _point: avail))
+        chips.present(view, ui, lines.font_fallback, tuple(widgets[:-1]))
+        if not chips.isVisible():
+            raise RuntimeError("Task chips demo has no available layout")
+
+        pet_bounds = pet.geometry()
+        overlay = pet._v3_scene_overlay
+        if overlay is not None and overlay.isVisible():
+            pet_bounds = pet_bounds.united(overlay.geometry())
+        assert all(not chips.geometry().intersects(rect)
+                   for rect in (pet.visible_sprite_bounds(), *(w.geometry() for w in widgets[:-1])))
+        layers = [(pet_bounds, scene.render())]
+        for widget in widgets:
+            image = (widget.render_image(now + 10) if isinstance(widget, BubbleWindow)
+                     else render_widget_image(widget))
+            layers.append((widget.geometry(), image))
+        bounds = pet_bounds
+        for rect, _image in layers[1:]:
+            bounds = bounds.united(rect)
+        bounds.adjust(-12, -12, 12, 12)
+        image = QImage(bounds.size(), QImage.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        painter = QPainter(image)
+        try:
+            for rect, layer in layers:
+                painter.drawImage(rect.topLeft() - bounds.topLeft(), layer)
+        finally:
+            painter.end()
+        return image
+    finally:
+        for widget in reversed(widgets):
+            widget.hide()
+            widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 def snapshot(
     out: str, state: str = "idle", bubble: str | None = None, at: float = 0.0,
     squash: str | None = None, lang: str = "zh", from_state: str | None = None,
     jump: bool = False, badge: bool = False, height: int = 200,
     activity: str = "normal", nod: bool = False,
     gesture: str | None = None, side: str | None = None,
+    chips: str | None = None, chips_side: str | None = None, chips_overlays: str | None = None,
 ) -> int:
     """原单帧 PNG 入口；参数、保存格式和终端输出保持不变。"""
     img = render_snapshot(state, bubble, at, squash, lang, from_state, jump, badge, height, activity,
-                          nod, gesture, side)
+                          nod, gesture, side, chips, chips_side, chips_overlays)
 
     ok = img.save(out, "PNG")
     if not ok:

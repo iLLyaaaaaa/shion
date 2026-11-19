@@ -31,6 +31,7 @@ class BoardInputs:
     ledger_tasks: Mapping[LedgerKey, TaskRecord] = field(default_factory=dict)
     ledger_ttl: float = 300.0
     private: bool = False
+    ledger_now: float | None = None
 
 
 @dataclass(frozen=True)
@@ -191,16 +192,19 @@ class TaskBoard:
         return [_Row(CHAT_KEY, "claude_chat", "working", self._chat_timing)]
 
     def _codex_rows(self, inputs: BoardInputs, now: float) -> list[_Row]:
+        # The observer and Qt animation clocks may have different origins on Windows.
+        ledger_now = now if inputs.ledger_now is None else inputs.ledger_now
         latest: dict[ChipKey, tuple[str, TaskRecord]] = {}
         for (provider, namespace, session, turn_id), task in inputs.ledger_tasks.items():
             if provider == "chatgpt":
                 latest[(provider, namespace, session)] = (turn_id, task)
         rows = []
         for key, (turn_id, task) in latest.items():
+            stamp = now + (task.last - ledger_now)
             turn = self._codex_turns.get(key)
             if turn is None or turn.turn_id != turn_id:
                 self._done.pop(key, None)
-                turn = _CodexTurn(turn_id, self._start(task.last))
+                turn = _CodexTurn(turn_id, self._start(stamp))
                 self._codex_turns[key] = turn
             if task.state == "interrupted":
                 turn.ended_seen = True
@@ -208,13 +212,13 @@ class TaskBoard:
                 continue
             if task.state == "turn_ended":
                 if not turn.ended_seen:
-                    self._complete(key, "chatgpt", turn.timing, task.last)
+                    self._complete(key, "chatgpt", turn.timing, stamp)
                     turn.ended_seen = True
             elif (task.permission_unknown and not task.terminal
                   and task.state in ("observed_working", "uncertain")
                   and not (task.continuity_lost or task.observation_paused or task.observation_gap_at is not None
                            and task.state == "uncertain")
-                  and (task.lease_supported or now - task.last < inputs.ledger_ttl)):
+                  and (task.lease_supported or ledger_now - task.last < inputs.ledger_ttl)):
                 rows.append(_Row(key, "chatgpt", "waiting", turn.timing, "permission_unknown"))
             elif task.state == "observed_working":
                 rows.append(_Row(key, "chatgpt", "working", turn.timing))
