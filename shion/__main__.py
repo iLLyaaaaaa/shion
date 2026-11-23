@@ -52,6 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--activity", choices=["quiet", "normal", "lively"], default="normal", help="截图用：活跃度")
     p.add_argument("--squash", choices=["click", "land"], default=None, help="截图用：0 秒时触发压扁")
     p.add_argument("--badge", action="store_true", help="截图用：画出暂停文字标签")
+    p.add_argument("--chips", choices=["demo"], help="截图用：用合成任务绘制标签")
+    p.add_argument("--chips-side", choices=["left", "right"], help="截图用：任务标签所在侧（默认右侧）")
+    p.add_argument("--chips-overlays", choices=["pause", "checkpoints"], help="截图用：与其他提示共存")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
     p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating", "about", "connection"], default=None,
                    help="截图用：授权、检查点停下、反馈、对话首页、零食列表或吃零食效果")
@@ -66,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="截图用：捏脸 / 摸头 / 敲头 / 挠痒 / 拎起，让动画器走到手势的第 --at 秒")
     p.add_argument("--side", choices=["left", "right"], default=None, help="截图用：鼓脸颊的一侧（不自动换边）")
     args = p.parse_args(argv)
+
+    if args.chips and (not args.snapshot or args.panel or args.weekly_preview or args.icon_preview):
+        p.error("--chips requires a pet --snapshot")
+    if (args.chips_side or args.chips_overlays) and not args.chips:
+        p.error("--chips-side and --chips-overlays require --chips")
 
     from shion import app
 
@@ -88,7 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         return app.snapshot(args.snapshot, args.state, args.bubble, args.at, args.squash, args.lang,
                             args.from_state, jump=args.jump, badge=args.badge,
                             height=args.height, activity=args.activity, nod=args.nod,
-                            gesture=args.gesture, side=args.side)
+                            gesture=args.gesture, side=args.side, chips=args.chips,
+                            chips_side=args.chips_side, chips_overlays=args.chips_overlays)
     return app.run()
 
 

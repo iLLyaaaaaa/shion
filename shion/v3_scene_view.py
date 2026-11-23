@@ -46,6 +46,16 @@ class SceneImages:
         self.furniture = _rgba_image(arrays["furniture"]) if scene.has_furniture else None
         self.seam = _alpha_image(arrays["seam"]) if arrays["seam"].any() else None
         self.alpha = arrays["alpha"]
+        self.furniture_bounds = QRectF()
+        if self.furniture is not None:
+            alpha = arrays["furniture"][..., 3]
+            xs = np.flatnonzero(alpha.any(axis=0))
+            ys = np.flatnonzero(alpha.any(axis=1))
+            if xs.size:
+                width, height = self.size
+                self.furniture_bounds = QRectF(xs[0] / width, ys[0] / height,
+                                              (xs[-1] - xs[0] + 1) / width,
+                                              (ys[-1] - ys[0] + 1) / height)
 
     @property
     def rig_size(self) -> tuple[float, float]:
@@ -71,17 +81,30 @@ class SceneOverlay(QWidget):
                             | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_DontShowOnScreen, pet.testAttribute(Qt.WA_DontShowOnScreen))
         self.pet = pet
         self.image: QImage | None = None
         self.opacity = 1.0
         self._rect = QRectF()
+        self._visible_fraction = QRectF()
         self._topmost = False
 
     def image_rect(self) -> QRectF:
         """图像在覆盖窗自己坐标里的矩形。"""
         return QRectF(self._rect).translated(-self.x(), -self.y())
 
-    def set_scene(self, image: QImage | None, rect: QRectF | None, opacity: float, topmost: bool) -> None:
+    def visible_bounds(self):
+        """Opaque furniture extents in screen coordinates, excluding texture padding."""
+        fraction = self._visible_fraction
+        rect = self._rect
+        return QRectF(rect.x() + fraction.x() * rect.width(),
+                      rect.y() + fraction.y() * rect.height(),
+                      fraction.width() * rect.width(), fraction.height() * rect.height()).toAlignedRect()
+
+    def set_scene(self, image: QImage | None, rect: QRectF | None, opacity: float, topmost: bool,
+                  *, visible_fraction: QRectF | None = None) -> None:
+        if visible_fraction is not None:
+            self._visible_fraction = visible_fraction
         changed = image is not self.image or abs(opacity - self.opacity) > 1e-4
         self.image, self.opacity = image, opacity
         if rect is not None and rect != self._rect:

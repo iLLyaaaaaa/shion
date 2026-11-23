@@ -218,7 +218,9 @@ def test_menu_contents(env):
     assert menu_tree(find_action(menu, "AI 连接").menu()) == [
         ("Claude Code", ["连接：未连接", "活动：空闲", "-", "连接 / 查看配置", "临时关闭联动"]),
         ("Claude 桌面版", ["连接聊天", "复制个人偏好"])]
-    assert [a.text() for a in find_action(menu, "设置").menu().actions()] == ["语言", "开机自启", "统计用量", "周报显示项目链接"]
+    assert [a.text() for a in find_action(menu, "设置").menu().actions()] == [
+        "显示任务标签", "语言", "开机自启", "统计用量", "周报显示项目链接",
+    ]
     assert find_action(menu, "开机自启").isCheckable()
     assert not find_action(menu, "开机自启").isChecked()
     sizes = find_action(menu, "大小").menu().actions()

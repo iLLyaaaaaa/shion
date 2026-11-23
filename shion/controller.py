@@ -30,6 +30,7 @@ from shion.menu_content import MenuContent, localized
 from shion.lines import Lines
 from shion import interrupt
 from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
+from shion.permission_text import permission_summary
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
 from shion.remote import RemoteHub
@@ -44,6 +45,8 @@ from shion.weekly import WorkTimer, count as weekly_count, report as weekly_repo
 from shion.weekly_ui import WeeklyWindow
 from shion.limits import Limits, clean_last
 from shion.v3_display import pick_screen_rect
+from shion.task_board import BoardInputs, TaskBoard
+from shion.task_chips import TaskChips
 
 log = logging.getLogger("shion.controller")
 
@@ -122,6 +125,8 @@ class PetController(QObject):
         self.connection = HookConnection()
         self.desktop_connection = ChatConnection(scheduler.path.parent)
         self.chat_activity = ChatActivity()
+        self.task_board = TaskBoard()
+        self._task_chips: Optional[TaskChips] = None
         self.chatgpt = None  # Started by app; isolated from Claude RemoteHub.
         self.v2 = SchedulerGUI(window.monotonic_time, state.save.v2_scheduler_enabled)
         self._observation_hint = None
@@ -218,6 +223,64 @@ class PetController(QObject):
             cur = "bed"
         if cur != self.window.sprite_name:
             self.window.set_state(cur)
+        self._sync_task_chips(now)
+
+    def _sync_task_chips(self, now: datetime) -> None:
+        ledger = self.chatgpt.ledger if self.chatgpt is not None else None
+        inputs = BoardInputs(
+            cc_working=tuple(self.state.working_sessions(now)),
+            cc_holding=tuple(self.hub.holding_sessions(include_legacy=True)),
+            cc_permissions=tuple(request.session for request in self.hub.permissions.pending()),
+            cc_link_enabled=self.hub.link_enabled,
+            chat_phase=self.chat_activity.phase,
+            ledger_tasks=ledger.tasks if ledger is not None else {},
+            ledger_ttl=ledger.ttl if ledger is not None else BoardInputs.ledger_ttl,
+            ledger_now=ledger.clock() if ledger is not None else None,
+            private=self.state.save.privacy_mode,
+        )
+        view = self.task_board.snapshot(inputs, now=self.window.monotonic_time(),
+                                        session_names=self.session_names, ui=self.lines.ui)
+        if not self.state.save.show_task_chips or not view.all_chips:
+            if self._task_chips is not None:
+                self._task_chips.withdraw()
+                self._task_chips.view = None
+            return
+        if self._task_chips is None:
+            self._task_chips = TaskChips(self.window)
+            self._task_chips.chip_clicked.connect(self._on_task_chip)
+            self._task_chips.clear_clicked.connect(self._clear_task_chips)
+        obstacles = tuple(window for window in (self.bubble, self.window._pause_badge,
+                          self._perm_panel, self._checkpoint) if window is not None)
+        self._task_chips.present(view, self.lines.ui, self.lines.font_fallback, obstacles)
+
+    def _on_task_chip(self, chip) -> None:
+        if chip.status == "done":
+            self.task_board.dismiss_done(chip.key)
+            self._sync_task_chips(self._now())
+        elif chip.wait_reason == "plan_ready":
+            self.task_board.dismiss_plan(chip.key)
+            self._sync_task_chips(self._now())
+        elif chip.wait_reason == "permission":
+            self._sync_permission()
+            if self._perm_panel is not None:
+                raise_without_activation(self._perm_panel)
+        elif chip.wait_reason == "checkpoint":
+            target = self._checkpoint
+            if target is None or not target.isVisible():
+                target = self.window._pause_badge
+            if target is not None:
+                raise_without_activation(target)
+        elif chip.source in ("claude_chat", "chatgpt") and chip.status == "waiting":
+            self.say_text(self.lines.ui("task_board_check_" + chip.source))
+
+    def _clear_task_chips(self) -> None:
+        self.task_board.clear_done()
+        self._sync_task_chips(self._now())
+
+    def set_show_task_chips(self, on: bool) -> None:
+        self.state.save.show_task_chips = on
+        self.scheduler.mark_dirty(self._now())
+        self._sync_task_chips(self._now())
 
     def tick(self) -> None:
         now = self._now()
@@ -552,6 +615,7 @@ class PetController(QObject):
             self._connection_panel.follow(self.window.body_rect())
         self.scheduler.mark_dirty(self._now())
         self.sync()
+        self._sync_permission()
         self._try_time_speech()
 
     def set_privacy(self, private: bool) -> None:
@@ -560,6 +624,8 @@ class PetController(QObject):
         if private:
             self.session_names.forget_prompts()  # 已记的第一句话也丢掉，关掉隐私后不会再冒出来
         self.scheduler.mark_dirty(self._now())
+        self._sync_task_chips(self._now())
+        self._sync_permission()
         self._try_time_speech()
 
     def set_muted(self, muted: bool) -> None:
@@ -615,7 +681,8 @@ class PetController(QObject):
 
     def _pet_windows(self):
         return (self.window, self.bubble, self.overlay, self._crumbs,
-                self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z, self._checkpoint)
+                self.window._pause_badge, self.window._fps_overlay, self.window._sleep_z,
+                self._checkpoint, self._task_chips)
 
     def _dialog_windows(self):
         return (self._dialogue, self._input_panel, self._perm_panel, self._about, self._connection_panel,
@@ -655,7 +722,9 @@ class PetController(QObject):
         meta：hook 附带的会话信息 {"session", "tool_id", "proc"}（server.parse_meta 已校验）。
         """
         if etype == "chat_event" and meta:
-            notice = self.chat_activity.receive(meta["event"], meta["client"], self.window.monotonic_time())
+            stamp = self.window.monotonic_time()
+            notice = self.chat_activity.receive(meta["event"], meta["client"], stamp)
+            self.task_board.note_chat(notice, task_name=detail, private=self.state.save.privacy_mode, now=stamp)
             self._sync_observed_working()
             if notice:
                 text = self.lines.pick("desktop_chat_" + notice)
@@ -709,7 +778,11 @@ class PetController(QObject):
                                 meta.get("prompt_head") if etype == "prompt" else None, private)
         log.info("收到事件：%s %r %s", etype, None if private else detail, session or "")
         now = self._now()
-        kind = "work_stopped" if etype == "stop" and session in self._end_pending else etype
+        ended_by_shion = (session or "") in self._end_pending
+        kind = "work_stopped" if etype == "stop" and ended_by_shion else etype
+        if etype in ("stop", "pause_timeout", "work_stopped"):
+            self.task_board.note_cc_stop(session, ended_by_shion=ended_by_shion or etype != "stop",
+                                         now=self.window.monotonic_time())
         self._work_timer.event(kind, session, now, self.state.save.weekly_stats)
         if etype == "stop":
             self.scheduler.mark_dirty(now)
@@ -739,9 +812,9 @@ class PetController(QObject):
             return
         if etype == "tool_error" and session in self._interrupted:
             etype, detail = "tool_done", None  # 被“立即中断”结束的工具：本来就会失败，不说“出错了”
-        if etype == "stop" and session and session in self._end_pending:
+        if etype == "stop" and ended_by_shion:
             # 诗音结束的这一轮（CC 随后照常发 Stop）：和 work_stopped 一样，不加任务数、不 done、不说完成、不催
-            self._end_pending.discard(session)
+            self._end_pending.discard(session or "")
             self._interrupted.discard(session)
             self._remember_ended(session)
             self.state.end_session(session)
@@ -754,8 +827,8 @@ class PetController(QObject):
             self._sync_pause()
             self.sync()
             return
-        if etype == "prompt" and session:
-            self._end_pending.discard(session)  # 用户开始新的一轮
+        if etype == "prompt":
+            self._end_pending.discard(session or "")  # 用户开始新的一轮
         if etype in ("prompt", "working") and self._ended and self._ended[0] == session:
             self._ended = None  # 用户自己在 CC 里接着说了
         if etype in ("prompt", "stop", "plan_ready"):
@@ -766,6 +839,8 @@ class PetController(QObject):
             self._sync_pause()  # 服务线程可能已经在 hub 里解除了暂停
         if etype == "notification" and detail == "idle_prompt" and session:
             self._tool_wall.pop(session, None)  # CC 在等输入：没有工具在跑（state 里同时清掉工作中）
+        if etype in ("tool_done", "tool_error"):
+            self.task_board.note_cc_tool_done(session, tool_id)
         if etype == "tool_done":
             self.state.claude_event(etype, detail, now, session, tool_id)
             self.sync()
@@ -774,6 +849,11 @@ class PetController(QObject):
         entry = make_entry(etype, detail, now)
         self.activity.add(entry)
         reactions = self.state.claude_event(etype, detail, now, session, tool_id)
+        if not private:
+            if etype == "prompt":
+                self.task_board.note_cc_prompt(session, meta.get("prompt_head") or "")
+            elif etype == "working" and entry is not None:
+                self.task_board.note_cc_tool(session, tool_id, entry)
         greeted = any(r.key in ("wake", "neglect_return") for r in reactions)  # 这句别被盖掉
         if etype == "working" and parse_working(detail):
             # 用“在读 x.py……”代替随机的“Claude 在努力中”
@@ -784,6 +864,7 @@ class PetController(QObject):
         else:
             self.react(reactions)
         if etype == "plan_ready":
+            self.task_board.note_cc_plan_ready(session, now=self.window.monotonic_time())
             self.window.jump()
         self.sync()
         if etype in ("stop", "plan_ready"):
@@ -1088,8 +1169,7 @@ class PetController(QObject):
 
     # ------------------------------------------------------------ 遥控：这一轮结束后的继续
     def _mark_end_pending(self, session: Optional[str]) -> None:
-        if session:
-            self._end_pending.add(session)
+        self._end_pending.add(session or "")
 
     def _remember_ended(self, session: Optional[str]) -> None:
         if session:
@@ -1163,12 +1243,18 @@ class PetController(QObject):
         qp.start()
 
     # ------------------------------------------------------------ 遥控：同意 / 否决
-    def _permission_texts(self) -> dict[str, str]:
+    def _permission_texts(self, session: str | None) -> dict[str, str]:
         ui = self.lines.ui
+        title = ("Claude · " if self.v2.core.enabled else "") + ui("permission_title")
+        sessions = self.remote_sessions()
+        if len(sessions) >= 2:
+            label = self.session_labels(sessions).get(session, ui("task_board_source_claude_code"))
+            title = ui("permission_title_session", title=title, session=label)
         return {
-            "title": ("Claude · " if self.v2.core.enabled else "") + ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
-            "more": ui("permission_more"), "expand": ui("permission_expand"),
+            "title": title, "allow": ui("permission_allow"), "deny": ui("permission_deny"),
+            "more": ui("permission_more"), "expand": ui("permission_details"),
             "collapse": ui("permission_collapse"),
+            "command_warning": ui("permission_command_warning"),
         }
 
     def _sync_permission(self) -> None:
@@ -1192,16 +1278,19 @@ class PetController(QObject):
             panel = self._perm_panel = PermissionPanel(family, clock=self.window.monotonic_time)
             panel.decided.connect(self._on_permission_decided)
         head = pending[0]
+        texts = self._permission_texts(head.session)
+        summary = permission_summary(head.tool, head.detail, self.lines.ui)
         if panel.request_id != head.id:
             first = not panel.isVisible()
             panel.show_request(
                 head.id, head.tool, head.detail, len(pending) - 1,
-                self._permission_texts(), self.window.body_rect(),
+                texts, self.window.body_rect(), summary=summary,
             )
             if first:
                 self.say_key("permission_request")
             self._bring_forward()
         else:
+            panel.refresh_texts(texts, summary)
             panel.set_more(len(pending) - 1)
 
     def _on_permission_decided(self, rid: str, allow: bool) -> None:
@@ -1302,7 +1391,7 @@ class PetController(QObject):
         self._foreground.stop()
         self.state.cancel_snack()
         for panel in (self._perm_panel, self._input_panel, self._dialogue, self._crumbs, self._connection_panel,
-                      self._observation_hint, self._checkpoint):
+                      self._observation_hint, self._checkpoint, self._task_chips):
             if panel is not None:
                 panel.hide()
                 panel.setParent(None)
@@ -1311,11 +1400,13 @@ class PetController(QObject):
         self._dialogue = self._crumbs = None
         self._connection_panel = None
         self._observation_hint = None
-        self._checkpoint = None
+        self._checkpoint = self._task_chips = None
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def quit(self) -> None:
         self.usage.close()
+        if self._task_chips is not None:
+            self._task_chips.withdraw()
         if self._weekly_window is not None:
             self._weekly_window.hide()
         self._foreground.stop()
@@ -1878,6 +1969,10 @@ class PetController(QObject):
 
         settings_menu = menu.addMenu(ui("menu_settings"))
         settings_menu.setToolTipsVisible(True)  # 开机自启错误
+        chips = settings_menu.addAction(ui("menu_show_task_chips"))
+        chips.setCheckable(True)
+        chips.setChecked(self.state.save.show_task_chips)
+        chips.triggered.connect(self.set_show_task_chips)
         lang_menu = settings_menu.addMenu(ui("menu_language"))
         lang_group = QActionGroup(lang_menu)
         lang_group.setExclusive(True)

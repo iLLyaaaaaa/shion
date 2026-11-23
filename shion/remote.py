@@ -159,12 +159,13 @@ class RemoteHub:
         with self._cond:
             return self._recently_held(session, time.monotonic())
 
-    def holding_sessions(self) -> list[str]:
-        """正在检查点等着、而且仍在暂停的会话（宽限期内也算），按开始等的先后。没带 session 的旧请求不列出。"""
+    def holding_sessions(self, *, include_legacy: bool = False) -> list[str]:
+        """列出仍在暂停的检查点。调用方可选择把没有会话 ID 的旧请求列为空字符串。"""
         now = time.monotonic()
         with self._cond:
-            keys = [k for k in self._held if k is not None and self._recently_held(k, now) and self._paused_for(k)]
-            return sorted(keys, key=lambda k: self._held_order.get(k, 0))
+            keys = [k for k in self._held if (include_legacy or k is not None)
+                    and self._recently_held(k, now) and self._paused_for(k)]
+            return [k or "" for k in sorted(keys, key=lambda k: self._held_order.get(k, 0))]
 
     # ---- 立即中断 ----
     def request_interrupt(self, sessions) -> None:

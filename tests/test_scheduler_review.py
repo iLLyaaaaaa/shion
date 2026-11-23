@@ -251,7 +251,13 @@ def test_disabled_matches_a55825f_menu_status_and_counts(env, tmp_path, lang):
             ctl.toggle_chatgpt()
         ctl.tick()
         assert not ctl.v2.core.enabled and not ctl.v2.core.ledger.tasks
-        menu = json.dumps(menu_snapshot(ctl.build_menu()), ensure_ascii=False, sort_keys=True)
+        structure = menu_snapshot(ctl.build_menu())
+        settings = next(item for item in structure if item["text"] == ctl.lines.ui("menu_settings"))
+        chip_label = ctl.lines.ui("menu_show_task_chips")
+        chip_action, = [item for item in settings["children"] if item["text"] == chip_label]
+        assert chip_action["checkable"] and chip_action["checked"]
+        settings["children"].remove(chip_action)  # Historical baseline predates the task-chip setting.
+        menu = json.dumps(structure, ensure_ascii=False, sort_keys=True)
         trace.append({"stage": stage, "menu_sha256": sha256(menu.encode("utf-8")).hexdigest(),
                       "status": ctl.status_text(), "chatgpt_status": ctl.chatgpt.status(ctl.lines.ui),
                       "working": ctl.chatgpt.working,
