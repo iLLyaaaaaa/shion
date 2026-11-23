@@ -151,7 +151,7 @@ def pause_limit() -> int:
     return remote_setting("pause_timeout", 1800, 60, 1880)
 
 
-def pause_gate(limit: float, poll: float = PAUSE_POLL, session=None):
+def pause_gate(limit: float, poll: float = PAUSE_POLL, session=None, transcript_path=None):
     """检查点（PreToolUse / PostToolUse）。用户点了“停下”后在这里原地等，直到在诗音上选择。
 
     返回 None = 放行（选了“继续”或在 CC 里说了话）；("stop", 理由) = 选了“结束这一轮”；
@@ -159,7 +159,15 @@ def pause_gate(limit: float, poll: float = PAUSE_POLL, session=None):
     诗音没开、请求失败、返回内容不对，都按“没暂停、没停下”处理，绝不把 CC 卡住。
     """
     extra = {"session": session} if session else {}
-    result = request("/pause/wait", {"wait": 0, **extra})
+    first = {"wait": 0, **extra}
+    if session and isinstance(transcript_path, str) and 0 < len(transcript_path) <= 32767:
+        try:
+            transcript_path.encode("utf-8")
+        except UnicodeEncodeError:
+            pass  # A malformed path must not suppress the pause check.
+        else:
+            first["transcript_path"] = transcript_path
+    result = request("/pause/wait", first)
     deadline = time.monotonic() + limit
     while True:
         if not isinstance(result, dict):
@@ -514,7 +522,7 @@ def main() -> None:
         ensure_running()
     if name == "PostToolUse":
         # 检查点：工具做完、开始写文字之前也能停住；继续以后才取反馈，停下时反馈留给下一次 UserPromptSubmit
-        gate = pause_gate(pause_limit(), session=session)
+        gate = pause_gate(pause_limit(), session=session, transcript_path=data.get("transcript_path"))
         if gate is not None:
             emit({"continue": False, "stopReason": gate[1]})
             return
@@ -529,7 +537,7 @@ def main() -> None:
             emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
         return
     if name == "PreToolUse":
-        gate = pause_gate(pause_limit(), session=session)
+        gate = pause_gate(pause_limit(), session=session, transcript_path=data.get("transcript_path"))
         if gate is not None:
             reason = gate[1]
             # 结束这一轮：continue=false（官方：优先于事件专属决定），同时 deny 保证这次工具不执行

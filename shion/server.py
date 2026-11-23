@@ -15,8 +15,10 @@ import re
 import threading
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import perf_counter
 from typing import Callable, Optional
 
+from .budget import BudgetMeter
 from .loopback import bind_exclusive, new_token, valid_token
 from .remote import DISABLED, RemoteHub
 from .limits import parse_limits
@@ -26,6 +28,7 @@ log = logging.getLogger("shion.server")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 47613
 MAX_BODY = 4096
+MAX_PAUSE_BODY = 256 * 1024  # Windows extended-length transcript paths, including JSON escaping.
 MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/参数
 REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
@@ -315,15 +318,19 @@ class _Handler(BaseHTTPRequestHandler):
     def _post_pause_wait(self):
         """检查点长轮询：停下中最多等 wait 秒；等满上限被结束、或这个会话被“立即中断”时 stop=true。
         不能借此开始停下或中断，只能等待用户在诗音上做的决定。"""
-        data = self._read_json()
+        data = self._read_json(MAX_PAUSE_BODY)
         if data is None:
             return
         wait = data.get("wait", 0) if isinstance(data, dict) else 0
+        initial = type(wait) in (int, float) and wait == 0
         if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait):
             wait = 0
         session = data.get("session") if isinstance(data, dict) else None
         if not isinstance(session, str) or not session or len(session) > ID_MAX:
             session = None
+        transcript_path = data.get("transcript_path") if isinstance(data, dict) else None
+        if initial and session and isinstance(transcript_path, str) and transcript_path:
+            self._meter_usage(session, transcript_path)
         paused, stop = self.server.hub.wait_gate(wait, session)
         if stop:
             try:
@@ -332,6 +339,21 @@ class _Handler(BaseHTTPRequestHandler):
                 log.exception("on_event 回调出错")
         self._send(200, {"paused": paused, "stop": stop})
 
+    def _meter_usage(self, session, path):
+        try:
+            if not self.server.usage_enabled():
+                return
+            start = perf_counter()
+            result = self.server.budget_meter.observe(session, path)
+            elapsed = (perf_counter() - start) * 1000
+            if result is not None:
+                short_id = re.sub(r"[^a-zA-Z0-9_-]", "_", session[:8])
+                suffix = "" if result.complete else "（超时，部分结果）"
+                log.info("预算计量 会话%s 累计 %d（主 %d / 子代理 %d）耗时 %.1f 毫秒%s",
+                         short_id, result.total, result.main, result.subagents, elapsed, suffix)
+        except Exception:
+            # Optional accounting must never interfere with the checkpoint response.
+            return
 
     # ---- 同意 / 否决 ----
     # 安全：这里只有“登记请求 / 等结果 / 撤回 / 已在 CC 里答过就撤掉”。没有任何接口、任何字段能写入 allow 或 deny，
@@ -404,12 +426,14 @@ class _Server(ThreadingHTTPServer):
     allow_reuse_address = False  # 端口被占用时要报错，而不是悄悄共用
     request_queue_size = 64  # 并行子代理的 hook 可能同时连进来，默认的 5 会被重置连接
 
-    def __init__(self, addr, on_event, on_take_feedback, hub, token):
+    def __init__(self, addr, on_event, on_take_feedback, hub, token, usage_enabled):
         self.token = token
         super().__init__(addr, _Handler)
         self.on_event = on_event
         self.on_take_feedback = on_take_feedback
         self.hub = hub
+        self.usage_enabled = usage_enabled
+        self.budget_meter = BudgetMeter()
         self.feedback_lock = threading.Lock()
 
     def server_bind(self):
@@ -434,6 +458,7 @@ class ShionServer:
         port: int = DEFAULT_PORT,
         hub: Optional[RemoteHub] = None,
         token: Optional[str] = None,
+        usage_enabled: Callable[[], bool] = lambda: True,
     ):
         """token：只认带这个令牌的请求；不给就随机生成一个（可从 .token 读到）。"""
         if token is None:
@@ -443,6 +468,7 @@ class ShionServer:
         self.token = token
         self._on_event = on_event
         self._on_take_feedback = on_take_feedback
+        self._usage_enabled = usage_enabled
         self.hub = hub or RemoteHub()
         self._host = host
         self._port = port
@@ -457,7 +483,8 @@ class ShionServer:
         """启动服务。端口被占用时抛 OSError。"""
         if self._httpd:
             return
-        self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_feedback, self.hub, self.token)
+        self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_feedback, self.hub, self.token,
+                              self._usage_enabled)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="shion-server", daemon=True
         )

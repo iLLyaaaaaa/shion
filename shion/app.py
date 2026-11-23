@@ -215,7 +215,8 @@ def run() -> int:
     # 本地 HTTP 服务：回调在服务线程里，经 ServerBridge 切回 GUI 线程
     bridge = ServerBridge(controller, parent=app)
     port = int(os.environ.get("SHION_PORT") or DEFAULT_PORT)
-    server = ShionServer(bridge.on_event, bridge.on_take_feedback, port=port, hub=hub)
+    server = ShionServer(bridge.on_event, bridge.on_take_feedback, port=port, hub=hub,
+                         usage_enabled=lambda: data.usage_enabled)
     # 绑定成功才写令牌；端口被占时不写，hook 就不会去连占着端口的进程
     link_status = start_linked(server, directory)
     app.aboutToQuit.connect(lambda: stop_linked(server, directory))  # 先删令牌、停服务，再写存档

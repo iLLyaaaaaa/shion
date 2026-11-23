@@ -257,6 +257,46 @@ def test_pause_gate_bad_server_response_means_no_pause(monkeypatch):
         assert h.pause_gate(5, poll=0.1) is None
 
 
+@pytest.mark.parametrize("event", ["PreToolUse", "PostToolUse"])
+def test_checkpoints_send_transcript_only_on_first_wait(event, env, monkeypatch):
+    from hooks import shion_hook as h
+
+    srv, _, _, directory = env
+    calls = []
+    original = srv._httpd.budget_meter.observe
+
+    def observe(session, path):
+        calls.append((session, path))
+        srv.hub.resume(session)
+        return original(session, path)
+
+    monkeypatch.setattr(srv._httpd.budget_meter, "observe", observe)
+    srv.hub.pause("session")
+    path = str(directory / "session.jsonl")
+    result = run_hook(event, srv.port, directory, json.dumps({
+        "session_id": "session", "transcript_path": path,
+    }).encode())
+    assert result.returncode == 0 and result.stdout == b""
+    assert calls == [("session", path)]
+
+
+def test_pause_gate_omits_transcript_on_long_poll(monkeypatch):
+    from hooks import shion_hook as h
+
+    calls = []
+
+    def request(route, body, **kwargs):
+        calls.append((route, body))
+        return {"paused": len(calls) == 1}
+
+    monkeypatch.setattr(h, "request", request)
+    assert h.pause_gate(5, poll=0.1, session="session", transcript_path="session.jsonl") is None
+    assert calls == [
+        ("/pause/wait", {"wait": 0, "session": "session", "transcript_path": "session.jsonl"}),
+        ("/pause/wait", {"wait": 0.1, "session": "session"}),
+    ]
+
+
 def test_pause_limit_comes_from_save_and_is_clamped(tmp_path, monkeypatch):
     monkeypatch.setenv("SHION_DATA_DIR", str(tmp_path))
     h = load_hook()

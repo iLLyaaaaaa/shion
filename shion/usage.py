@@ -132,6 +132,43 @@ def counts_from(usage):
     return dict(zip(FIELDS, (inp, out, cw5, cw1, cr)))
 
 
+def parse_transcript_line(line, oldest=None, newest=None):
+    """Return activity time, hashed usage key, usage record and a bad-line flag."""
+    if b'"timestamp"' not in line:
+        return None, None, None, False
+    try:
+        row = json.loads(line, object_pairs_hook=metadata)
+    except (ValueError, UnicodeError, RecursionError):
+        return None, None, None, True
+    if not isinstance(row, dict) or row.get('type') not in ('user', 'assistant'):
+        return None, None, None, False
+    dt = timestamp(row.get('timestamp'))
+    if dt is None:
+        return None, None, None, False
+    day = str(dt.date())
+    if (oldest is not None and day < oldest) or (newest is not None and day > newest):
+        return None, None, None, False
+    msg = row.get('message')
+    if row.get('type') != 'assistant' or not isinstance(msg, dict) or not isinstance(msg.get('usage'), dict):
+        return dt, None, None, False
+    ids = (msg.get('id'), row.get('requestId'))
+    if not any(ids) or any(v is not None and (not isinstance(v, str) or not v) for v in ids):
+        return dt, None, None, False
+    counts = counts_from(msg['usage'])
+    if counts is None:
+        return dt, None, None, True
+    return dt, sha(json.dumps(ids).encode()), {
+        'day': day, 'model': model_name(msg.get('model')), 'counts': counts, 'stamp': dt.timestamp(),
+    }, False
+
+
+def replaces_usage_record(record, previous):
+    """Use the latest write, ignoring less complete updates at the same time."""
+    if record['stamp'] != previous['stamp']:
+        return record['stamp'] > previous['stamp']
+    return record['counts']['out'] >= previous['counts']['out'] and record != previous
+
+
 def empty(signature):
     return {'version': CACHE_VERSION, 'pricing_shape': signature, 'days': {}, 'activity': {}, 'files': {}, 'seen': {}}
 
@@ -250,7 +287,7 @@ class UsageScanner:
 
     def _read(self, initial, paths, today, cancelled, full=False):
         data = deepcopy(initial)
-        oldest, recent = str(today - timedelta(days=55)), str(today - timedelta(days=7))
+        oldest, recent, newest = str(today - timedelta(days=55)), str(today - timedelta(days=7)), str(today)
         for key, path in paths:
             if cancelled():
                 return None, False
@@ -288,41 +325,21 @@ class UsageScanner:
                     if len(line) > MAX_LINE:
                         self.skipped += 1
                         continue
-                    # Timestamps are also needed on user records, even without usage.
-                    if b'"timestamp"' not in line:
-                        continue
-                    try:
-                        row = json.loads(line, object_pairs_hook=metadata)
-                    except (ValueError, UnicodeError, RecursionError):
+                    dt, ident, record, bad = parse_transcript_line(line, oldest, newest)
+                    if bad:
                         self.skipped += 1
-                        continue
-                    if not isinstance(row, dict) or row.get('type') not in ('user', 'assistant'):
-                        continue
-                    dt = timestamp(row.get('timestamp'))
-                    if dt is None or not oldest <= str(dt.date()) <= str(today):
+                    if dt is None:
                         continue
                     activity_day = str((dt - timedelta(hours=5)).date())
                     minute = (dt.hour * 60 + dt.minute - 300) % 1440
                     data['activity'][activity_day] = max(minute, data['activity'].get(activity_day, -1))
-                    msg = row.get('message')
-                    if row.get('type') != 'assistant' or not isinstance(msg, dict) or not isinstance(msg.get('usage'), dict):
+                    if record is None:
                         continue
-                    ids = (msg.get('id'), row.get('requestId'))
-                    if not any(ids) or any(v is not None and (not isinstance(v, str) or not v) for v in ids):
-                        continue
-                    counts = counts_from(msg['usage'])
-                    if counts is None:
-                        self.skipped += 1
-                        continue
-                    ident = sha(json.dumps(ids).encode())
-                    model = model_name(msg.get('model'))
-                    record = {'day': str(dt.date()), 'model': model, 'counts': counts,
-                              'tier': self.pricing.tier(model, counts['in'] + counts['cw5'] + counts['cw1'] + counts['cr']),
-                              'stamp': dt.timestamp()}
+                    counts = record['counts']
+                    record['tier'] = self.pricing.tier(record['model'], sum(counts[k] for k in FIELDS if k != 'out'))
                     previous = data['seen'].get(ident)
                     if previous:
-                        if record['stamp'] < previous['stamp'] or (record['stamp'] == previous['stamp'] and
-                                (counts['out'] < previous['counts']['out'] or record == previous)):
+                        if not replaces_usage_record(record, previous):
                             continue
                         add_record(data, previous, -1)
                     elif record['day'] < recent and not full:
