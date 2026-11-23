@@ -47,6 +47,18 @@ def test_prices_require_explicit_version_and_unknown_opus_41():
     assert Pricing({'models': 'invalid'}).model('claude-opus-5-5') is None
 
 
+@pytest.mark.parametrize('model', ['claude-fable-5-2', 'claude-mythos-5-2'])
+def test_fable_and_mythos_52_use_flat_standard_rates(model):
+    pricing = Pricing()
+    assert pricing.data['as_of'] == '2026-11-23'
+    item = pricing.model(model + '-20261123')
+    assert item['prefixes'] == ['claude-fable-5-2', 'claude-mythos-5-2']
+    assert item['tiers'] == [{'above_input_tokens': 0, 'rates': dict(zip(FIELDS, (8, 40, 10, 16, 0.2)))}]
+    assert pricing.tier(model, 900_000) == '0'
+    price, partial = pricing.estimate({str(TODAY): {model: {'0': dict.fromkeys(FIELDS, 1_000_000)}}})
+    assert price == pytest.approx(74.2) and not partial
+
+
 @pytest.mark.parametrize('tokens,tier', [(0, '0'), (100000, '0'), (100001, '100000')])
 def test_tier_boundary(tokens, tier):
     assert Pricing().tier('claude-haiku-5-5', tokens) == tier
@@ -153,6 +165,35 @@ def test_price_edit_does_not_require_rescan_or_change_cache(tmp_path):
     assert pricing.estimate(data['days'])[0] == pytest.approx(Pricing().estimate(data['days'])[0] * 2)
 
 
+def test_fable_prefix_addition_rebuilds_cache_once(tmp_path, monkeypatch):
+    current = Pricing()
+    model = 'claude-fable-5-2'
+    previous = Pricing({**current.data, 'models': [m for m in current.data['models'] if model not in m['prefixes']]})
+    assert previous.signature() != current.signature()
+    scan = scanner(tmp_path)
+    scan.pricing = previous
+    stamp = datetime(2026, 11, 2, 12).astimezone().isoformat()
+    write(scan.projects / 'x.jsonl', [row(model=model, stamp=stamp)])
+    before = scan.scan(TODAY)
+    assert previous.estimate(before['days']) == (0, True)
+
+    scan = scanner(tmp_path)
+    read = scan._read
+    full_scans = []
+
+    def track_read(*args, full):
+        full_scans.append(full)
+        return read(*args, full=full)
+
+    monkeypatch.setattr(scan, '_read', track_read)
+    after = scan.scan(TODAY)
+    assert after['pricing_shape'] == current.signature() and after['days'] == before['days']
+    price, partial = current.estimate(after['days'])
+    assert price == pytest.approx(0.001188) and not partial
+    assert scan.scan(TODAY)['days'] == after['days']
+    assert full_scans == [True, False]
+
+
 def test_corrupt_cache_missing_directory_cancel_and_bad_rows(tmp_path):
     scan = scanner(tmp_path)
     scan.cache.write_text('broken')
@@ -207,6 +248,34 @@ def test_report_weeks_no_quota_unknown_models_and_title_boundary():
     card = report(TODAY, {}, data)
     assert card['partial'] and 'quota' not in card and card['price'] == 0
     assert report(TODAY, {}, data, enabled=False)['totals']['total_tokens'] == 0
+
+
+def test_report_breakdown_combines_model_versions_days_tiers_and_other():
+    usage = {'days': {
+        '2026-11-01': {'claude-fable-5-2': {'0': {'in': 5_000_000}}},
+        '2026-11-02': {
+            'claude-fable-5-2-20261123': {'0': {'in': 300_000, 'out': 100_000}},
+            'claude-opus-5-5': {'0': {'in': 300_000}},
+            'claude-haiku-5-5': {'0': {'in': 100_000}, '100000': {'cw5': 150_000}},
+            '<unknown>': {'0': {'out': 700_000}},
+            '<synthetic>': {'0': {'out': 2_000_000}},
+        },
+        '2026-11-03': {
+            'claude-fable-5-2-latest': {'0': {'in': 100_000}},
+            'claude-sonnet-5-5': {'0': {'in': 200_000}},
+            'claude-mythos-5-2': {'0': dict.fromkeys(FIELDS, 0)},
+        },
+    }}
+    card = report(TODAY, {}, usage)
+    assert [(m['name'], m['tokens']) for m in card['models']] == [
+        ('Fable 5.2', 500_000), ('Opus 5.5', 300_000), ('Haiku 5.5', 250_000), (None, 900_000),
+    ]
+    assert [m['price'] for m in card['models']] == pytest.approx([7.2, 1.2, 0.10375, 0.4])
+    assert card['price'] == pytest.approx(8.90375) and card['partial']
+    assert card['totals']['total_tokens'] == 1_950_000
+    assert card['totals']['output_tokens'] == 800_000
+    assert card['daily'][:2] == [1_650_000, 300_000]
+    assert report(TODAY, {}, usage, enabled=False)['models'] == []
 
 
 def test_controller_tracks_independent_sessions_and_interrupted_stop(env):
@@ -615,6 +684,59 @@ def finished_card(lang='zh', **changes):
     return {**report(start, stats, usage, lang, True, today=date(2026, 11, 3)), **changes}
 
 
+@pytest.mark.parametrize('lang,other', [('zh', '其他'), ('en', 'Other'), ('ja', 'その他')])
+def test_model_line_fits_between_quota_and_existing_cards(qapp, draws, lang, other):
+    from shion.lines import Lines
+    from shion.weekly_ui import GRID_TOP
+
+    ui = Lines(lang).ui
+    render_card(preview(lang))
+    quota = draws.one(ui('weekly_quota', value='72'))
+    label = draws.one(ui('weekly_models'))
+    shares = draws.one(f'Opus 5.5 45% · Fable 5.2 30% · Sonnet 5.5 15% · {other} 10%')
+    assert label['geom'].center().y() == shares['geom'].center().y()
+    assert label['geom'].right() <= shares['geom'].left()
+    assert shares['advance'] <= shares['geom'].width()
+    assert quota['geom'].center().y() + 32 <= shares['geom'].center().y()
+    assert shares['geom'].bottom() <= GRID_TOP
+    assert draws.one(ui('weekly_output'))['geom'].y() == GRID_TOP + 14
+
+    draws.texts.clear()
+    render_card(preview(lang, enabled=False))
+    assert not draws.by_text(ui('weekly_models'))
+
+
+def test_single_model_and_missing_quota_do_not_leave_empty_rows(qapp, draws):
+    from shion.lines import Lines
+    from shion.weekly_ui import GRID_TOP, QUOTA_ROW_HEIGHT
+
+    ui = Lines('zh').ui
+    render_card(finished_card())
+    shares = draws.one('Sonnet 5.5 100%')
+    assert not any(ui('weekly_models_other') in item['text'] for item in draws.texts)
+    assert not draws.by_text(ui('weekly_quota', value='72'))
+    assert shares['geom'].y() == GRID_TOP - QUOTA_ROW_HEIGHT - 45
+    assert draws.one(ui('weekly_output'))['geom'].y() == GRID_TOP - QUOTA_ROW_HEIGHT + 14
+
+
+def test_longest_english_model_names_and_small_other_share_fit(qapp, draws):
+    from shion.lines import Lines
+
+    models = {
+        'claude-sonnet-88-88': {'0': {'in': 400_000}},
+        'claude-mythos-88-88': {'0': {'in': 300_000}},
+        'claude-sonnet-88-87': {'0': {'in': 299_000}},
+        '<unknown>': {'0': {'in': 1_000}},
+    }
+    stats = {str(TODAY): {'seven_day_peak': 72}}
+    card = report(TODAY, stats, {'days': {str(TODAY): models}}, 'en')
+    render_card(card)
+    shares = draws.one('Sonnet 88.88 40% · Mythos 88.88 30% · Sonnet 88.87 30% · Other <1%')
+    output = draws.one(Lines('en').ui('weekly_output'))
+    assert shares['geom'].left() + shares['advance'] <= 1136
+    assert shares['geom'].bottom() < output['geom'].top()
+
+
 def test_range_label_drops_repeated_year_but_keeps_it_across_years():
     from shion.weekly_ui import range_label
     assert range_label('2026-10-26', '2026-11-01') == '2026.10.26 — 11.01'
@@ -631,15 +753,20 @@ def test_top_bar_date_is_centered_on_sprite_axis_and_on_header_row(qapp, draws):
 
 
 def test_sprite_and_glow_sit_beside_total_number_above_the_grid(qapp, draws):
+    from shion.lines import Lines
+    from shion.weekly_ui import GRID_TOP
+
     render_card(finished_card())
     sprite = draws.images[0]
-    assert sprite.top() == 225 and sprite.bottom() == pytest.approx(655, abs=1) and sprite.height() == pytest.approx(430, abs=1)
-    assert 689 <= sprite.left() and sprite.right() <= 1066.5 and sprite.bottom() < 753
+    assert sprite.top() > draws.one('> SHION / ' + Lines('zh').ui('weekly_report'))['geom'].bottom()
+    assert sprite.height() == pytest.approx(430, abs=1)
+    assert 689 <= sprite.left() and sprite.right() <= 1066.5 and sprite.bottom() < GRID_TOP
     center, radius_x, radius_y = draws.ellipses[0]
-    assert (center.x(), center.y()) == (sprite.center().x(), 440) and radius_x == radius_y
+    assert center.x() == sprite.center().x() and center.y() == pytest.approx(sprite.center().y(), abs=1)
+    assert radius_x == radius_y
     total = draws.one(number(finished_card()['totals']['total_tokens'], 'zh'))
     assert total['size'] == 136 and total['bold'] and total['color'] == '#F4772E' and total['geom'].x() == 64
-    assert total['geom'].y() <= 655 and total['geom'].x() + total['advance'] < sprite.left()
+    assert total['geom'].y() <= sprite.bottom() and total['geom'].x() + total['advance'] < sprite.left()
 
 
 @pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
@@ -656,6 +783,8 @@ def test_title_area_has_label_big_bold_title_and_two_line_comment(qapp, draws, l
 
 def test_grid_is_three_by_two_rounded_cards_with_accent_on_busiest_day(qapp, draws):
     from shion.lines import Lines
+    from shion.weekly_ui import GRID_TOP, QUOTA_ROW_HEIGHT
+
     ui = Lines('zh').ui
     card = finished_card()
     image = render_card(card)
@@ -663,16 +792,17 @@ def test_grid_is_three_by_two_rounded_cards_with_accent_on_busiest_day(qapp, dra
               ui('weekly_active_days'), ui('weekly_latest_label'), ui('weekly_peak')]
     rects = [draws.one(label)['geom'] for label in labels]
     assert [r.x() - 22 for r in rects[:3]] == [64, 64 + 364, 64 + 728] == [r.x() - 22 for r in rects[3:]]
-    assert rects[0].y() - 14 == 753 and rects[3].y() > rects[0].y() + 124
+    assert rects[0].y() - 14 == GRID_TOP - QUOTA_ROW_HEIGHT
+    assert rects[3].y() > rects[0].y() + 124
     fill, edge, accent = '#231917', '#33241F', '#F4772E'
     for i, rect in enumerate(rects):
         x, y = rect.x() - 22, rect.y() - 14
         assert image.pixelColor(int(x) + 330, int(y) + 100).name().upper() == fill
         assert image.pixelColor(int(x) + 172, int(y)).name().upper() == (accent if i == 5 else edge)
-        assert image.pixelColor(int(x) + 1, int(y) + 1).name().upper() == '#1A1212'  # rounded corner
+        corner = image.pixelColor(int(x) + 1, int(y) + 1).name().upper()
+        assert corner not in (fill, edge, accent)  # background shows through the rounded corner
     peak = next(t for t in draws.by_text('11-01') if t['size'] == 44)
     assert peak['color'] == accent and peak['bold']
-    assert draws.by_text(ui('weekly_peak'))[0]['geom'].y() > 753  # a card label now, not a chart caption
 
 
 @pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
@@ -709,20 +839,21 @@ def test_counter_cards_appear_only_when_shion_recorded_something(qapp, draws):
     assert not any(t['text'] == ui('weekly_chip_tasks') for t in draws.texts)
 
 
-def test_bars_are_wide_rounded_on_top_and_peak_number_is_bold_accent(qapp, draws):
+def test_bars_are_slim_rounded_on_top_and_peak_number_is_bold_accent(qapp, draws):
     from shion.lines import Lines
-    from shion.weekly_ui import BAR_W, CHART_BASE, bar_x
+    from shion.weekly_ui import BAR_W, CHART_BASE, bar_center, bar_x
     card = finished_card()
     image = render_card(card)
-    assert BAR_W == 118
+    assert BAR_W == 100
     x = bar_x(6)
-    mid = int(x + 59)
+    mid = int(bar_center(6))
     assert image.pixelColor(mid, CHART_BASE - 10).name().upper() == '#F4772E'
     assert image.pixelColor(int(x) + 2, CHART_BASE - 10).name().upper() == '#F4772E'
     assert image.pixelColor(int(x) - 4, CHART_BASE - 10).name().upper() == '#1A1212'
     top = CHART_BASE - 1
     while image.pixelColor(mid, top - 1).name().upper() == '#F4772E':
         top -= 1
+    assert CHART_BASE - top >= 175
     assert image.pixelColor(int(x) + 1, top).name().upper() != '#F4772E'  # rounded corner
     peak_number = draws.one(number(card['daily'][6], 'zh'))
     assert peak_number['bold'] and peak_number['color'] == '#F4772E'
@@ -811,23 +942,26 @@ def test_comment_breaks_evenly_without_tiny_last_lines(qapp):
                 assert len(lines[1].replace(' ', '')) >= 3 and lines[1][0] not in NO_LINE_START
                 if lang == 'en':
                     assert ' '.join(lines) == comment  # never splits inside a word
+                if lang == 'ja':
+                    assert not (lines[0].endswith('詩') and lines[1].startswith('音'))
 
 
-def test_forty_pixel_gap_between_comment_and_total_label(qapp):
+def test_comment_and_total_label_have_visible_spacing(qapp, draws):
     from PySide6.QtGui import qGray
+    from shion.lines import Lines
+
     card = finished_card()
     card['title'] = {**card['title'], 'comment': '这周的 token 一口一口全吃光啦，好能吃！'}  # two lines
     image = render_card(card)
-    inked = [y for y in range(360, 540)
-             if any(qGray(image.pixelColor(x, y).rgb()) > 100 for x in range(64, 560, 2))]
-    runs, start = [], inked[0]
-    for before, after in zip(inked, inked[1:] + [None]):
-        if after != before + 1:
-            runs.append((start, before))
-            start = after
-    assert len(runs) >= 2
-    gap = runs[-1][0] - runs[-2][1]  # last comment line to the "total" label glyphs
-    assert 36 <= gap <= 54, runs
+    comment = [t['geom'] for t in draws.texts if t['size'] == 34]
+    label = draws.one(Lines('zh').ui('weekly_total'))['geom']
+
+    def ink_rows(rect):
+        return [y for y in range(int(rect.top()), int(rect.bottom()))
+                if any(qGray(image.pixelColor(x, y).rgb()) > 100 for x in range(64, 560, 2))]
+
+    assert len(comment) == 2
+    assert min(ink_rows(label)) - max(ink_rows(comment[-1])) >= 20
 
 
 def test_busiest_day_card_and_highlighted_bar_always_agree(qapp, draws):
@@ -876,12 +1010,16 @@ def test_english_labels_are_uppercase_and_estimate_wording(qapp, draws):
 
 @pytest.mark.parametrize('lang', ['zh', 'en', 'ja'])
 @pytest.mark.parametrize('partial', [False, True])
-def test_first_row_cards_have_equal_height(qapp, lang, partial):
+def test_first_row_cards_have_equal_height(qapp, draws, lang, partial):
+    from shion.lines import Lines
+
     image = render_card(finished_card(lang, partial=partial))
+    top = int(draws.one(Lines(lang).ui('weekly_output'))['geom'].y()) - 14
     bottoms = []
     for column in range(3):
-        x = 64 + column * 364 + 330
-        bottoms.append(next(y for y in range(800, 1000) if image.pixelColor(x, y).name().upper() == '#33241F'))
+        x = 64 + column * 364 + 172
+        bottoms.append(next(y for y in range(top + 120, top + 205)
+                            if image.pixelColor(x, y).name().upper() == '#33241F'))
     assert len(set(bottoms)) == 1, bottoms
 
 

@@ -326,6 +326,8 @@
     "weekly_this": "This week so far",
     "weekly_previous": "Previous week",
     "weekly_total": "CLAUDE CODE TOKENS",
+    "weekly_models": "MODELS",
+    "weekly_models_other": "Other",
     "weekly_output": "CC OUTPUT",
     "weekly_price_label": "API PRICE",
     "weekly_estimate": "Estimate only",

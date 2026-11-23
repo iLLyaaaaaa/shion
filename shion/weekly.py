@@ -2,12 +2,15 @@
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 from shion.limits import number
 
-from shion.usage import FIELDS, Pricing
+from shion.usage import FIELDS, SYNTHETIC, Pricing
 
 ROOT = Path(__file__).resolve().parents[1]
 COUNTERS = ('tasks', 'seconds', 'approvals', 'denials', 'pats', 'snacks')
+MODEL_FAMILY = r'opus|sonnet|haiku|fable|mythos'
+MODEL_VERSION = r'[0-9]{1,2}(?:-[0-9]{1,2})?'
 
 
 def clean_stats(raw):
@@ -91,6 +94,29 @@ def title_for(metrics, lang, rules=None):
     return _title(FALLBACK_TITLE, lang)
 
 
+def model_label(model):
+    base = re.sub(r'-(?:[0-9]{8}|latest)$', '', model)
+    if match := re.fullmatch(rf'claude-({MODEL_FAMILY})-({MODEL_VERSION})', base):
+        family, version = match.groups()
+    elif match := re.fullmatch(rf'claude-({MODEL_VERSION})-({MODEL_FAMILY})', base):
+        version, family = match.groups()
+    else:
+        return None
+    return f"{family.capitalize()} {version.replace('-', '.')}"
+
+
+def model_breakdown(models):
+    ranked = sorted((m for name, m in models.items() if name is not None),
+                    key=lambda m: (-m['tokens'], m['name']))
+    shown, rest = ranked[:3], ranked[3:]
+    if None in models:
+        rest.append(models[None])
+    if rest:
+        shown.append({'name': None, 'tokens': sum(m['tokens'] for m in rest),
+                      'price': sum(m['price'] for m in rest)})
+    return shown
+
+
 def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=None):
     # today=None means a finished week (previews, tests of completed weeks).
     days = [str(start + timedelta(days=i)) for i in range(7)]
@@ -100,10 +126,26 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
     selected = {d: usage.get('days', {}).get(d, {}) for d in days} if enabled else {}
     daily = []
     output = 0
+    models = {}
+    pricing = pricing or Pricing()
+    partial = False
     for day in days:
-        token_counts = [c for tiers in selected.get(day, {}).values() for c in tiers.values()]
-        daily.append(sum(sum(c.get(k, 0) for k in FIELDS) for c in token_counts))
-        output += sum(c.get('out', 0) for c in token_counts)
+        day_tokens = 0
+        for model, tiers in selected.get(day, {}).items():
+            if model == SYNTHETIC:
+                continue
+            tokens = sum(c.get(k, 0) for c in tiers.values() for k in FIELDS)
+            if not tokens:
+                continue
+            day_tokens += tokens
+            output += sum(c.get('out', 0) for c in tiers.values())
+            name = model_label(model)
+            entry = models.setdefault(name, {'name': name, 'tokens': 0, 'price': 0.0})
+            cost, unpriced = pricing.estimate_model(model, tiers)
+            entry['tokens'] += tokens
+            entry['price'] += cost
+            partial |= unpriced
+        daily.append(day_tokens)
     activity = {d: usage.get('activity', {}).get(d) for d in days}
     minutes = [m for m in activity.values() if type(m) is int and 0 <= m < 1440]
     latest = max(minutes) if minutes else None
@@ -114,7 +156,7 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
     totals.update(total_tokens=sum(daily), output_tokens=output,
                   nights=sum(m >= 1200 for m in minutes),
                   approvals_denials_pats=totals['approvals'] + totals['denials'] + totals['pats'])
-    price, partial = (pricing or Pricing()).estimate(selected)
+    price = sum((m['price'] for m in models.values()), 0.0)
     peaks = [stats.get(day, {}).get('seven_day_peak') for day in days]
     peaks = [v for v in peaks if number(v)]
     if peaks:
@@ -134,14 +176,21 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
             'daily_avg': sum(daily) / days_elapsed if enabled else None,
             'latest': f'{(latest + 300) // 60 % 24:02}:{(latest + 300) % 60:02}' if latest is not None else None,
             'title': None if ongoing else title_for(totals, lang), 'price': price, 'partial': partial,
-            'enabled': enabled, 'lang': lang}
+            'models': model_breakdown(models), 'enabled': enabled, 'lang': lang}
 
 
 def preview(lang='zh', enabled=True):
     start = date(2026, 10, 19)
     stats = {str(start + timedelta(days=i)): dict(tasks=i + 1, seconds=3500 + i * 500,
               approvals=4, denials=1, pats=3, snacks=2) for i in range(7)}
-    usage = {'days': {str(start + timedelta(days=i)): {'claude-sonnet-5-5': {'0':
-             dict(zip(FIELDS, (25000, 90000 + i * 20000, 40000, 5000, 2000000 + i * 100000)))}}
-             for i in range(7)}, 'activity': {str(start): 1301, str(start + timedelta(days=1)): 1250}}
+    stats[str(start)]['seven_day_peak'] = 72
+    shares = {'claude-opus-5-5': 45, 'claude-fable-5-2': 30, 'claude-sonnet-5-5': 15, 'claude-haiku-4-5': 10}
+    days = {}
+    for i in range(7):
+        counts = (25000, 90000 + i * 20000, 40000, 5000, 2000000 + i * 100000)
+        days[str(start + timedelta(days=i))] = {
+            model: {'0': {key: value * share // 100 for key, value in zip(FIELDS, counts)}}
+            for model, share in shares.items()
+        }
+    usage = {'days': days, 'activity': {str(start): 1301, str(start + timedelta(days=1)): 1250}}
     return report(start, stats, usage, lang, enabled)

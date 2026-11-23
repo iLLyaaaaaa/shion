@@ -78,10 +78,11 @@ def ensure_fonts():
 
 
 LABEL, CARD_FILL, CARD_EDGE, PRIMARY = '#9C8A84', '#231917', '#33241F', '#F2EDEA'
-SPRITE_RECT = QRectF(689, 225, 377, 430)  # Right of the total number, clear of the card grid.
+SPRITE_RECT = QRectF(689, 154, 377, 430)  # Right of the total number, clear of the card grid.
 SPRITE_CENTER = QPointF(SPRITE_RECT.center().x(), SPRITE_RECT.center().y())
-GRID_TOP, GRID_GAP, CARD_W3, CARD_H3 = 753, 20, 344, 118
-CHART_BASE, BAR_W, BAR_SLOT = 1372, 118, 1072 / 7
+GRID_TOP, GRID_GAP, CARD_W3, CARD_H3 = 669, 20, 344, 118
+QUOTA_ROW_HEIGHT = 40
+CHART_BASE, BAR_W, BAR_SLOT = 1384, 100, 1072 / 7
 FOOTER_NAME = '诗音 · Shion'
 
 
@@ -114,7 +115,7 @@ def balanced_break(font, value, width):
         left, right = value[:i].rstrip(), value[i:].lstrip()
         if after.isspace() or not left or len(right.replace(' ', '')) < 3:
             continue
-        if after in NO_LINE_START or before in NO_LINE_END:
+        if after in NO_LINE_START or before in NO_LINE_END or before + after == '詩音':
             continue
         if before.isascii() and not before.isspace() and after.isascii():  # break Latin text at spaces only
             continue
@@ -167,13 +168,18 @@ def paint_card(painter, data, branding=True):
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
     def text(x, y, width, height, value, size=MIN_FONT, color=PRIMARY, bold=False,
-             align=Qt.AlignLeft, baseline=None, hero=False):
+             align=Qt.AlignLeft, baseline=None, hero=False, compact=False):
         font = card_font(lang, size, bold, hero)
         painter.setFont(font)
         painter.setPen(QColor(color))
         # Fit localizations and large counts without clipping or overlap.
         while painter.fontMetrics().horizontalAdvance(value) > width and font.pixelSize() > MIN_FONT:
             font.setPixelSize(font.pixelSize() - 1)
+            painter.setFont(font)
+        advance = painter.fontMetrics().horizontalAdvance(value)
+        if compact and advance > width:
+            # Keep long model lists on one line at the normal text height.
+            font.setStretch(int(100 * width / advance) - 1)
             painter.setFont(font)
         value = painter.fontMetrics().elidedText(value, Qt.ElideRight, int(width))
         if baseline is not None:
@@ -218,12 +224,12 @@ def paint_card(painter, data, branding=True):
     painter.setBrush(Qt.NoBrush)
 
     if data.get('ongoing'):
-        text(64, 222, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True, hero=True)
+        text(64, 170, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True, hero=True)
         sprite_name = 'idle'
     else:
-        text(64, 178, 620, 40, ui('weekly_title_label'), 28, LABEL)
-        text(64, 222, 620, 140, data['title']['name'], 128, ACCENT, True, hero=True)
-        wrapped(64, 372, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
+        text(64, 126, 620, 40, ui('weekly_title_label'), 28, LABEL)
+        text(64, 170, 620, 140, data['title']['name'], 128, ACCENT, True, hero=True)
+        wrapped(64, 316, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
         sprite_name = data['title']['sprite']
     sprite = QImage(str(ROOT / 'assets/weekly' / (sprite_name + '.png')))
     if sprite.isNull():
@@ -237,17 +243,33 @@ def paint_card(painter, data, branding=True):
 
     totals = data['totals']
     if data['enabled']:
-        text(64, 492, 620, 40, ui('weekly_total'), 28, LABEL)
-        text(64, 520, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=650, hero=True)
+        text(64, 417, 620, 40, ui('weekly_total'), 28, LABEL)
+        text(64, 436, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=566, hero=True)
     else:
-        text(64, 560, 620, 80, ui('weekly_disabled'), 36, LABEL)
-    if 'seven_day_peak' in totals:
+        text(64, 476, 620, 80, ui('weekly_disabled'), 36, LABEL)
+    has_quota = 'seven_day_peak' in totals
+    if has_quota:
         quota = ui('weekly_quota', value=f"{totals['seven_day_peak']:g}")
-        text(64, 676, 1072, 44, quota, 28, LABEL)
+        quota_y = GRID_TOP - 85
+        text(64, quota_y, 1072, 44, quota, 28, LABEL)
         # Quota counts all usage, not just Claude Code; say so in smaller muted text beside it.
         quota_w = QFontMetrics(card_font(lang, 28)).horizontalAdvance(quota)
         if quota_w + 40 < 1072 - 200:
-            text(64 + quota_w + 28, 676, 1072 - quota_w - 28, 44, ui('weekly_quota_note'), 28, '#6F5F59')
+            text(64 + quota_w + 28, quota_y, 1072 - quota_w - 28, 44, ui('weekly_quota_note'), 28, '#6F5F59')
+
+    grid_top = GRID_TOP
+    if data['enabled'] and data.get('models'):
+        if not has_quota:
+            grid_top -= QUOTA_ROW_HEIGHT
+        label = ui('weekly_models')
+        offset = QFontMetrics(card_font(lang, 28)).horizontalAdvance(label) + 24
+        shares = []
+        for model in data['models']:
+            share = model['tokens'] / totals['total_tokens']
+            percent = '<1%' if share < 0.01 else f'{share:.0%}'
+            shares.append(f"{model['name'] or ui('weekly_models_other')} {percent}")
+        text(64, grid_top - 45, offset, 36, label, 28, LABEL)
+        text(64 + offset, grid_top - 45, 1072 - offset, 36, ' · '.join(shares), compact=True)
 
     # 3x2 card grid; the price card carries its own estimate note.
     peak = data.get('peak_day')
@@ -263,7 +285,7 @@ def paint_card(painter, data, branding=True):
                   dict(label=ui('weekly_active_days'), value=f"{data['active_days']}/{data['days_elapsed']}")]
     cards += [dict(label=ui('weekly_latest_label'), value=data['latest'] or '—'),
               dict(label=ui('weekly_peak'), value=peak_value, accent=True)]
-    y = GRID_TOP
+    y = grid_top
     for first in range(0, len(cards), 3):
         row = cards[first:first + 3]
         height = max([c.get('height', CARD_H3) for c in row])

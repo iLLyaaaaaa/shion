@@ -328,6 +328,8 @@
     "weekly_this": "今週ここまで",
     "weekly_previous": "先週",
     "weekly_total": "Claude Code 合計 TOKEN",
+    "weekly_models": "モデル",
+    "weekly_models_other": "その他",
     "weekly_output": "Claude Code 出力",
     "weekly_price_label": "API 概算",
     "weekly_estimate": "推定額・参考値です",

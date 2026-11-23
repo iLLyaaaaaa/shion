@@ -645,7 +645,7 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 - hook 仍**不打开** `transcript_path`，`Stop` 规则不变。token 统计由**诗音主程序**在后台线程只读扫描 CC 本地对话记录。
 - 扫描只取 `type == "assistant"` 且带 `message.usage` 的行中的：`timestamp`、`message.id`、`requestId`、`message.model`，以及 usage 的 `input_tokens`、`output_tokens`、`cache_creation_input_tokens`、`cache_read_input_tokens`，以及 `usage.cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`。最晚活动与夜猫子只使用 user / assistant 对话记录的 `timestamp`（不读取内容）。**绝不读取、保存、记录或显示**对话内容、`cwd`、文件路径和项目目录名；日志中只写计数。
 - 落盘只含按本地日期/模型/档位的数字聚合，以及增量扫描状态：文件偏移与哈希去重索引。最近 8 天的去重索引只含消息键的 sha256、聚合桶定位、上次 token 数与数值时间戳，用于跨重启的重复排除和流式差额修正，不保存明文 message.id / requestId。缓存里的文件以路径 sha256 前 16 位作为键，不存明文路径；只存偏移、文件标识/大小/修改时间和边界摘要等重扫校验信息。
-- 设置菜单新增“统计用量”开关，默认开启。关闭后不扫描，周报里隐藏 token 和价格两行，七天柱图改为任务计数。隐私模式不影响用量统计，因为它们只是数字。
+- 设置菜单新增“统计用量”开关，默认开启。关闭后不扫描，周报隐藏 token、模型和价格，七天柱图改为任务计数。隐私模式不影响用量统计，因为它们只是数字。
 
 ### 数据源 A：token 用量（`shion/usage.py`）
 
@@ -704,7 +704,7 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 
 - **周**：本地时间的周一到周日。每周一（或之后）的第一次启动，在问候结束、没有授权或输入面板时，诗音举着报告说“这周的报告出来了！”，点一下打开**上一周**的周报。右键菜单的“周报”可以随时查看**本周到目前为止**和上一周。
 - **统计项**：
-  - token：总量、输出量，以及 7 天柱状图（每天总量）
+  - token：总量、输出量，以及 7 天柱状图（每天总量）。模型行显示按总 token 排名前三的模型及其占比，忽略日期 / latest 后缀。其余与无法识别的模型合入“其他”，无用量时隐藏模型行。低于 1% 的非零占比标为 `<1%`。`<synthetic>` 不计入周报用量。
   - API 价格估算（见下）
   - 7 天额度：本周观测到的 `seven_day.used_percentage` 最大值，没有收到时隐藏该行
   - 诗音自己记录的数据：完成任务数（`Stop` 次数）、工作时长（每个会话从 `UserPromptSubmit` 到 `Stop` 的时长之和，单轮最多算 2 小时，没收到 Stop 的不算）、通过诗音批准和拒绝的次数、摸头和喂零食次数。最晚活动时间与夜猫子改从对话记录 timestamp 计算（日界按 05:00 算，例如 02:41 算前一天的深夜）
@@ -728,7 +728,7 @@ ChatGPT 只观察元数据；独立认证 HTTP 通道与逐会话/轮次任务�
 
 ### API 价格估算
 
-- `assets/pricing.json`：按明确模型版本匹配（仅允许日期 / latest 后缀，不用 claude-opus-4 这类宽前缀；未知版本一律未计价），填写每百万 token 的 input / output / cache write 5m / cache write 1h / cache read 美元单价。支持可选档位阈值，按每条消息的 input + cache write + cache read 判断（超过阈值才进高档），不按一日/一周的聚合总量判断。仅采用官方定价页的数字，写明 `as_of` 与来源；提交前先给用户核对价格表。只改单价无需重扫，修改分档阈值则需重建聚合。
+- `assets/pricing.json`：按明确模型版本匹配（仅允许日期 / latest 后缀，不用 claude-opus-4 这类宽前缀；未知版本一律未计价），填写每百万 token 的 input / output / cache write 5m / cache write 1h / cache read 美元单价。支持可选档位阈值，按每条消息的 input + cache write + cache read 判断（超过阈值才进高档），不按一日/一周的聚合总量判断。仅采用官方定价页的数字，写明 `as_of` 与来源；提交前先给用户核对价格表。只改单价无需重扫，修改模型前缀或分档阈值则需重建聚合。Fable 5.2 与 Mythos 5.2 适用同一档标准费率。
 - 卡片上写“按 API 公开价格约 $xx”，再用小字注明“估算，仅供参考”。出现无法匹配价格的模型时，小字改为“部分模型未计价”。价格变动时只需要改这份 JSON。
 
 ### 开发步骤

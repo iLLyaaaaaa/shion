@@ -327,6 +327,8 @@
     "weekly_this": "本周到目前为止",
     "weekly_previous": "上一周",
     "weekly_total": "Claude Code 总 token",
+    "weekly_models": "模型",
+    "weekly_models_other": "其他",
     "weekly_output": "Claude Code 输出",
     "weekly_price_label": "API 估价",
     "weekly_estimate": "估算，仅供参考",

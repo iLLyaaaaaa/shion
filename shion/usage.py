@@ -70,20 +70,27 @@ class Pricing:
         amount, partial = 0.0, False
         for models in days.values():
             for model, tiers in models.items():
-                item = self.model(model)
-                for threshold, counts in tiers.items():
-                    # Client-generated and empty rows cost nothing; never mark them unpriced.
-                    if model == SYNTHETIC or not any(counts.get(k, 0) for k in FIELDS):
-                        continue
-                    tier = next((t for t in item['tiers'] if str(t['above_input_tokens']) == threshold), None) if item else None
-                    if tier is None:
-                        partial = True
-                    else:
-                        amount += sum(counts.get(k, 0) * tier['rates'][k] for k in FIELDS) / 1_000_000
+                cost, unpriced = self.estimate_model(model, tiers)
+                amount += cost
+                partial |= unpriced
+        return amount, partial
+
+    def estimate_model(self, model, tiers):
+        if model == SYNTHETIC:
+            return 0.0, False
+        item = self.model(model)
+        rates_by_tier = {str(t['above_input_tokens']): t['rates'] for t in item['tiers']} if item else {}
+        amount, partial = 0.0, False
+        for threshold, counts in tiers.items():
+            rates = rates_by_tier.get(threshold)
+            if rates is not None:
+                amount += sum(counts.get(k, 0) * rates[k] for k in FIELDS) / 1_000_000
+            elif any(counts.get(k, 0) for k in FIELDS):
+                partial = True
         return amount, partial
 
     def signature(self):
-        # Rate edits never invalidate token aggregates; threshold edits do.
+        # Prefix or threshold changes invalidate token aggregates; rate edits do not.
         return sha(json.dumps([(i['prefixes'], [t['above_input_tokens'] for t in i['tiers']])
                                for i in self.data['models']], sort_keys=True).encode())
 

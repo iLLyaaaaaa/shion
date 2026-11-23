@@ -1,8 +1,26 @@
 {
-  "as_of": "2026-11-02",
+  "as_of": "2026-11-23",
   "source": "https://platform.claude.com/docs/en/about-claude/pricing",
   "basis": "standard global API USD per million tokens; excludes fast mode, batch, regional and tool charges",
   "models": [
+    {
+      "prefixes": [
+        "claude-fable-5-2",
+        "claude-mythos-5-2"
+      ],
+      "tiers": [
+        {
+          "above_input_tokens": 0,
+          "rates": {
+            "in": 8,
+            "out": 40,
+            "cw5": 10,
+            "cw1": 16,
+            "cr": 0.2
+          }
+        }
+      ]
+    },
     {
       "prefixes": [
         "claude-opus-5-5"
