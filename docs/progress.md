@@ -4,6 +4,13 @@
 
 ## 当前状态总览
 
+### 2026-11-23 诗音 3.1.0 · 本地发布准备
+
+- `master` 以 `--no-ff` 将 `feature/task-chips` 的 `48f6181` 合入 `c9d7da4`，`a1ddf3d` 将应用、三语 README 下载名及测试更新至 3.1.0。EXE 版本资源由构建脚本生成。
+- 首轮全仓测试 3020 通过、11 跳过、1 失败。V3 换边帧耗时 41.03 ms，超过 40 ms 门槛。专项重跑 33 项通过，随后将上次失败项排在最前重跑全仓，3021 通过、11 跳过、2 条 Pillow 弃用警告，耗时 41 分 51 秒，退出码 0。日志在 `build/pytest-310-full-retry.log`。
+- `dist/Shion` 共 407 个文件、168,828,546 字节。发布 ZIP `dist/Shion-3.1.0-win64.zip` 为 75,066,639 字节，包内文件逐一校验。隔离 `bundle_smoke` 127 项通过，保留原生窗口启动和正常退出检查，本次跳过内存采样。
+- 三语发布说明在 `build/release-notes-3.1.0.md`。替换器在 `build/v310-release-20261123/start_replacer.cmd`，仅做语法检查，尚未执行。Git 已注销 `shion-chips`，扫描未发现 reparse point。旧 worktree 的 37 个验收文件已归档至 `build/chips/` 并核对哈希。
+
 ### 2026-11-23 多任务标签阶段 3 · 验收通过
 
 - 阶段 2 已本地提交为 `f4f7cc9`，静止定位与四档避让等 146 项回归通过。
