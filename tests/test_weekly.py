@@ -390,10 +390,12 @@ def test_card_and_window_are_exportable_without_focus(qapp, lang, tmp_path):
 
 
 def test_card_uses_shion_palette_and_highlights_only_peak(qapp):
+    from shion.weekly_ui import bar_center
+
     image = render_card(preview())
     assert image.pixelColor(0, 0).name().upper() == '#1A1212'
-    assert image.pixelColor(100, 1340).name().upper() == '#5A3A2C'
-    assert image.pixelColor(1040, 1340).name().upper() == '#F4772E'
+    assert image.pixelColor(int(bar_center(0)), 1340).name().upper() == '#5A3A2C'
+    assert image.pixelColor(int(bar_center(6)), 1340).name().upper() == '#F4772E'
 
 
 def test_window_escape_save_and_clipboard_under_mocked_ui(qapp, tmp_path, monkeypatch):
@@ -843,8 +845,9 @@ def test_bars_are_slim_rounded_on_top_and_peak_number_is_bold_accent(qapp, draws
     from shion.lines import Lines
     from shion.weekly_ui import BAR_W, CHART_BASE, bar_center, bar_x
     card = finished_card()
+    card['totals']['seven_day_peak'] = 72
     image = render_card(card)
-    assert BAR_W == 100
+    assert 48 <= BAR_W <= 56
     x = bar_x(6)
     mid = int(bar_center(6))
     assert image.pixelColor(mid, CHART_BASE - 10).name().upper() == '#F4772E'
@@ -853,13 +856,22 @@ def test_bars_are_slim_rounded_on_top_and_peak_number_is_bold_accent(qapp, draws
     top = CHART_BASE - 1
     while image.pixelColor(mid, top - 1).name().upper() == '#F4772E':
         top -= 1
-    assert CHART_BASE - top >= 175
+    assert 140 <= CHART_BASE - top <= 150
     assert image.pixelColor(int(x) + 1, top).name().upper() != '#F4772E'  # rounded corner
     peak_number = draws.one(number(card['daily'][6], 'zh'))
     assert peak_number['bold'] and peak_number['color'] == '#F4772E'
     other = draws.one(number(card['daily'][5], 'zh'))
     assert not other['bold'] and other['color'] == '#F2EDEA'
     assert len(draws.by_text(Lines('zh').ui('weekly_peak'))) == 1  # no separate chart caption
+    footer = draws.one('github.com/iLLyaaaaaa/shion')['geom']
+    start = date.fromisoformat(card['start'])
+    for day, tokens in enumerate(card['daily']):
+        amount = next(t['geom'] for t in draws.by_text(number(tokens, 'zh')) if t['size'] == 28)
+        label = (start + timedelta(days=day)).strftime('%m-%d')
+        date_text = next(t['geom'] for t in draws.by_text(label) if t['size'] == 28)
+        assert amount.center().x() == pytest.approx(bar_center(day))
+        assert date_text.center().x() == pytest.approx(bar_center(day))
+        assert footer.top() - date_text.bottom() >= 20
 
 
 def test_footer_has_link_left_and_name_right_and_link_follows_branding_switch(qapp, draws):

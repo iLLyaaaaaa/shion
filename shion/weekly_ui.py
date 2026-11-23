@@ -78,11 +78,12 @@ def ensure_fonts():
 
 
 LABEL, CARD_FILL, CARD_EDGE, PRIMARY = '#9C8A84', '#231917', '#33241F', '#F2EDEA'
-SPRITE_RECT = QRectF(689, 154, 377, 430)  # Right of the total number, clear of the card grid.
+SPRITE_RECT = QRectF(689, 166, 377, 430)  # Right of the total number, clear of the card grid.
 SPRITE_CENTER = QPointF(SPRITE_RECT.center().x(), SPRITE_RECT.center().y())
-GRID_TOP, GRID_GAP, CARD_W3, CARD_H3 = 669, 20, 344, 118
+GRID_TOP, GRID_GAP, CARD_W3, CARD_H3 = 691, 20, 344, 118
 QUOTA_ROW_HEIGHT = 40
-CHART_BASE, BAR_W, BAR_SLOT = 1384, 100, 1072 / 7
+CHART_BASE, BAR_W, BAR_SLOT = 1370, 52, 1072 / 7
+BAR_RADIUS = 6
 FOOTER_NAME = '诗音 · Shion'
 
 
@@ -224,12 +225,12 @@ def paint_card(painter, data, branding=True):
     painter.setBrush(Qt.NoBrush)
 
     if data.get('ongoing'):
-        text(64, 170, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True, hero=True)
+        text(64, 182, 620, 140, ui('weekly_ongoing', n=data['day_n']), 128, ACCENT, True, hero=True)
         sprite_name = 'idle'
     else:
-        text(64, 126, 620, 40, ui('weekly_title_label'), 28, LABEL)
-        text(64, 170, 620, 140, data['title']['name'], 128, ACCENT, True, hero=True)
-        wrapped(64, 316, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
+        text(64, 138, 620, 40, ui('weekly_title_label'), 28, LABEL)
+        text(64, 182, 620, 140, data['title']['name'], 128, ACCENT, True, hero=True)
+        wrapped(64, 328, 620, data['title']['comment'], 34, PRIMARY, 2, 46)
         sprite_name = data['title']['sprite']
     sprite = QImage(str(ROOT / 'assets/weekly' / (sprite_name + '.png')))
     if sprite.isNull():
@@ -243,10 +244,10 @@ def paint_card(painter, data, branding=True):
 
     totals = data['totals']
     if data['enabled']:
-        text(64, 417, 620, 40, ui('weekly_total'), 28, LABEL)
-        text(64, 436, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=566, hero=True)
+        text(64, 439, 620, 40, ui('weekly_total'), 28, LABEL)
+        text(64, 458, 620, 150, number(totals['total_tokens'], lang), 136, ACCENT, True, baseline=588, hero=True)
     else:
-        text(64, 476, 620, 80, ui('weekly_disabled'), 36, LABEL)
+        text(64, 498, 620, 80, ui('weekly_disabled'), 36, LABEL)
     has_quota = 'seven_day_peak' in totals
     if has_quota:
         quota = ui('weekly_quota', value=f"{totals['seven_day_peak']:g}")
@@ -326,7 +327,7 @@ def paint_card(painter, data, branding=True):
         height = max(4, int(max_height * value / top))
         is_peak = i == peak
         path = QPainterPath()
-        path.addRoundedRect(QRectF(x, CHART_BASE - height, BAR_W, height + 12), 12, 12)
+        path.addRoundedRect(QRectF(x, CHART_BASE - height, BAR_W, height + BAR_RADIUS), BAR_RADIUS, BAR_RADIUS)
         painter.save()
         painter.setClipRect(QRectF(x, CHART_BASE - height, BAR_W, height))
         painter.fillPath(path, QColor(ACCENT if is_peak else '#5A3A2C'))
