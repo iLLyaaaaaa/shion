@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from html import escape
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QToolTip, QWidget
 
@@ -49,6 +49,9 @@ def place_chips(body: QRect, pet_bounds: QRect, size: QSize, avail: QRect,
 
 
 class TaskChips(QWidget):
+    chip_clicked = Signal(object)
+    clear_clicked = Signal()
+
     def __init__(self, pet, *, available=None):
         super().__init__(pet, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
         self.pet = pet
@@ -69,7 +72,7 @@ class TaskChips(QWidget):
         self._shown_chips = ()
         self._obstacles = ()
         self._scene_overlay = None
-        self._pressed = False
+        self._pressed = None
         self._relayout = QTimer(self, singleShot=True, interval=0)
         self._relayout.timeout.connect(self.follow)
         pet.installEventFilter(self)
@@ -78,10 +81,11 @@ class TaskChips(QWidget):
     def present(self, view, ui, fallback=(), obstacles=()):
         self.view = view
         config = (tuple(fallback), ui("task_board_clear"), ui("task_board_collapse"))
-        appearance = tuple((chip.key, chip.name, chip.status, chip.wait_reason) for chip in view.all_chips)
+        appearance = tuple((chip.key, chip.name, chip.status, chip.wait_reason, chip.activity)
+                           for chip in view.all_chips)
         if config != self._config or appearance != self._appearance:
             QToolTip.hideText()
-            self._pressed = False
+            self._pressed = None
             if config != self._config:
                 self.setFont(label_font(fallback))
             self._config = config
@@ -102,7 +106,7 @@ class TaskChips(QWidget):
         if self.isVisible():
             QToolTip.hideText()
             self.hide()
-        self._pressed = False
+        self._pressed = None
         self.expanded = False
         self._offset = 0
 
@@ -145,7 +149,8 @@ class TaskChips(QWidget):
         if rect is None or rect.intersects(pet.visible_sprite_bounds()):
             self.withdraw()
             return
-        rows = [(chip.name, BADGES[chip.source], chip.status) for chip in chips]
+        rows = [(f"{chip.activity} · {chip.name}" if chip.activity else chip.name,
+                 BADGES[chip.source], chip.status) for chip in chips]
         if self.view.overflow_count:
             rows.append((self._config[2] if self.expanded else f"+{self.view.overflow_count}", "", "toggle"))
         if self.view.show_clear_done:
@@ -196,8 +201,6 @@ class TaskChips(QWidget):
             painter.drawRoundedRect(row.adjusted(1, 1, -1, -1), ROW / 2, ROW / 2)
             painter.setPen(QColor("#542F0E") if waiting else FG)
             if not badge:
-                if status == "clear":
-                    painter.setPen(QColor("#A59588"))
                 painter.drawText(row, Qt.AlignCenter, name)
                 continue
             painter.drawText(row.adjusted(10, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, badge)
@@ -232,21 +235,35 @@ class TaskChips(QWidget):
         return super().event(event)
 
     def mousePressEvent(self, event):
-        self._pressed = (event.button() == Qt.LeftButton and self._toggle_at(event.position().toPoint()))
-        event.setAccepted(self._pressed)
+        self._pressed = self._action_at(event.position().toPoint()) if event.button() == Qt.LeftButton else None
+        event.setAccepted(self._pressed is not None)
 
     def mouseReleaseEvent(self, event):
-        toggle = self._pressed and event.button() == Qt.LeftButton and self._toggle_at(event.position().toPoint())
-        self._pressed = False
-        event.setAccepted(toggle)
-        if toggle:
+        action = self._action_at(event.position().toPoint()) if event.button() == Qt.LeftButton else None
+        clicked = action is not None and action == self._pressed
+        self._pressed = None
+        event.setAccepted(clicked)
+        if not clicked:
+            return
+        if action == "toggle":
             self.expanded = not self.expanded
             self._offset = 0
             self.follow()
+        elif action == "clear":
+            self.clear_clicked.emit()
+        else:
+            chip = self._shown_chips[self._row_at(event.position().toPoint())]
+            self.chip_clicked.emit(chip)
 
-    def _toggle_at(self, pos):
+    def _action_at(self, pos):
         index = self._row_at(pos)
-        return 0 <= index < len(self._rows) and self._rows[index][2] == "toggle"
+        if 0 <= index < len(self._shown_chips):
+            chip = self._shown_chips[index]
+            if chip.status != "working":
+                return chip.key, chip.status, chip.wait_reason
+        elif 0 <= index < len(self._rows):
+            return self._rows[index][2]
+        return None
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y()

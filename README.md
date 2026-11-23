@@ -27,10 +27,11 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 ### Claude Code integration
 - **Status awareness**: changes expression and speaks up when work starts, finishes, fails, or needs your confirmation
 - **Answer permission requests**: when Claude Code wants to run a command or edit a file, Shion shows a panel with **Allow / Deny** (you can still answer inside Claude Code; whichever comes first wins — **she never allows anything by default**)
+- **Read the request before answering**: The panel summarizes the action in plain language. For Bash and PowerShell, the full command is always visible and scrolls when needed. Recognized operations get a short summary, and a description supplied by Claude is labeled as such. Common risky operations get a red warning. **Details** shows the original tool name and the information sent by the hook.
 - **Stop / Continue**: pauses at the next tool checkpoint, shows a "Paused" label, one click to continue
 - **Interrupt now**: stops the running tool process and ends the turn at the next checkpoint; an ongoing text reply may finish its current sentence first. If the working process cannot be found, Shion pauses at the next checkpoint instead
 - **Nice work / Something's wrong...**: quietly passes your feedback to the working AI as added context (no extra chat message appears)
-- **Plan and completion reminders**: she only tells you to go look — no content is shown on your desktop
+- **Plan and completion reminders**: she sends you back to the session to read the plan or reply
 - **Several sessions at once**: when more than one Claude Code session is working, Stop, Interrupt now, Nice work and Something's wrong... in **Work remote** open a submenu so you can pick one session (or **All**). Sessions are named after their project folder; two sessions in the same project also show the first few characters of their first message
 - **Disable integration temporarily**: right-click → **AI connections** → **Claude Code** → **Disable integration temporarily**. While it's off, Shion shows no panels and Claude Code handles permission requests itself; turn it back on at any time
 - **No slowdown when Shion isn't running**: hooks notice right away and hand control straight back to Claude Code, with no waiting
@@ -44,6 +45,14 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 - Works with the Codex CLI and the Codex desktop app: Shion changes expression and speaks up when work starts, tools run, approval is needed, or the work is done
 - **Observation only**: she can't approve, stop or interrupt Codex for you; when Codex needs you, she just reminds you to go back and check
 - Managed separately from Claude Code: install, temporarily disable or remove it under right-click → **AI connections** → **ChatGPT**
+
+### Task chips
+
+- Chips beside Shion show Claude Code, Claude Desktop chat, and ChatGPT (Codex) tasks. Yellow means waiting, a blue dot means working, and a green check means finished. A working Claude Code chip shows the current action or a short task summary when available. Hover to see its session and more detail.
+- Click a finished chip to dismiss it, or use **Clear all** when it appears. Click **+N** to see the rest. A waiting Claude Code chip can bring its permission or checkpoint panel to the front. For a plan awaiting review, click the chip to dismiss the reminder.
+- Turn chips on or off under right-click → **Settings** → **Show task chips**. **Status only (hide details)** hides task content.
+
+<p align="center"><img src="docs/images/task-chips.png" alt="Shion beside task chips: a yellow waiting chip, two blue working indicators, a green completion check, and a +1 row" width="480"><br>Task chips with synthetic data.</p>
 
 ### Shion Weekly
 - Right-click → **Shion Weekly**. It opens last week by default; switch to **This week** in the window. On the first launch each Monday, Shion holds up the report to let you know

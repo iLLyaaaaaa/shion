@@ -298,13 +298,13 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 
 ## Claude Code 遥控（v0.3）
 
-诗音成为 Claude Code 的遥控器。**只用官方 hooks 机制，不模拟按键，不往对话里发消息。**唯一的例外是下面「这一轮结束后的继续」：终端版 CC 在用户点了菜单后，往它的控制台写一句“继续”（不切前台、不用 SendInput）。 工作遥控相关的界面文字里不出现“Claude”，统一叫“工作”。
+诗音成为 Claude Code 的遥控器。**只用官方 hooks 机制，不模拟按键，不往对话里发消息。**唯一的例外是下面「这一轮结束后的继续」：终端版 CC 在用户点了菜单后，往它的控制台写一句“继续”（不切前台、不用 SendInput）。 工作遥控菜单沿用“工作”的称呼。授权面板以“Claude 说明”标明模型提供的描述。
 
 右键菜单新增“工作遥控”子菜单；需要用户决定时，诗音会主动弹出带按钮的气泡。
 
 | 操作 | 实现 | 行为 |
 |---|---|---|
-| **同意 / 否决** | **PermissionRequest hook**：返回 `hookSpecificOutput.decision.behavior` 为 `allow` / `deny`（字段按官方文档确认）。hook 脚本向本地服务器长轮询，等待用户在诗音上的选择 | 气泡显示要执行的命令或要改的文件（完整显示，过长时可展开）和两个大按钮。**ExitPlanMode 例外，只提醒，计划确认由 CC 自己处理** |
+| **同意 / 否决** | **PermissionRequest hook**：返回 `hookSpecificOutput.decision.behavior` 为 `allow` / `deny`（字段按官方文档确认）。hook 脚本向本地服务器长轮询，等待用户在诗音上的选择 | 授权面板显示操作摘要和“同意 / 否决”按钮。命令请求同时显示完整命令，详情可展开。**ExitPlanMode 例外，只提醒，计划确认由 CC 自己处理** |
 | **做得好 / 有问题** | 放进**反馈队列**；送达方式见下 | “有问题”可以附一句话（单行输入框，可留空） |
 | **停下 / 继续**（子菜单第一项） | **PreToolUse 和 PostToolUse 两个检查点**：hook 长轮询原地等待；“继续”放行，停太久返回 `continue: false` + `stopReason` | 见下面「停下规则」 |
 | **立即中断**（第二项） | 结束 CC 进程下正在跑的工具子进程树 + 一次性中断标记，下一个检查点返回 `continue: false` | 见下面「立即中断」 |
@@ -332,8 +332,10 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 
 **同意 / 否决的实现要点（v0.3 第二部分）**
 - hook（PermissionRequest）：`AskUserQuestion` 不处理（那是提问不是授权）；`ExitPlanMode` 只向 `/event` 发 `{"type":"plan_ready"}`，不进入授权流程；其余工具先 `/permission/open`，再按 10 秒一段 `/permission/wait`。**只有响应是对象、`id` 对得上、`status` 恰好等于 `"allow"` 才输出 allow**；`"deny"` 输出 deny + 存档语言的理由（`ui.hook_deny`，默认“用户通过诗音否决了这个操作”）；其余一切（连不上、超时、`gone`、字段不对）都不输出任何决定。超时（存档 `remote.permission_timeout`，默认 120 秒）先撤回请求再退出。
-- 显示的内容：Bash/PowerShell 显示命令（有描述则附 `# 描述`）；Edit/Write/NotebookEdit 显示文件完整路径；WebFetch 显示网址；WebSearch 显示搜索词；其他显示参数 JSON（不含已排除的 ExitPlanMode / AskUserQuestion）。最多 12000 字。**隐私模式不影响授权面板**（要决定就必须看到内容）。
-- 面板（`panel.py:PermissionPanel`）：终端配色；内容区只读、约 6 行高，过长出现“展开/收起”；“还有 N 个”；“否决”“同意”两个大按钮。**不抢焦点、不响应键盘**（`WindowDoesNotAcceptFocus`，按钮子类忽略所有按键），按钮在每条请求出现后 0.6 秒内不可点。静音不影响面板，只影响那一句提示语。
+- 摘要以中英日三语显示动作和对象，例如文件名、网址的域名、文件夹路径或子代理描述。未知 MCP 工具显示服务名和工具名，已知服务可使用易读名，例如 Claude in Chrome。目录访问请求显示为申请访问文件夹。
+- Bash / PowerShell 在主区域始终显示 hook 提供的全文，长命令折行并可滚动。上方显示已识别操作的说明，或标明“Claude 说明”的描述。常见删除、格式化、强制覆盖 Git 历史和下载后执行等操作有独立的红色提醒。提醒依据命令文本中的常见形式，用户仍须核对命令。
+- “详情”默认收起，展开显示原始工具名及 hook 已发送的内容。Edit / Write / NotebookEdit 的详情是原有路径。接口继续使用已有字段，hook 保留 12000 字上限。隐私模式保留授权所需内容，多个可识别会话时标题显示当前请求所属会话，隐私模式使用会话编号。
+- 面板（`panel.py:PermissionPanel`）使用终端配色，内容区只读，显示排队数量及“否决”“同意”按钮。**不抢焦点，决定只响应鼠标**（`WindowDoesNotAcceptFocus`，按钮子类忽略按键），每条请求出现后的 0.6 秒内不可决定。静音只影响提示台词。
 - 排队：诗音每 100 毫秒从 hub 取最早的未决请求显示。用户在 CC 里自己答了以后**马上收起**：同一会话的 PostToolUse / PostToolUseFailure（同意后工具跑完，按工具名 + 参数配对）、Stop、UserPromptSubmit、Notification `idle_prompt`（否决后 CC 等输入）都会撤掉对应请求，面板收起或换下一条。兜底：hook 超过 25 秒没来轮询的请求视为已被 CC 取消。官方的 `PermissionDenied` 只在 auto 模式触发，手动否决授权框时不触发，所以不接。
 - 服务端 `request_queue_size` 调到 64，并行子代理的 hook 同时连进来不会被重置。
 
@@ -391,6 +393,15 @@ v5 可选字段 `time_speech`：`{"date": "2026-10-21", "spoken": ["time_noon"]}
 **hooks 配置**
 - PermissionRequest、PreToolUse、PostToolUse 的 hook 超时要设得比上面的等待时间长（例如 PermissionRequest 180 秒、PreToolUse / PostToolUse 1900 秒），由 hook 脚本自己控制提前返回
 - 实现后要在 CC 终端版和桌面端 Code 标签页里实测：授权请求能否被诗音接管、暂停时 CC 界面显示什么。结果记录到 progress.md
+
+## 任务标签
+
+- 默认在诗音身旁显示 Claude Code、Claude 桌面版聊天和 ChatGPT（Codex）的任务状态。等待项为黄色，工作中使用蓝点，完成使用绿色勾。按等待、工作中、完成分组，同组按开始时间排序。前四项直接显示，剩余项由 `+N` 展开。
+- Claude Code 以会话 ID 区分，旧 hook 的空 ID 统一显示为 Claude Code。工作标签优先展示当前工具的动作和目标，其次是本轮提示词摘要，悬停可看完整文案和会话名。等待项包括待授权、停在检查点和计划待确认。诗音主动结束的轮次不计入完成。
+- Claude 桌面版聊天根据既有通知展示工作、等待和完成。ChatGPT 按观察到的轮次更新标签，暂不确定的授权请求以等待提示显示，断线和中断的轮次不显示为完成。
+- 点击完成项可点掉，三个及以上完成项时出现“全部清除”。最多保留八个完成项，重启清空。新的工作轮次可以复用该会话的标签。点击授权或检查点等待项会前移相关面板，授权仍按队首顺序处理。计划待确认可以点掉，Claude 聊天和 ChatGPT 的等待项提示返回对应客户端。
+- 标签以诗音窗口位置及静止轮廓为基准，选朝屏幕中间的一侧，并避让气泡、暂停标签和面板。遇到空间不足可换侧或暂时隐藏，拖动和下落期间隐藏。跳跃、呼吸等动画期间保持摆放位置。
+- 右键“设置 → 显示任务标签”对应存档字段 `show_task_chips`，旧存档默认开启。隐私模式使用编号或通用名称，并清除工作内容摘要。临时关闭 Claude Code 联动时隐藏对应标签，静音不影响标签。
 
 ## 诗音的对话菜单（v0.4）
 

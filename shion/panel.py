@@ -8,13 +8,14 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 from shion.bubble import BG, BORDER, FG, FONT_PX
+from shion.permission_text import COMMAND_TOOLS, command_needs_warning
 from shion.windowing import position_dialog
 
 PANEL_WIDTH = 300
@@ -97,8 +98,6 @@ class InputPanel(QWidget):
 ARM_DELAY = 0.6  # 面板出现（或换成下一条）后，这么久之内按钮点了也不算，防误点
 COLLAPSED_H = 112
 EXPANDED_H = 300
-LONG_CHARS = 240
-LONG_LINES = 6
 PERMISSION_WIDTH = 400
 
 
@@ -202,6 +201,8 @@ class PermissionPanel(QWidget):
             QPushButton#allow:disabled, QPushButton#deny:disabled {{ background: #333; color: #777;
                                                                     border-color: #444; }}
             QPushButton#toggle {{ padding: 1px 8px; }}
+            QLabel#commandWarning {{ background: #6a231d; color: #fff3e9; font-weight: bold;
+                                    padding: 4px 6px; }}
             """
         )
         self._clock = clock
@@ -213,12 +214,23 @@ class PermissionPanel(QWidget):
         self._more = 0
 
         self._title = QLabel()
-        self._title.setTextFormat(Qt.PlainText)  # 标题含工具名等外部文字，不能按富文本解析
+        self._title.setTextFormat(Qt.PlainText)  # 会话名来自外部，按纯文本显示
         self._title.setWordWrap(True)
+        self._summary_text = ""
+        self._summary = QPlainTextEdit()
+        self._command = QPlainTextEdit()
         self._detail = QPlainTextEdit()
-        self._detail.setReadOnly(True)
-        self._detail.setFocusPolicy(Qt.NoFocus)
-        self._detail.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self._command_risky = False
+        self._command_warning = QLabel()
+        self._command_warning.setObjectName("commandWarning")
+        self._command_warning.setTextFormat(Qt.PlainText)
+        self._command_warning.setWordWrap(True)
+        self._command_warning.hide()
+        self._command.hide()
+        for text in (self._summary, self._command, self._detail):
+            text.setReadOnly(True)
+            text.setFocusPolicy(Qt.NoFocus)
+            text.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         self._toggle = QPushButton()
         self._toggle.setObjectName("toggle")
         self._toggle.setFocusPolicy(Qt.NoFocus)
@@ -245,6 +257,9 @@ class PermissionPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.addLayout(top)
+        layout.addWidget(self._summary)
+        layout.addWidget(self._command_warning)
+        layout.addWidget(self._command)
         layout.addWidget(self._detail)
         layout.addLayout(bottom)
         layout.addWidget(self._observation_hint)
@@ -266,19 +281,22 @@ class PermissionPanel(QWidget):
         return self._clock() >= self._armed_at
 
     def show_request(self, rid: str, tool: str, detail: str, more: int, texts: dict[str, str],
-                     body: tuple[int, int, int, int]) -> None:
+                     body: tuple[int, int, int, int], *, summary: str) -> None:
         """显示一条请求（出现或换成下一条都从这里进来）；按钮 ARM_DELAY 秒后才生效。"""
         self._rid = rid
-        self._texts = texts
         self._armed_at = self._clock() + ARM_DELAY
         self._expanded = False
-        self._detail.setPlainText(detail)
+        is_command = tool in COMMAND_TOOLS
+        self._command_risky = command_needs_warning(tool, detail)
+        # Keep the full hook payload visible. Its final "# ..." can be a
+        # description or part of the original command, so never strip it here.
+        self._set_panel_text(self._command, detail if is_command else "", COLLAPSED_H)
+        self._command.moveCursor(QTextCursor.Start)
+        self._command.setVisible(is_command)
+        self._set_panel_text(self._detail, f"{tool}\n{detail}", COLLAPSED_H if is_command else EXPANDED_H)
         self._detail.moveCursor(QTextCursor.Start)
-        long_text = len(detail) > LONG_CHARS or detail.count("\n") >= LONG_LINES
-        self._toggle.setVisible(long_text)
-        self._allow.setText(texts["allow"])
-        self._deny.setText(texts["deny"])
-        self._title.setText(f"{texts['title']}  [{tool}]")
+        self.refresh_texts(texts, summary)
+        self._refresh_command_warning()
         self.set_more(more)
         self._apply_height()
         self.refresh_enabled()
@@ -287,6 +305,25 @@ class PermissionPanel(QWidget):
             self.show()
         self.raise_()
         self._timer.start()
+
+    def refresh_texts(self, texts: dict[str, str], summary: str) -> None:
+        """Refresh an active request without changing its arm time or expanded state."""
+        if texts != self._texts or summary != self._summary_text:
+            self._summary_text = summary
+            self._texts = texts
+            self._title.setText(texts["title"])
+            self._allow.setText(texts["allow"])
+            self._deny.setText(texts["deny"])
+            self._set_panel_text(self._summary, summary, COLLAPSED_H)
+            self._summary.moveCursor(QTextCursor.Start)
+            self._refresh_command_warning()
+            self.set_more(self._more)
+            self._apply_height()
+            self.follow(self._body)
+
+    def _refresh_command_warning(self) -> None:
+        self._command_warning.setText(self._texts.get("command_warning", ""))
+        self._command_warning.setVisible(self._command_risky)
 
     def set_more(self, n: int) -> None:
         self._more = n
@@ -313,8 +350,18 @@ class PermissionPanel(QWidget):
         self._deny.setEnabled(on)
 
     # ---- 内部 ----
+    @staticmethod
+    def _set_panel_text(widget, text: str, max_height: int) -> None:
+        widget.ensurePolished()
+        widget.setPlainText(text)
+        # Leave space for the frame, margins and a scrollbar when wrapping long text.
+        area = QRect(0, 0, PERMISSION_WIDTH - 48, 0)
+        metrics = widget.fontMetrics()
+        height = metrics.boundingRect(area, Qt.TextWordWrap, text).height() + 12
+        widget.setFixedHeight(min(max_height, max(metrics.lineSpacing() + 12, height)))
+
     def _apply_height(self) -> None:
-        self._detail.setFixedHeight(EXPANDED_H if self._expanded else COLLAPSED_H)
+        self._detail.setVisible(self._expanded)
         self._toggle.setText(self._texts["collapse" if self._expanded else "expand"])
         self.adjustSize()
 

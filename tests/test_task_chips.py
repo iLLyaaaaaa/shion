@@ -218,6 +218,116 @@ def test_chip_first_shown_at_jump_peak_uses_resting_position(env):
     assert chips.isVisible() and chips.geometry() == rectangle
 
 
+def _click_chip(chips, index):
+    QTest.mouseClick(chips, Qt.LeftButton, pos=QPoint(70, index * (ROW + SPACING) + ROW // 2))
+
+
+def test_chip_clicks_dismiss_waiting_plan_and_completed_items_in_overflow(env):
+    env.win.setAttribute(Qt.WA_DontShowOnScreen)
+    env.win.show()
+    controller = env.ctl
+    for n in range(5):
+        controller.handle_event("stop", meta={"session": f"finished-{n}"})
+    controller.handle_event("plan_ready", meta={"session": "plan"})
+    controller.handle_event("prompt", meta={"session": "working"})
+    chips = controller._task_chips
+    assert chips.isVisible()
+    _click_chip(chips, 0)  # Awaiting plan.
+    assert all(chip.wait_reason != "plan_ready" for chip in chips.view.all_chips)
+    _click_chip(chips, 0)  # Working row is informational.
+    assert chips.view.all_chips[0].status == "working"
+    _click_chip(chips, 4)  # Open the overflow list.
+    assert chips.expanded and len(chips._shown_chips) == 6
+    _click_chip(chips, 5)  # A completion from the formerly hidden rows.
+    assert all(chip.key != ("claude_code", "finished-4") for chip in chips.view.all_chips)
+    clear = len(chips._shown_chips) + int(bool(chips.view.overflow_count))
+    _click_chip(chips, clear)
+    assert [chip.status for chip in chips.view.all_chips] == ["working"]
+
+
+def test_permission_chip_only_raises_the_queue_head(env, monkeypatch):
+    from shion import controller as module
+
+    env.win.setAttribute(Qt.WA_DontShowOnScreen)
+    env.win.show()
+    controller = env.ctl
+    first = controller.hub.permissions.open("Bash", "git status", session="first")
+    second = controller.hub.permissions.open("Write", "C:/demo/file", session="second")
+    env.advance(0.1)
+    chips = controller._task_chips
+    assert chips.isVisible()
+    raised = []
+    monkeypatch.setattr(module, "raise_without_activation", raised.append)
+    index = next(i for i, chip in enumerate(chips.view.visible_chips)
+                 if chip.key == ("claude_code", "second"))
+    _click_chip(chips, index)
+    assert raised == [controller._perm_panel]
+    assert controller._perm_panel.request_id == first
+    assert [request.id for request in controller.hub.permissions.pending()] == [first, second]
+    assert all(request.status == "pending" for request in controller.hub.permissions.pending())
+
+
+def test_checkpoint_chip_raises_pause_badge_without_resuming(env, monkeypatch):
+    from shion import controller as module
+
+    env.win.setAttribute(Qt.WA_DontShowOnScreen)
+    env.win.show()
+    ctl = env.ctl
+    ctl.handle_event("prompt", meta={"session": "held"})
+    ctl.stop_work("held")
+    assert ctl.hub.wait_gate(0, "held") == (True, False)
+    env.advance(0.1)
+    chips = ctl._task_chips
+    assert chips.isVisible() and chips.view.visible_chips[0].wait_reason == "checkpoint"
+    assert env.win._pause_badge.isVisible()
+    raised = []
+    monkeypatch.setattr(module, "raise_without_activation", raised.append)
+    _click_chip(chips, 0)
+    assert raised == [env.win._pause_badge]
+    assert ctl.hub.is_session_paused("held")
+
+
+def test_chat_wait_chip_points_to_the_observed_app(env):
+    env.win.setAttribute(Qt.WA_DontShowOnScreen)
+    env.win.show()
+    env.ctl.handle_event("chat_event", meta={"event": "need_input", "client": "demo"})
+    env.ctl._speech.dismiss()
+    chips = env.ctl._task_chips
+    assert chips.isVisible()
+    _click_chip(chips, 0)
+    assert env.said[-1] == env.ctl.lines.ui("task_board_check_claude_chat")
+
+
+def test_working_chip_shows_current_turn_and_tool_without_exposing_private_text(env):
+    env.win.setAttribute(Qt.WA_DontShowOnScreen)
+    env.win.show()
+    ctl = env.ctl
+    ctl.handle_event("prompt", meta={"session": "one", "project": "chips-c", "prompt_head": "修改 hello.py"})
+    ctl.handle_event("prompt", meta={"session": "two", "project": "other", "prompt_head": "检查文档"})
+    chips = ctl._task_chips
+    first, second = chips.view.all_chips
+    assert (first.activity, second.activity) == ("修改 hello.py", "检查文档")
+
+    ctl.handle_event("working", '{"tool":"edit","target":"hello.py"}', {"session": "one", "tool_id": "edit"})
+    first, second = chips.view.all_chips
+    assert "在改 hello.py" in first.activity and "chips-c" in first.tooltip
+    assert second.activity == "检查文档"
+    assert "在改 hello.py" in chips._rows[0][0]
+
+    ctl.handle_event("tool_done", meta={"session": "one", "tool_id": "older"})
+    assert "在改 hello.py" in chips.view.all_chips[0].activity
+    ctl.handle_event("tool_done", meta={"session": "one", "tool_id": "edit"})
+    assert chips.view.all_chips[0].activity == "修改 hello.py"
+    ctl.handle_event("prompt", meta={"session": "one", "prompt_head": "再跑一次测试"})
+    assert chips.view.all_chips[0].activity == "再跑一次测试"
+
+    ctl.set_privacy(True)
+    assert all(not item.activity for item in chips.view.all_chips)
+    assert "再跑一次测试" not in chips.view.all_chips[0].tooltip
+    ctl.set_privacy(False)
+    assert all(not item.activity for item in chips.view.all_chips)
+
+
 def test_settings_and_privacy_refresh_live_view(env):
     controller = env.ctl
     assert SaveData.from_dict({}).show_task_chips

@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .activity import Entry, describe
 from .sessions import SessionNames
 from .tasks import TaskRecord
 
@@ -43,6 +44,7 @@ class TaskChip:
     started_at: float
     wait_reason: WaitReason | None
     tooltip: str
+    activity: str = ""
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,13 @@ class BoardView:
     visible_chips: tuple[TaskChip, ...]
     overflow_count: int
     show_clear_done: bool
+
+
+@dataclass
+class _CcContent:
+    prompt: str = ""
+    tool: Entry | None = None
+    tool_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,7 @@ class TaskBoard:
         self._done: OrderedDict[ChipKey, _Row] = OrderedDict()
         self._cc_active: dict[str, _Timing] = {}
         self._cc_plans: dict[str, _Timing] = {}
+        self._cc_content: dict[str, _CcContent] = {}
         self._chat_timing: _Timing | None = None
         self._chat_name: str | None = None
         self._codex_turns: dict[ChipKey, _CodexTurn] = {}
@@ -103,11 +113,24 @@ class TaskBoard:
             oldest = min(self._done, key=lambda k: self._done[k].ended_at)
             del self._done[oldest]
 
+    def note_cc_prompt(self, session_id: str | None, prompt: str) -> None:
+        self._cc_content[session_id or ""] = _CcContent(prompt=prompt)
+
+    def note_cc_tool(self, session_id: str | None, tool_id: str | None, entry: Entry) -> None:
+        content = self._cc_content.setdefault(session_id or "", _CcContent())
+        content.tool, content.tool_id = entry, tool_id
+
+    def note_cc_tool_done(self, session_id: str | None, tool_id: str | None) -> None:
+        content = self._cc_content.get(session_id or "")
+        if content is not None and (not tool_id or content.tool_id == tool_id):
+            content.tool = content.tool_id = None
+
     def note_cc_stop(self, session_id: str | None, *, ended_by_shion: bool, now: float) -> None:
         session = session_id or ""
         key = ("claude_code", session)
         timing = self._cc_active.pop(session, None) or self._cc_plans.get(session)
         self._cc_plans.pop(session, None)
+        self._cc_content.pop(session, None)
         if ended_by_shion:
             self._done.pop(key, None)
         elif key not in self._done:
@@ -151,6 +174,7 @@ class TaskBoard:
         if not inputs.cc_link_enabled:
             self._cc_active.clear()
             self._cc_plans.clear()
+            self._cc_content.clear()
             return []
         working = set(inputs.cc_working)
         holding = set(inputs.cc_holding)
@@ -176,6 +200,7 @@ class TaskBoard:
             self._done.pop(key, None)
             rows.append(_Row(key, "claude_code", "waiting" if reason else "working", timing, reason))
         self._cc_active = timings
+        self._cc_content = {s: content for s, content in self._cc_content.items() if s in active}
         return rows
 
     def _chat_rows(self, phase: str, now: float) -> list[_Row]:
@@ -232,6 +257,7 @@ class TaskBoard:
                  ui: Callable[..., str]) -> BoardView:
         if inputs.private:
             self._chat_name = None
+            self._cc_content.clear()
         rows = self._cc_rows(inputs, now)
         rows.extend(self._chat_rows(inputs.chat_phase, now))
         rows.extend(self._codex_rows(inputs, now))
@@ -258,4 +284,15 @@ class TaskBoard:
         end = now if row.ended_at is None else row.ended_at
         duration = max(0, int(end - row.timing.started_at))
         tooltip = ui("task_board_tooltip", source=source_label, name=name, state=status, seconds=duration)
-        return TaskChip(row.key, row.source, name, row.status, row.timing.started_at, row.wait_reason, tooltip)
+        activity = ""
+        if row.source == "claude_code" and row.status == "working":
+            content = self._cc_content.get(row.key[1])
+            if content is not None:
+                if content.tool is not None and (content.tool.target or not content.prompt):
+                    activity = describe(content.tool, ui, private=False)
+                else:
+                    activity = content.prompt
+        if activity:
+            tooltip = f"{tooltip}\n{activity}"
+        return TaskChip(row.key, row.source, name, row.status, row.timing.started_at,
+                        row.wait_reason, tooltip, activity)

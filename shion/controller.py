@@ -30,6 +30,7 @@ from shion.menu_content import MenuContent, localized
 from shion.lines import Lines
 from shion import interrupt
 from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
+from shion.permission_text import permission_summary
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
 from shion.remote import RemoteHub
@@ -246,9 +247,35 @@ class PetController(QObject):
             return
         if self._task_chips is None:
             self._task_chips = TaskChips(self.window)
+            self._task_chips.chip_clicked.connect(self._on_task_chip)
+            self._task_chips.clear_clicked.connect(self._clear_task_chips)
         obstacles = tuple(window for window in (self.bubble, self.window._pause_badge,
                           self._perm_panel, self._checkpoint) if window is not None)
         self._task_chips.present(view, self.lines.ui, self.lines.font_fallback, obstacles)
+
+    def _on_task_chip(self, chip) -> None:
+        if chip.status == "done":
+            self.task_board.dismiss_done(chip.key)
+            self._sync_task_chips(self._now())
+        elif chip.wait_reason == "plan_ready":
+            self.task_board.dismiss_plan(chip.key)
+            self._sync_task_chips(self._now())
+        elif chip.wait_reason == "permission":
+            self._sync_permission()
+            if self._perm_panel is not None:
+                raise_without_activation(self._perm_panel)
+        elif chip.wait_reason == "checkpoint":
+            target = self._checkpoint
+            if target is None or not target.isVisible():
+                target = self.window._pause_badge
+            if target is not None:
+                raise_without_activation(target)
+        elif chip.source in ("claude_chat", "chatgpt") and chip.status == "waiting":
+            self.say_text(self.lines.ui("task_board_check_" + chip.source))
+
+    def _clear_task_chips(self) -> None:
+        self.task_board.clear_done()
+        self._sync_task_chips(self._now())
 
     def set_show_task_chips(self, on: bool) -> None:
         self.state.save.show_task_chips = on
@@ -588,6 +615,7 @@ class PetController(QObject):
             self._connection_panel.follow(self.window.body_rect())
         self.scheduler.mark_dirty(self._now())
         self.sync()
+        self._sync_permission()
         self._try_time_speech()
 
     def set_privacy(self, private: bool) -> None:
@@ -597,6 +625,7 @@ class PetController(QObject):
             self.session_names.forget_prompts()  # 已记的第一句话也丢掉，关掉隐私后不会再冒出来
         self.scheduler.mark_dirty(self._now())
         self._sync_task_chips(self._now())
+        self._sync_permission()
         self._try_time_speech()
 
     def set_muted(self, muted: bool) -> None:
@@ -810,6 +839,8 @@ class PetController(QObject):
             self._sync_pause()  # 服务线程可能已经在 hub 里解除了暂停
         if etype == "notification" and detail == "idle_prompt" and session:
             self._tool_wall.pop(session, None)  # CC 在等输入：没有工具在跑（state 里同时清掉工作中）
+        if etype in ("tool_done", "tool_error"):
+            self.task_board.note_cc_tool_done(session, tool_id)
         if etype == "tool_done":
             self.state.claude_event(etype, detail, now, session, tool_id)
             self.sync()
@@ -818,6 +849,11 @@ class PetController(QObject):
         entry = make_entry(etype, detail, now)
         self.activity.add(entry)
         reactions = self.state.claude_event(etype, detail, now, session, tool_id)
+        if not private:
+            if etype == "prompt":
+                self.task_board.note_cc_prompt(session, meta.get("prompt_head") or "")
+            elif etype == "working" and entry is not None:
+                self.task_board.note_cc_tool(session, tool_id, entry)
         greeted = any(r.key in ("wake", "neglect_return") for r in reactions)  # 这句别被盖掉
         if etype == "working" and parse_working(detail):
             # 用“在读 x.py……”代替随机的“Claude 在努力中”
@@ -1207,12 +1243,18 @@ class PetController(QObject):
         qp.start()
 
     # ------------------------------------------------------------ 遥控：同意 / 否决
-    def _permission_texts(self) -> dict[str, str]:
+    def _permission_texts(self, session: str | None) -> dict[str, str]:
         ui = self.lines.ui
+        title = ("Claude · " if self.v2.core.enabled else "") + ui("permission_title")
+        sessions = self.remote_sessions()
+        if len(sessions) >= 2:
+            label = self.session_labels(sessions).get(session, ui("task_board_source_claude_code"))
+            title = ui("permission_title_session", title=title, session=label)
         return {
-            "title": ("Claude · " if self.v2.core.enabled else "") + ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
-            "more": ui("permission_more"), "expand": ui("permission_expand"),
+            "title": title, "allow": ui("permission_allow"), "deny": ui("permission_deny"),
+            "more": ui("permission_more"), "expand": ui("permission_details"),
             "collapse": ui("permission_collapse"),
+            "command_warning": ui("permission_command_warning"),
         }
 
     def _sync_permission(self) -> None:
@@ -1236,16 +1278,19 @@ class PetController(QObject):
             panel = self._perm_panel = PermissionPanel(family, clock=self.window.monotonic_time)
             panel.decided.connect(self._on_permission_decided)
         head = pending[0]
+        texts = self._permission_texts(head.session)
+        summary = permission_summary(head.tool, head.detail, self.lines.ui)
         if panel.request_id != head.id:
             first = not panel.isVisible()
             panel.show_request(
                 head.id, head.tool, head.detail, len(pending) - 1,
-                self._permission_texts(), self.window.body_rect(),
+                texts, self.window.body_rect(), summary=summary,
             )
             if first:
                 self.say_key("permission_request")
             self._bring_forward()
         else:
+            panel.refresh_texts(texts, summary)
             panel.set_more(len(pending) - 1)
 
     def _on_permission_decided(self, rid: str, allow: bool) -> None:

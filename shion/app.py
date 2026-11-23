@@ -27,6 +27,7 @@ from shion.effects import HeartOverlay
 from shion.lines import Lines, available_languages, resolve_language
 from shion.remote import RemoteHub
 from shion.pet_window import MARGIN_TOP, MARGIN_X, PetWindow
+from shion.permission_text import permission_summary
 from shion.server import DEFAULT_PORT, LINK_PORT_BUSY, LINK_TOKEN_FAILED, ShionServer, start_linked, stop_linked
 from shion.speech import Priority
 
@@ -445,6 +446,7 @@ def _render_snapshot(
 
 def render_task_chips_demo(scene, lang, side, overlays, bubble_text, badge, at):
     """Compose live widgets on a fixed virtual screen so previews work on either side."""
+    from shion.activity import Entry
     from shion.badge import CheckpointPanel, PauseBadge
     from shion.panel import ARM_DELAY, PermissionPanel
     from shion.sessions import SessionNames
@@ -468,6 +470,7 @@ def render_task_chips_demo(scene, lang, side, overlays, bubble_text, badge, at):
     now = scene.time[0]
     board.note_cc_stop("docs", ended_by_shion=False, now=now - 2)
     board.note_cc_stop("tests", ended_by_shion=False, now=now - 1)
+    board.note_cc_tool("build", "demo", Entry(datetime.min, "working", "edit", "hello.py"))
     view = board.snapshot(BoardInputs(
         cc_permissions=("review",), cc_working=("build",),
         ledger_tasks={("chatgpt", "demo", "session", "turn"): TaskRecord("observed_working", now - 5)},
@@ -499,8 +502,10 @@ def render_task_chips_demo(scene, lang, side, overlays, bubble_text, badge, at):
             permission = hidden(PermissionPanel(bubble.font_family, clock=lambda: permission_clock[0]))
             permission.show_request("demo", "Bash", "git status", 0, {
                 key: ui("permission_" + key) for key in
-                ("title", "allow", "deny", "more", "expand", "collapse")
-            }, pet.body_rect())
+                ("title", "allow", "deny", "more", "collapse")
+            } | {"expand": ui("permission_details"), "command_warning": ui("permission_command_warning")},
+                pet.body_rect(),
+                summary=permission_summary("Bash", "git status", ui))
             permission_clock[0] += ARM_DELAY + 0.1
             permission.refresh_enabled()
         chips = hidden(TaskChips(pet, available=lambda _point: avail))
@@ -676,9 +681,9 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         panel.show_request(
             "snapshot", "Bash", text, more,
             {"title": ui("permission_title"), "allow": ui("permission_allow"), "deny": ui("permission_deny"),
-             "more": ui("permission_more"), "expand": ui("permission_expand"),
-             "collapse": ui("permission_collapse")},
-            body,
+             "more": ui("permission_more"), "expand": ui("permission_details"),
+             "collapse": ui("permission_collapse"), "command_warning": ui("permission_command_warning")},
+            body, summary=permission_summary("Bash", text, ui),
         )
         if expand:
             panel._toggle.click()
