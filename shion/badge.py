@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import math
+import re
+from decimal import Decimal
 
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF, QImage, QPainter, QPainterPath, QRegion
-from PySide6.QtWidgets import QGridLayout, QLabel, QLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit, QVBoxLayout, QWidget
 
 from shion.bubble import BG, BORDER, FG, FONT_PX, PAD_X, PAD_Y, pick_font_family
+from shion.budget_policy import BUDGET_TIERS
 from shion.panel import ARM_DELAY, STYLE, MouseOnlyButton
 from shion.sessions import LABEL_W as SESSION_LABEL_W
 from shion.windowing import set_topmost
@@ -187,6 +190,7 @@ class CheckpointPanel(QWidget):
 
     resume_clicked = Signal(str)
     end_clicked = Signal(str)
+    budget_selected = Signal(str, object, object)
 
     def __init__(self, pet, fallback=()):
         super().__init__(pet, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -204,6 +208,8 @@ class CheckpointPanel(QWidget):
         self._armed_at = math.inf
         self._rows: list[tuple[str, str]] = []
         self._texts: dict[str, str] = {}
+        self._budgets = {}
+        self._budget_input = None
         self.wanted = False
         self._title = QLabel()
         self._title.setTextFormat(Qt.PlainText)
@@ -228,20 +234,29 @@ class CheckpointPanel(QWidget):
     def armed(self) -> bool:
         return self._clock() >= self._armed_at
 
-    def present(self, rows: list[tuple[str, str]], texts: dict[str, str]) -> None:
+    def present(self, rows: list[tuple[str, str]], texts: dict[str, str], *, budgets=None) -> None:
         """rows：[(会话, 显示名)]，按开始停住的先后。会话集合或文字变了就重建并重新计时防误点。"""
         rows = list(rows)
-        if rows != self._rows or texts != self._texts:
-            if [r[0] for r in rows] != [r[0] for r in self._rows]:
+        budgets = dict(budgets or {})
+        if rows != self._rows or texts != self._texts or budgets != self._budgets:
+            if self._budget_input is not None:
+                session, hold, dialog = self._budget_input
+                if budgets.get(session, (None,))[0] is not hold:
+                    dialog.reject()
+            if budgets != self._budgets or [r[0] for r in rows] != [r[0] for r in self._rows]:
                 self._armed_at = self._clock() + ARM_DELAY
             self._rows, self._texts = rows, dict(texts)
+            self._budgets = budgets
             self._rebuild()
         self.wanted = True
         self.refresh()
 
     def withdraw(self) -> None:
+        if self._budget_input is not None:
+            self._budget_input[2].reject()
         self.wanted = False
         self._rows = []
+        self._budgets = {}
         self.refresh()
 
     def refresh(self) -> None:
@@ -269,10 +284,16 @@ class CheckpointPanel(QWidget):
         while self._grid.count():
             item = self._grid.takeAt(0)
             if item.widget() is not None:
+                item.widget().hide()
                 item.widget().deleteLater()
         self.buttons = {}
         self._title.setText(self._texts.get("title", ""))
         for row, (session, name) in enumerate(self._rows):
+            if session in self._budgets:
+                self._grid.addWidget(self._budget_row(session, name), row, 0, 1, 3)
+                continue
+            if self._budgets:
+                name = f"{name} · {self._texts['manual']}"
             label = QLabel(self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W))
             label.setTextFormat(Qt.PlainText)  # 文件夹名是外部文字，不能按富文本解析
             label.setToolTip(name)
@@ -290,13 +311,115 @@ class CheckpointPanel(QWidget):
         self.layout().activate()
         self.follow()
 
-    def _click(self, signal, session: str) -> None:
+    def _budget_row(self, session, name):
+        from shion.weekly_ui import number
+
+        hold, manual = self._budgets[session]
+        texts = self._texts
+        lang = texts["lang"]
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        if len(self._rows) > 1:
+            layout.addWidget(QLabel(self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W),
+                                    textFormat=Qt.PlainText))
+        body = texts["used"].format(used=number(hold.total, lang), budget=number(hold.budget, lang))
+        layout.addWidget(QLabel(body, textFormat=Qt.PlainText))
+        if manual:
+            note = QLabel(texts["also_manual"], textFormat=Qt.PlainText)
+            note.setWordWrap(True)
+            layout.addWidget(note)
+
+        choices = QHBoxLayout()
+        choices.setSpacing(6)
+        for value, label in zip(BUDGET_TIERS, texts["tiers"]):
+            if value > hold.total:
+                button = MouseOnlyButton(label)
+                button.clicked.connect(lambda _=False, v=value: self._select_budget(session, hold, v))
+                choices.addWidget(button)
+        custom = MouseOnlyButton(texts["custom"])
+        custom.clicked.connect(lambda: self._custom_budget(session, hold))
+        unlimited = MouseOnlyButton(texts["unlimited"])
+        unlimited.clicked.connect(lambda: self._select_budget(session, hold, None))
+        for button in (custom, unlimited):
+            choices.addWidget(button)
+        choices.addStretch()
+        layout.addLayout(choices)
+        end = MouseOnlyButton(texts["end"])
+        end.clicked.connect(lambda: self._click(self.end_clicked, session))
+        layout.addWidget(end, alignment=Qt.AlignRight)
+        return widget
+
+    def _select_budget(self, session, hold, value):
+        if self._budgets.get(session, (None,))[0] is hold:
+            self._click(self.budget_selected, session, hold, value)
+
+    def _custom_budget(self, session, hold):
+        if not self.armed() or not self.isVisible() or self._budget_input is not None:
+            return
+        if self._budgets.get(session, (None,))[0] is not hold:
+            return
+        texts = self._texts
+        units = 1_000_000 if texts["lang"] == "en" else 10_000
+        # Parent to the pet so the input can take focus while the checkpoint panel cannot.
+        dialog = QInputDialog(self.pet)
+        dialog.setWindowTitle(texts["custom"])
+        dialog.setLabelText(texts["input"])
+        dialog.setOkButtonText(texts["apply"])
+        dialog.setCancelButtonText(texts["cancel"])
+        dialog.setWindowModality(Qt.NonModal)
+        dialog.setWindowFlag(Qt.WindowStaysOnTopHint, bool(self.pet.windowFlags() & Qt.WindowStaysOnTopHint))
+        dialog.setTextValue("")
+        dialog.findChild(QLineEdit).setMaxLength(24)
+        self._budget_input = session, hold, dialog
+
+        def apply():
+            value = parse_custom_budget(dialog.textValue(), units)
+            if value is None or value <= hold.total:
+                dialog.setLabelText(texts["invalid"] if value is None else texts["too_low"])
+                dialog.show()
+                dialog.findChild(QLineEdit).selectAll()
+                return
+            close()
+            self._select_budget(session, hold, value)
+
+        def close():
+            self._budget_input = None
+            dialog.deleteLater()
+
+        dialog.accepted.connect(apply)
+        dialog.rejected.connect(close)
+        dialog.show()
+
+    def _click(self, signal, session: str, *args) -> None:
         # 防误点：刚出现 / 停住的会话刚变过的 ARM_DELAY 内，即使按钮事件进来了也不算
         if self.wanted and self.isVisible() and self.armed() and any(s == session for s, _ in self._rows):
-            signal.emit(session)
+            signal.emit(session, *args)
 
     def keyPressEvent(self, event) -> None:
         event.ignore()
 
     def keyReleaseEvent(self, event) -> None:
         event.ignore()
+
+
+def parse_custom_budget(text: str, units: int) -> int | None:
+    text = text.strip()
+    if not re.fullmatch(r"[0-9]{1,18}(?:\.[0-9]{1,6})?", text):
+        return None
+    tokens = Decimal(text) * units
+    return int(tokens) if tokens == tokens.to_integral_value() else None
+
+
+def checkpoint_budget_texts(lines) -> dict:
+    ui = lines.ui
+    return {
+        "title": ui("budget_title"), "lang": lines.lang,
+        "used": ui("budget_used"), "manual": ui("budget_manual"),
+        "also_manual": ui("budget_also_manual"),
+        "tiers": tuple(ui(f"budget_tier_{size}") for size in (10, 50, 100)),
+        "custom": ui("budget_custom"), "unlimited": ui("budget_unlimited"),
+        "input": ui("budget_input"), "invalid": ui("budget_invalid"),
+        "too_low": ui("budget_too_low"), "apply": ui("budget_apply"), "cancel": ui("panel_cancel"),
+    }

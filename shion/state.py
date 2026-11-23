@@ -210,6 +210,29 @@ def _bool(value, default: bool) -> bool:
     return value if isinstance(value, bool) else default
 
 
+def valid_budget(value) -> bool:
+    return type(value) is int and value > 0
+
+
+@dataclass(frozen=True)
+class SessionBudget:
+    budget: int | None
+    last_active: datetime
+
+
+def _session_budgets(raw) -> dict[str, SessionBudget]:
+    records = {}
+    if isinstance(raw, dict):
+        for session, entry in raw.items():
+            if not _feedback_session({"session": session}) or not isinstance(entry, dict):
+                continue
+            stamp = _parse_dt(entry.get("last_active"))
+            budget = entry.get("budget")
+            if stamp is not None and "budget" in entry and (budget is None or valid_budget(budget)):
+                records[session] = SessionBudget(budget, stamp)
+    return records
+
+
 @dataclass
 class SaveData:
     schema_version: int = SAVE_VERSION
@@ -240,6 +263,8 @@ class SaveData:
 
     weekly_stats: dict = field(default_factory=dict)
     usage_enabled: bool = True
+    task_budget_default: int | None = None
+    session_budgets: dict[str, SessionBudget] = field(default_factory=dict)
     weekly_branding: bool = True
     weekly_announced: str = ""
     stamina_announced: dict = field(default_factory=dict)
@@ -250,6 +275,11 @@ class SaveData:
             "seven_day_last": clean_last(self.seven_day_last),
             "weekly_stats": clean_stats(self.weekly_stats),
             "usage_enabled": self.usage_enabled,
+            "task_budget_default": self.task_budget_default,
+            "session_budgets": {
+                session: {"budget": record.budget, "last_active": record.last_active.isoformat()}
+                for session, record in self.session_budgets.items()
+            },
             "weekly_branding": self.weekly_branding,
             "weekly_announced": self.weekly_announced,
             "stamina_announced": clean_announced(self.stamina_announced),
@@ -288,6 +318,9 @@ class SaveData:
             return d
         d.weekly_stats = clean_stats(raw.get("weekly_stats"))
         d.usage_enabled = _bool(raw.get("usage_enabled"), True)
+        default = raw.get("task_budget_default")
+        d.task_budget_default = default if valid_budget(default) else None
+        d.session_budgets = _session_budgets(raw.get("session_budgets"))
         d.weekly_branding = _bool(raw.get("weekly_branding"), True)
         announced = raw.get("weekly_announced")
         d.stamina_announced = clean_announced(raw.get('stamina_announced'))

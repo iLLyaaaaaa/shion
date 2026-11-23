@@ -1,7 +1,7 @@
 """工作遥控的线程安全共享状态（纯 Python，不 import Qt）。
 
 服务线程（长轮询的 hook 请求）和 GUI 线程（用户点按钮）都会碰它，所以用一个 Condition 保护。
-这里只存“暂停”之类的标志；谁能改它由调用方决定：HTTP 服务只读、只等，不替用户做决定。
+这里只存“暂停”之类的标志；服务线程可按存档预算在检查点触发暂停。
 """
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ MAX_WAIT = 30.0  # 单次长轮询最多等多久（秒）
 HOLD_GRACE = 2.0  # hook 两段长轮询之间的空当，这么久之内仍算“在等”
 
 
+@dataclass(frozen=True, eq=False)
+class BudgetPause:
+    total: int
+    budget: int
+
+
 class RemoteHub:
     """停下 / 继续 / 结束这一轮 / 立即中断，都可以按会话进行。
 
@@ -26,6 +32,8 @@ class RemoteHub:
         self._cond = threading.Condition()
         self._paused = False  # 全局暂停
         self._paused_sessions: set[str] = set()  # 被单独停下的会话
+        self._budget_pauses: dict[str, BudgetPause] = {}
+        self._budget_ended: dict[str, float] = {}  # 两段轮询之间结束时，也要让续来的请求拿到 stop
         self._exempt: set[str] = set()  # 全局暂停中被单独放行的会话（继续 / 在 CC 里说话 / 结束这一轮）
         self._end_gen = 0  # 全局“结束这一轮”的一次性代数
         self._end_gens: dict[str, int] = {}  # 按会话的“结束这一轮”代数
@@ -55,6 +63,8 @@ class RemoteHub:
             self._link = enabled
             if not enabled:
                 self._clear_pauses()
+                self._budget_pauses.clear()
+                self._budget_ended.clear()
                 self._interrupts.clear()
             self._cond.notify_all()
         if enabled:
@@ -66,10 +76,13 @@ class RemoteHub:
         self._paused_sessions.clear()
         self._exempt.clear()
 
-    def _paused_for(self, session: Optional[str]) -> bool:
+    def _manual_for(self, session: Optional[str]) -> bool:
         if session is None:
             return self._paused
         return session in self._paused_sessions or (self._paused and session not in self._exempt)
+
+    def _paused_for(self, session: Optional[str]) -> bool:
+        return session in self._budget_pauses or self._manual_for(session)
 
     def _release(self, session: str) -> None:
         """只放行这个会话。全局暂停中：没有别的会话被单独停下、也没有别的 hook 在等时，整个解除全局暂停
@@ -78,7 +91,7 @@ class RemoteHub:
         if not self._paused:
             return
         now = time.monotonic()
-        others = any(k != session and self._paused_for(k) and self._recently_held(k, now)
+        others = any(k != session and self._manual_for(k) and self._recently_held(k, now)
                      for k in self._held)
         if not self._paused_sessions and not others:
             self._clear_pauses()
@@ -89,7 +102,20 @@ class RemoteHub:
     def is_paused(self) -> bool:
         """有任何暂停（全局或某个会话）。"""
         with self._cond:
+            return self._paused or bool(self._paused_sessions or self._budget_pauses)
+
+    @property
+    def is_manually_paused(self) -> bool:
+        with self._cond:
             return self._paused or bool(self._paused_sessions)
+
+    def is_session_manually_paused(self, session: str) -> bool:
+        with self._cond:
+            return self._manual_for(session)
+
+    def budget_pauses(self) -> dict[str, BudgetPause]:
+        with self._cond:
+            return dict(self._budget_pauses)
 
     @property
     def is_global_paused(self) -> bool:
@@ -105,16 +131,33 @@ class RemoteHub:
         with self._cond:
             return set(self._paused_sessions)
 
-    def pause(self, session: Optional[str] = None) -> None:
+    def pause(self, session: Optional[str] = None, *, budget: BudgetPause | None = None) -> bool:
         """None：全局停下（原行为，之后才开始工作的会话也会停）。给了会话：只停这个会话。"""
         with self._cond:
-            if session is None:
+            if budget is not None:
+                existing = self._budget_pauses.get(session)
+                if existing is not None and budget.total > existing.total:
+                    self._budget_pauses[session] = budget
+                    return False  # another checkpoint already opened the panel
+                if not self._link or not session or self._paused_for(session) or session in self._interrupts:
+                    return False
+                self._budget_pauses[session] = budget
+            elif session is None:
                 self._paused = True
                 self._exempt.clear()
             else:
                 self._paused_sessions.add(session)
                 self._exempt.discard(session)
             self._cond.notify_all()
+            return True
+
+    def resume_budget(self, session: str, hold: BudgetPause) -> bool:
+        with self._cond:
+            if self._budget_pauses.get(session) is not hold:
+                return False
+            del self._budget_pauses[session]
+            self._cond.notify_all()
+            return True
 
     def resume(self, session: Optional[str] = None) -> None:
         """None：解除全部暂停（原行为）。给了会话：只放行这个会话，其他会话的暂停不变。"""
@@ -139,12 +182,35 @@ class RemoteHub:
         之后才到的 hook 不受影响，不留残余状态。"""
         with self._cond:
             if session is None:
+                for key in tuple(self._budget_pauses):
+                    if self._manual_for(key):
+                        self._end_budget(key)
                 self._clear_pauses()
                 self._end_gen += 1
+            elif session in self._budget_pauses:
+                self._end_budget(session)
             else:
                 self._release(session)
                 self._end_gens[session] = self._end_gens.get(session, 0) + 1
             self._cond.notify_all()
+
+    def _end_budget(self, session: str) -> None:
+        now = time.monotonic()
+        del self._budget_pauses[session]
+        self._paused_sessions.discard(session)
+        if self._paused:
+            self._exempt.add(session)
+        self._end_gens[session] = self._end_gens.get(session, 0) + 1
+        self._budget_ended = {s: stamp for s, stamp in self._budget_ended.items() if now - stamp < HOLD_GRACE}
+        self._budget_ended[session] = now
+        self._cond.notify_all()
+
+    def budget_timeout(self, session: str) -> bool:
+        with self._cond:
+            if session in self._budget_pauses:
+                self._end_budget(session)
+                return True
+            return time.monotonic() - self._budget_ended.get(session, float("-inf")) < HOLD_GRACE
 
     def _recently_held(self, key: Optional[str], now: float) -> bool:
         return self._held.get(key, 0) > 0 or now - self._held_last.get(key, float("-inf")) < HOLD_GRACE
@@ -171,7 +237,10 @@ class RemoteHub:
     def request_interrupt(self, sessions) -> None:
         """只由诗音界面上的“立即中断”调用：这些会话的下一个检查点返回 stop。"""
         with self._cond:
-            self._interrupts.update(s for s in sessions if isinstance(s, str))
+            for session in sessions:
+                if isinstance(session, str):
+                    self._interrupts.add(session)
+                    self._budget_pauses.pop(session, None)
             self._cond.notify_all()
 
     def clear_interrupt(self, session: str) -> None:
@@ -193,6 +262,8 @@ class RemoteHub:
         with self._cond:
             if not self._link:
                 return False, False  # 临时关闭联动：不停、不中断
+            if seconds > 0 and time.monotonic() - self._budget_ended.get(session, float("-inf")) < HOLD_GRACE:
+                return False, True
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)
                 return False, True
@@ -200,9 +271,9 @@ class RemoteHub:
                 return False, False
             gen = self._end_gen
             sgen = self._end_gens.get(session, 0) if session is not None else 0
-
             def ended() -> bool:
-                return self._end_gen != gen or (session is not None and self._end_gens.get(session, 0) != sgen)
+                return ((session not in self._budget_pauses and self._end_gen != gen)
+                        or (session is not None and self._end_gens.get(session, 0) != sgen))
 
             now = time.monotonic()
             if not self._recently_held(session, now):

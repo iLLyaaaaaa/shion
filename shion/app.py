@@ -216,10 +216,11 @@ def run() -> int:
     bridge = ServerBridge(controller, parent=app)
     port = int(os.environ.get("SHION_PORT") or DEFAULT_PORT)
     server = ShionServer(bridge.on_event, bridge.on_take_feedback, port=port, hub=hub,
-                         usage_enabled=lambda: data.usage_enabled)
+                         usage_enabled=lambda: data.usage_enabled, budget_policy=controller.budget_policy)
     # 绑定成功才写令牌；端口被占时不写，hook 就不会去连占着端口的进程
     link_status = start_linked(server, directory)
     app.aboutToQuit.connect(lambda: stop_linked(server, directory))  # 先删令牌、停服务，再写存档
+    app.aboutToQuit.connect(controller.sync_budget_save)
     app.aboutToQuit.connect(scheduler.flush)
 
     controller.restore_position()
@@ -616,7 +617,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         family = {"zh": "Microsoft YaHei UI", "en": "Cascadia Mono", "ja": "Yu Gothic UI"}[lang]
     body = (400, 400, 100, 100)
     scene_pet = None
-    if with_pet and kind != "eating":
+    if (with_pet and kind != "eating") or kind == "budget":
         scene_pet = V3PetWindow(autostart=False, debug=False, **(
             {"height": 260, "clock": lambda: 100.0, "rng": random.Random(42), "pixel_ratio": scale}
             if fixed_scene else {}))
@@ -643,6 +644,19 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         p.drawImage(mouth.x() - panel.SIZE // 2, mouth.y() - 40, crumbs)
         p.end()
         win.close()
+    elif kind == "budget":
+        from shion.badge import CheckpointPanel, checkpoint_budget_texts
+        from shion.remote import BudgetPause
+        from shion.weekly_ui import ensure_fonts
+
+        ensure_fonts()
+        scene_pet.setAttribute(Qt.WA_DontShowOnScreen)
+        scene_pet.show()
+        panel = CheckpointPanel(scene_pet, lines.font_fallback)
+        panel.setAttribute(Qt.WA_DontShowOnScreen)
+        panel.present([("snapshot", "Claude Code")], {**checkpoint_budget_texts(lines), "end": ui("checkpoint_end")},
+                      budgets={"snapshot": (BudgetPause(10_200_000, 10_000_000), False)})
+        img = panel.grab().toImage()
     elif kind in ("dialogue", "snacks"):
         from shion.dialogue import DialoguePanel
         from shion.menu_content import MenuContent
@@ -697,7 +711,7 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
             img = render_widget_image(panel, scale)
         else:
             img = panel.grab().toImage()
-    if scene_pet is not None:
+    if scene_pet is not None and with_pet:
         # 使用真实定位结果合成，能同时检查对话框与身体是否重叠。
         bounds = scene_pet.geometry().united(panel.geometry())
         canvas = QImage(bounds.size() * scale, QImage.Format_ARGB32_Premultiplied)
@@ -708,13 +722,14 @@ def render_snapshot_panel(kind: str, text: str = "git status", lang: str = "zh",
         painter.drawImage(panel.pos() - bounds.topLeft(), img)
         painter.end()
         img = canvas
-        scene_pet.close()
-        scene_pet.deleteLater()
     font_bubble.close()
     font_bubble.deleteLater()
     panel.hide()
     panel.setParent(None)
     panel.deleteLater()  # 在这里（GUI 线程）立刻销毁，别留给别的线程里的垃圾回收
+    if scene_pet is not None:
+        scene_pet.close()
+        scene_pet.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     del app
     return img

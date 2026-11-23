@@ -19,6 +19,7 @@ from time import perf_counter
 from typing import Callable, Optional
 
 from .budget import BudgetMeter
+from .budget_policy import BudgetPolicy
 from .loopback import bind_exclusive, new_token, valid_token
 from .remote import DISABLED, RemoteHub
 from .limits import parse_limits
@@ -33,6 +34,7 @@ MAX_PERMISSION_BODY = 65536  # 授权请求要带完整命令/参数
 REQUEST_TIMEOUT = 5.0  # 秒：连上不发数据 / 发一半的连接最多占用这么久
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 INTERNAL_STOPPED = "work_stopped"  # 只由服务线程在 hook 取走“停下”时发给界面，外部不能伪造
+INTERNAL_BUDGET_PAUSE = "budget_pause"
 ID_MAX = 128  # session_id / tool_use_id 的长度上限
 PROC_NAMES = ("claude.exe", "node.exe", "bun.exe")  # hook 报来的工作进程只认这些名字
 PERM_KEY_RE = re.compile(r"[0-9a-f]{1,64}")  # 授权请求的指纹：工具名 + 参数的哈希（十六进制）
@@ -258,7 +260,7 @@ class _Handler(BaseHTTPRequestHandler):
         if detail is not None and not isinstance(detail, str):
             self._send(400, {"error": "detail 必须是字符串或 null"})
             return
-        if etype in (INTERNAL_STOPPED, 'usage_limits', 'chat_event'):
+        if etype in (INTERNAL_STOPPED, INTERNAL_BUDGET_PAUSE, 'usage_limits', 'chat_event'):
             self._send(400, {"error": "内部事件，不能从外部发送"})
             return
         if etype in ('quota_down', 'quota_revive') and (set(data) != {'type', 'session'}
@@ -280,6 +282,10 @@ class _Handler(BaseHTTPRequestHandler):
             # 这一轮结束了 / 用户又说话了 / 空闲等输入：这个会话还挂着的授权一定已经在 CC 里答过了
             hub.permissions.settle(meta["session"])
         session = meta.get("session")
+        if session and self.server.budget_policy is not None:
+            self.server.budget_policy.touch(session)
+        if session and etype == "pause_timeout" and hub.budget_timeout(session):
+            meta["budget_timeout"] = True  # only the service can classify a budget timeout
         if etype == "prompt":
             # 用户在 CC 里说话就解除这个会话自己的暂停（旧 hook 没带 session：解除全部）；
             # 在服务线程里直接做，紧接着的工具调用不会再被误挡
@@ -317,7 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _post_pause_wait(self):
         """检查点长轮询：停下中最多等 wait 秒；等满上限被结束、或这个会话被“立即中断”时 stop=true。
-        不能借此开始停下或中断，只能等待用户在诗音上做的决定。"""
+        首次请求只按本机存档和已验证 transcript 的用量触发预算暂停。"""
         data = self._read_json(MAX_PAUSE_BODY)
         if data is None:
             return
@@ -329,9 +335,15 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(session, str) or not session or len(session) > ID_MAX:
             session = None
         transcript_path = data.get("transcript_path") if isinstance(data, dict) else None
+        budget_paused = False
         if initial and session and isinstance(transcript_path, str) and transcript_path:
-            self._meter_usage(session, transcript_path)
+            budget_paused = self._meter_usage(session, transcript_path)
         paused, stop = self.server.hub.wait_gate(wait, session)
+        if budget_paused and paused:
+            try:
+                self.server.emit_event(INTERNAL_BUDGET_PAUSE, None, {"session": session})
+            except Exception:
+                log.exception("on_event 回调出错")
         if stop:
             try:
                 self.server.emit_event(INTERNAL_STOPPED, None, {"session": session} if session else {})
@@ -341,8 +353,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _meter_usage(self, session, path):
         try:
-            if not self.server.usage_enabled():
-                return
+            if not self.server.hub.link_enabled or not self.server.usage_enabled():
+                return False
             start = perf_counter()
             result = self.server.budget_meter.observe(session, path)
             elapsed = (perf_counter() - start) * 1000
@@ -351,9 +363,13 @@ class _Handler(BaseHTTPRequestHandler):
                 suffix = "" if result.complete else "（超时，部分结果）"
                 log.info("预算计量 会话%s 累计 %d（主 %d / 子代理 %d）耗时 %.1f 毫秒%s",
                          short_id, result.total, result.main, result.subagents, elapsed, suffix)
+                policy = self.server.budget_policy
+                if policy is not None and self.server.usage_enabled():
+                    return policy.observe(session, result.total, self.server.hub)
         except Exception:
             # Optional accounting must never interfere with the checkpoint response.
-            return
+            pass
+        return False
 
     # ---- 同意 / 否决 ----
     # 安全：这里只有“登记请求 / 等结果 / 撤回 / 已在 CC 里答过就撤掉”。没有任何接口、任何字段能写入 allow 或 deny，
@@ -426,7 +442,7 @@ class _Server(ThreadingHTTPServer):
     allow_reuse_address = False  # 端口被占用时要报错，而不是悄悄共用
     request_queue_size = 64  # 并行子代理的 hook 可能同时连进来，默认的 5 会被重置连接
 
-    def __init__(self, addr, on_event, on_take_feedback, hub, token, usage_enabled):
+    def __init__(self, addr, on_event, on_take_feedback, hub, token, usage_enabled, budget_policy):
         self.token = token
         super().__init__(addr, _Handler)
         self.on_event = on_event
@@ -434,6 +450,7 @@ class _Server(ThreadingHTTPServer):
         self.hub = hub
         self.usage_enabled = usage_enabled
         self.budget_meter = BudgetMeter()
+        self.budget_policy = budget_policy
         self.feedback_lock = threading.Lock()
 
     def server_bind(self):
@@ -459,6 +476,7 @@ class ShionServer:
         hub: Optional[RemoteHub] = None,
         token: Optional[str] = None,
         usage_enabled: Callable[[], bool] = lambda: True,
+        budget_policy: BudgetPolicy | None = None,
     ):
         """token：只认带这个令牌的请求；不给就随机生成一个（可从 .token 读到）。"""
         if token is None:
@@ -469,6 +487,7 @@ class ShionServer:
         self._on_event = on_event
         self._on_take_feedback = on_take_feedback
         self._usage_enabled = usage_enabled
+        self._budget_policy = budget_policy
         self.hub = hub or RemoteHub()
         self._host = host
         self._port = port
@@ -484,7 +503,7 @@ class ShionServer:
         if self._httpd:
             return
         self._httpd = _Server((self._host, self._port), self._on_event, self._on_take_feedback, self.hub, self.token,
-                              self._usage_enabled)
+                              self._usage_enabled, self._budget_policy)
         self._thread = threading.Thread(
             target=self._httpd.serve_forever, name="shion-server", daemon=True
         )

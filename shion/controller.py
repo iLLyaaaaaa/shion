@@ -33,6 +33,7 @@ from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
 from shion.permission_text import permission_summary
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
+from shion.budget_policy import BudgetPolicy
 from shion.remote import RemoteHub
 from shion.sessions import LABEL_W, SessionNames
 from shion.runtime import console_send_command, hook_process_images
@@ -90,6 +91,7 @@ class PetController(QObject):
         self.overlay = overlay
         self.bubble = bubble
         self.hub = hub or RemoteHub()
+        self.budget_policy = BudgetPolicy(state.save.task_budget_default, state.save.session_budgets, clock=now_fn)
         self.hub.set_link_enabled(state.save.claude_link_enabled)  # 在 HTTP 服务启动之前
         self._held_said = False  # 这次停下已经说过“已经停下啦～”
         self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示标签，直到继续）
@@ -284,6 +286,7 @@ class PetController(QObject):
 
     def tick(self) -> None:
         now = self._now()
+        self.sync_budget_save()
         if self.usage.poll(self.state.save.usage_enabled) and self._weekly_window is not None and self._weekly_window.isVisible():
             self._weekly_window.update_report(self._weekly_data())
         self._try_weekly_notice(now)
@@ -743,6 +746,11 @@ class PetController(QObject):
             detail = None  # 兼容旧 hook：回复/计划内容不显示、不记录
         meta = meta or {}
         session, tool_id = meta.get("session"), meta.get("tool_id")
+        if etype == "budget_pause":
+            self._sync_pause()
+            self.sync()
+            self._bring_forward()
+            return
         if etype == 'usage_limits':
             self.limits.update(meta, self._now().timestamp())
             peak_changed = dirty = False
@@ -794,7 +802,7 @@ class PetController(QObject):
             self._remember_ended(session)
             self.state.end_session(session)  # 这个会话的这一轮已经被 hook 结束了
             self._forget_session(session)
-            self._on_pause_timeout(session)
+            self._on_pause_timeout(session, budget=meta.get("budget_timeout", False))
             self.sync()
             return
         if etype == "work_stopped":
@@ -934,10 +942,10 @@ class PetController(QObject):
                 or (session is not None and session not in self.remote_sessions())):
             return
         if session is None:
-            if self.state.paused:
+            if self.hub.is_manually_paused:
                 return
             self._begin_stop(self.hub.pause)
-        elif not self.hub.is_session_paused(session):
+        elif not self.hub.is_session_manually_paused(session):
             self._begin_stop(lambda: self.hub.pause(session))
 
     def stop_all(self, sessions) -> None:
@@ -969,13 +977,14 @@ class PetController(QObject):
         """菜单上的“继续”：放行等待的 hook，无缝接着干（还没到检查点就点 = 取消停下）。
         session=None：全部（原行为）；给了会话：只放行这个会话，其他会话照旧停着。"""
         was_paused = self.state.paused
-        if session is None:
-            self.hub.resume()
+        self.hub.resume(session)
+        if not self.hub.is_paused:
             self._leave_pause()
-        else:
-            self.hub.resume(session)
-            if not self.hub.is_paused:
-                self._leave_pause()
+        budgets = self.hub.budget_pauses()
+        if (session is None and budgets) or session in budgets:
+            self.sync()
+            self._bring_forward()
+            return
         if not quiet and was_paused:
             self._speech.dismiss()
             self.say_key("resumed")
@@ -1009,19 +1018,21 @@ class PetController(QObject):
     def _sync_pause(self) -> None:
         """hub 在服务线程里被解除停下（用户在 CC 里说话，或这一轮没碰到检查点就结束了）后，把界面状态同步过来；
         hook 第一次真的在检查点等着时说一次“已经停下啦～”。"""
-        if not self._has_active_cc() and self.hub.is_paused and (
+        if not self._has_active_cc() and self.hub.is_manually_paused and (
                 self._cc_active_at is None or self._now() - self._cc_active_at > STALE_PAUSE_GRACE):
             # 无 CC 活动的遗留标记不能卡住后来的检查点。但 CC 长时间思考时可以几分钟没有 hook 事件，
             # is_working 5 分钟就过期，所以要等一段宽限再清，免得把用户的暂停悄悄解除。
             self.hub.resume()
         if self.state.paused and not self.hub.is_paused:
             self._leave_pause()
+        elif self.hub.budget_pauses():
+            self.state.paused = True
         first_hold = self.state.paused and not self._held_seen and self.hub.is_holding
         if first_hold:
             self._held_seen = True  # 暂停标签和静音无关；sync() 里显示
         if self.state.paused and not self._held_said and self.hub.is_holding:
             self._held_said = True
-            if not self.state.save.bubble_muted:
+            if not self.state.save.bubble_muted and self.hub.is_manually_paused:
                 self._speech.dismiss()  # 换掉“好，马上停～”
                 self.say(self._pause_text("work_held"), priority=Priority.MEDIUM, category="stop_requested")
         if first_hold:
@@ -1034,34 +1045,56 @@ class PetController(QObject):
         ui = self.lines.ui
         shown = self.state.paused and self._held_seen
         holding = self.hub.holding_sessions() if shown else []
-        multi = len(holding) >= 2
+        budgets = {s: (hold, self.hub.is_session_manually_paused(s))
+                   for s, hold in self.hub.budget_pauses().items() if s in holding}
+        panel = len(holding) >= 2 or bool(budgets)
         labels = self.session_labels(self.session_names.ordered([*self.remote_sessions(), *holding])) if holding else {}
         text = ui("pause_label")
         if len(holding) == 1 and not self.state.save.privacy_mode and self.session_names.project(holding[0]):
             text = ui("pause_label_named", name=labels[holding[0]])  # 隐私模式 / 不知道名字：仍是原来的“暂停中”
         if self.chat_activity.phase == "working":
             text = ui("pause_label_cc", label=text)
-        self.window.set_paused_badge(shown and not multi, text=text, tooltip=ui("pause_label_hint"),
+        self.window.set_paused_badge(shown and not panel, text=text, tooltip=ui("pause_label_hint"),
                                      fallback=self.lines.font_fallback)
-        if multi:
+        if panel:
+            from shion.badge import CheckpointPanel, checkpoint_budget_texts
             if self._checkpoint is None:
-                from shion.badge import CheckpointPanel
                 self._checkpoint = CheckpointPanel(self.window, self.lines.font_fallback)
                 self._checkpoint.resume_clicked.connect(lambda s: self.resume_work(s))
                 self._checkpoint.end_clicked.connect(self.end_turn)
-            self._checkpoint.present([(s, labels[s]) for s in holding], {
+                self._checkpoint.budget_selected.connect(self._choose_budget)
+            texts = {
                 "title": (ui("pause_label_cc", label=ui("checkpoint_title"))
                           if self.chat_activity.phase == "working" else ui("checkpoint_title")),
-                "resume": ui("checkpoint_resume"), "end": ui("checkpoint_end")})
+                "resume": ui("checkpoint_resume"), "end": ui("checkpoint_end")}
+            if budgets:
+                texts.update(checkpoint_budget_texts(self.lines))
+            self._checkpoint.present([(s, labels[s]) for s in holding], texts, budgets=budgets)
         elif self._checkpoint is not None and self._checkpoint.wanted:
             self._checkpoint.withdraw()
 
-    def _on_pause_timeout(self, session: Optional[str] = None) -> None:
+    def _choose_budget(self, session, hold, value) -> None:
+        if self.budget_policy.choose(session, hold, value, self.hub):
+            self.sync_budget_save()
+            self._sync_pause()
+            self.sync()
+
+    def sync_budget_save(self) -> None:
+        changes = self.budget_policy.take_changes()
+        if changes is not None:
+            self.state.save.session_budgets = changes
+            if not self.scheduler.dirty:
+                self.scheduler.mark_dirty(self._now())
+
+    def _on_pause_timeout(self, session: Optional[str] = None, *, budget: bool = False) -> None:
         """hook 停满上限后已返回 continue: false：放掉其他并行等待的 hook，提醒一次。只在停下等待中有效。
         全局停下中（或旧 hook 没带会话）：和原来一样结束所有正在等的 hook；只是这个会话被单独停下：只结束它的。"""
-        if not self.state.paused:
+        if not self.state.paused and not budget:
             return
-        if session is None or self.hub.is_global_paused:
+        if budget:
+            if not self.hub.is_paused:
+                self._leave_pause()
+        elif session is None or self.hub.is_global_paused:
             self.hub.end()
             self._leave_pause()
         else:
@@ -1797,7 +1830,7 @@ class PetController(QObject):
         if not self.hub.is_global_paused:
             self._targets_item(remote_menu, ui("menu_stop"), sessions, labels,
                                lambda s: self.stop_work(s), lambda: self.stop_all(sessions),
-                               enabled=lambda s: not self.hub.is_session_paused(s))
+                               enabled=lambda s: not self.hub.is_session_manually_paused(s))
         busy = [s for s in sessions if s in working]
         if busy:
             self._targets_item(remote_menu, ui("menu_interrupt"), sessions, labels,

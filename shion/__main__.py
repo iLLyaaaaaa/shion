@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--chips-side", choices=["left", "right"], help="截图用：任务标签所在侧（默认右侧）")
     p.add_argument("--chips-overlays", choices=["pause", "checkpoints"], help="截图用：与其他提示共存")
     p.add_argument("--lang", default="zh", help="截图用：气泡字体按这个语言的 font_fallback 选（zh/en/ja…）")
-    p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating", "about", "connection"], default=None,
+    p.add_argument("--panel", choices=["permission", "input", "dialogue", "snacks", "eating", "about", "connection", "budget"], default=None,
                    help="截图用：授权、检查点停下、反馈、对话首页、零食列表或吃零食效果")
     p.add_argument("--with-pet", action="store_true", help="面板截图同时绘制诗音，检查相邻位置")
     p.add_argument("--panel-text", default="git status", help="截图用：同意/否决面板里显示的内容")
