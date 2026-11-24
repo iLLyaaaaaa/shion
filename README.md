@@ -136,7 +136,7 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 
 ## Install
 
-1. Download `Shion-3.1.0-win64.zip` from [Releases](../../releases)
+1. Download `Shion-3.2.0-win64.zip` from [Releases](../../releases)
 2. Extract it to a **permanent location**, e.g. `D:\Apps\Shion` (if you move it later, reconnect: for Claude Code use right-click → **AI connections** → **Claude Code** → **Connect / inspect configuration**; for Claude Desktop chat, disconnect first, then connect)
 3. Run `Shion.exe`
 4. On first launch Shion asks whether to connect to Claude Code — click **Connect**

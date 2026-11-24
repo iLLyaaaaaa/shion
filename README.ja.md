@@ -136,7 +136,7 @@ Claude Code や Claude デスクトップ版のチャット（または ChatGPT 
 
 ## インストール
 
-1. [Releases](../../releases) から `Shion-3.1.0-win64.zip` をダウンロード
+1. [Releases](../../releases) から `Shion-3.2.0-win64.zip` をダウンロード
 2. **固定の場所**に展開します（例：`D:\Apps\Shion`）。あとで移動した場合は再接続してください：Claude Code は右クリック →「AI 連携」→「Claude Code」→「接続 / 設定を確認」、Claude デスクトップ版チャットは一度切断してから接続し直します
 3. `Shion.exe` をダブルクリック
 4. 初回起動時に Claude Code と接続するか聞かれるので、**接続** を押します

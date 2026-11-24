@@ -4,6 +4,16 @@
 
 ## 当前状态总览
 
+### 2026-11-24 诗音 3.2.0 · 合并与本地打包
+
+- `71d81ef` 保留了「计划待确认已搁置」记录。`38b851c` 把 `fix/codex-chip-states` 非快进合并到 `feature/quota-budget`。进度冲突保留两边内容并按日期排列。确认无 reparse point 后移除 `shion-codex-chips` worktree。
+- 应用版本、三语 README 下载名、规格及发布测试更新至 3.2.0。EXE 字符串和四段数值版本由构建脚本生成。当前文件的版本已核对，历史记录保留原版本号。
+- 全仓收集 3131 项，分两段完成，合计 3117 通过、14 跳过。第一段中止前的两项失败是菜单和 EXE 数值版本断言未更新，修正后与剩余用例一并通过。日志在 `build/v320-release-20261124/pytest-full.log` 和 `pytest-resumed.log`。
+- `tools/bundle_smoke.py` 129 项通过。核对 PE 文件和产品版本均为 3.2.0，隔离原生窗口托盘可见，正常退出码为 0。首次烟测的临时路径位于源码下，触发了路径隔离检查，换用系统临时目录后通过。报告在 `build/v320-release-20261124/bundle-smoke/report.json`。
+- 目录包在 `dist/Shion/`，共 407 个文件。ZIP 在 `dist/Shion-3.2.0-win64.zip`，75,099,049 字节，含运行目录和两份许可，包内文件逐一验证。SHA-256 为 `084297a704a6a47aa69eee7d23068d53c187e2097bb992cbfff605377997f9d6`。
+- 替换器在 `build/v320-release-20261124/start_replacer.cmd`，先提示退出诗音，末尾执行 `pause`。隔离测试验证了存档和旧包备份、替换后文件校验，以及验证失败时的回滚。
+- 诗音及客户端辅助进程正常退出后，已原地替换 `D:\desktop\tools\Shion-dev`。安装目录的 407 个文件与构建清单逐项哈希一致，EXE 文件和产品版本均为 3.2.0。旧包备份在 `D:\desktop\tools\Shion-dev-before-3.2.0-20261124-143908-704660`，存档备份在 `%APPDATA%\Shion-appdata-before-3.2.0-20261124-143908-704660`，共 10 个文件。替换状态记录在 `build/v320-release-20261124/status.json`。
+
 ### 2026-11-24 Codex 任务标签 · 按顺序配对授权
 
 - 第 0 步按本机 `codex --version` 报告的 `0.171.0-alpha.13` 核对了对应发布源码 `581161ab`。同一次调用由工具注册表先等待 `PreToolUse`，再进入工具处理与授权路径触发 `PermissionRequest`。未发现同一调用反向触发的路径。 [工具注册表](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/registry.rs#L896-L1017) · [授权入口](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/approvals.rs#L595-L625)

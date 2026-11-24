@@ -136,7 +136,7 @@
 
 ## 安装
 
-1. 到 [Releases](../../releases) 下载 `Shion-3.1.0-win64.zip`
+1. 到 [Releases](../../releases) 下载 `Shion-3.2.0-win64.zip`
 2. 解压到一个**固定的位置**，例如 `D:\Apps\Shion`（以后挪动位置要重新连接：Claude Code 右键 → “AI 连接” → “Claude Code” → “连接 / 查看配置”；Claude 桌面版聊天要先断开再连接）
 3. 双击 `Shion.exe`
 4. 第一次启动时，诗音会问你要不要连接 Claude Code，点 **连接**

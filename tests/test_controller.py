@@ -220,7 +220,8 @@ def test_menu_contents(env):
         ("Claude 桌面版", ["连接聊天", "复制个人偏好"])]
     assert [a.text() for a in find_action(menu, "设置").menu().actions()] == [
         "显示任务标签", "语言", "开机自启", "统计用量", "新会话默认预算",
-        "按 token 计，可能略超（约两次请求）", "周报显示项目链接",
+        "按 token 计，可能略超（约两次请求）", "CC 每日总计",
+        "只统计 Claude Code，不含 Claude 聊天；可能比实际晚约 1 分钟", "周报显示项目链接",
     ]
     assert find_action(menu, "开机自启").isCheckable()
     assert not find_action(menu, "开机自启").isChecked()
