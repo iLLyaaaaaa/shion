@@ -23,6 +23,12 @@ class BudgetPause:
     day: date | None = None  # Daily holds share one object for this local date.
 
 
+@dataclass(frozen=True)
+class _BudgetEnd:
+    generation: int
+    timestamp: float
+
+
 class RemoteHub:
     """停下 / 继续 / 结束这一轮 / 立即中断，都可以按会话进行。
 
@@ -35,7 +41,7 @@ class RemoteHub:
         self._paused = False  # 全局暂停
         self._paused_sessions: set[str] = set()  # 被单独停下的会话
         self._budget_pauses: dict[str, BudgetPause] = {}
-        self._budget_ended: dict[str, float] = {}  # 两段轮询之间结束时，也要让续来的请求拿到 stop
+        self._budget_ended: dict[str, _BudgetEnd] = {}  # 两段轮询之间结束时，也要让续来的请求拿到 stop
         self._exempt: set[str] = set()  # 全局暂停中被单独放行的会话（继续 / 在 CC 里说话 / 结束这一轮）
         self._end_gen = 0  # 全局“结束这一轮”的一次性代数
         self._end_gens: dict[str, int] = {}  # 按会话的“结束这一轮”代数
@@ -133,14 +139,20 @@ class RemoteHub:
         with self._cond:
             return set(self._paused_sessions)
 
+    def checkpoint_generation(self, session: str) -> int:
+        """The session's end generation before a hook evaluates its budgets."""
+        with self._cond:
+            return self._end_gens.get(session, 0)
+
     def pause(self, session: Optional[str] = None, *, budget: BudgetPause | None = None,
-              checkpoint_started: float = float('inf')) -> bool:
+              checkpoint_generation: int | None = None) -> bool:
         """None：全局停下（原行为，之后才开始工作的会话也会停）。给了会话：只停这个会话。"""
         with self._cond:
             if budget is not None:
                 if not self._link or not session or session in self._interrupts:
                     return False
-                if self._budget_ended.get(session, float('-inf')) >= checkpoint_started:
+                ended = self._budget_ended.get(session)
+                if ended is not None and checkpoint_generation is not None and ended.generation > checkpoint_generation:
                     return False  # This turn was ended while its checkpoint was being evaluated.
                 existing = self._budget_pauses.get(session)
                 if budget.day is None:
@@ -244,8 +256,8 @@ class RemoteHub:
         if self._paused:
             self._exempt.add(session)
         self._end_gens[session] = self._end_gens.get(session, 0) + 1
-        self._budget_ended = {s: stamp for s, stamp in self._budget_ended.items() if now - stamp < HOLD_GRACE}
-        self._budget_ended[session] = now
+        self._budget_ended = {s: end for s, end in self._budget_ended.items() if now - end.timestamp < HOLD_GRACE}
+        self._budget_ended[session] = _BudgetEnd(self._end_gens[session], now)
         self._cond.notify_all()
 
     def budget_timeout(self, session: str) -> bool:
@@ -257,7 +269,8 @@ class RemoteHub:
                 else:
                     self.resolve_daily_budget(hold, end=True)
                 return True
-            return time.monotonic() - self._budget_ended.get(session, float("-inf")) < HOLD_GRACE
+            ended = self._budget_ended.get(session)
+            return ended is not None and time.monotonic() - ended.timestamp < HOLD_GRACE
 
     def _recently_held(self, key: Optional[str], now: float) -> bool:
         return self._held.get(key, 0) > 0 or now - self._held_last.get(key, float("-inf")) < HOLD_GRACE
@@ -300,7 +313,7 @@ class RemoteHub:
             return session in self._interrupts
 
     def wait_gate(self, seconds: float, session: Optional[str] = None, *,
-                  checkpoint_started: float = float('inf')) -> tuple[bool, bool]:
+                  checkpoint_generation: int | None = None) -> tuple[bool, bool]:
         """检查点：最多等 seconds 秒，直到这个会话不再暂停。返回 (仍在暂停, 这次要停下)。
 
         等待期间被“结束这一轮”（全局，或针对这个会话），返回 stop=True（此刻并行等待的同范围 hook 都会拿到）；
@@ -310,8 +323,11 @@ class RemoteHub:
         with self._cond:
             if not self._link:
                 return False, False  # 临时关闭联动：不停、不中断
-            ended_at = self._budget_ended.get(session, float('-inf'))
-            if ended_at >= checkpoint_started or (seconds > 0 and time.monotonic() - ended_at < HOLD_GRACE):
+            budget_end = self._budget_ended.get(session)
+            if budget_end is not None and (
+                    (checkpoint_generation is not None and budget_end.generation > checkpoint_generation)
+                    or (seconds > 0 and session not in self._budget_pauses
+                        and time.monotonic() - budget_end.timestamp < HOLD_GRACE)):
                 return False, True
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)

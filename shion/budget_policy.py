@@ -169,7 +169,7 @@ class BudgetPolicy:
                 self._record(session, record.budget, now, record)
 
     def observe(self, session: str, total: int | None, hub: RemoteHub, *,
-                checkpoint_started: float = float('inf')) -> bool:
+                checkpoint_generation: int | None = None) -> bool:
         """Update the session reading and check the cached daily limit first."""
         with self._lock:
             now = self._clock()
@@ -189,7 +189,7 @@ class BudgetPolicy:
                 hold = BudgetPause(total, budget)
             else:
                 hold = None
-            paused = hold is not None and hub.pause(session, budget=hold, checkpoint_started=checkpoint_started)
+            paused = hold is not None and hub.pause(session, budget=hold, checkpoint_generation=checkpoint_generation)
         log.info("每日预算判断 今日用量=%s 上限=%s 数据距今=%s 结果=%s",
                  daily.total if daily.total is not None else "未知",
                  daily.budget if daily.budget is not None else "不限",

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QPushButton
 
-from shion import usage_service
+from shion import remote, usage_service
 from shion.budget import BudgetReading
 from shion.budget_policy import BudgetPolicy
 from shion.lines import Lines
@@ -185,6 +185,7 @@ def test_end_all_and_timeout_stop_only_the_daily_group(daily_server, timeout):
 
 def test_end_all_reaches_a_session_joining_before_its_first_poll_returns(daily_server, monkeypatch):
     srv, policy, _, _ = daily_server
+    monkeypatch.setattr(remote, 'time', SimpleNamespace(monotonic=lambda: 123.0))
     policy.set_daily_reading(DailyReading(DAY, 100, monotonic()))
     assert checkpoint(srv, 'a') == HOLD
     observe = policy.observe
@@ -198,6 +199,9 @@ def test_end_all_reaches_a_session_joining_before_its_first_poll_returns(daily_s
     assert checkpoint(srv, 'b') == END
     assert checkpoint(srv, 'a', wait=.01) == END
     assert not srv.hub.budget_pauses()
+    monkeypatch.setattr(policy, 'observe', observe)
+    assert checkpoint(srv, 'b') == HOLD  # Next checkpoint arrives on the same clock tick.
+    assert checkpoint(srv, 'b', wait=.01) == HOLD
 
 
 def test_today_unlimited_expires_at_local_midnight_even_after_reload(daily_server):

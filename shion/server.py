@@ -15,7 +15,7 @@ import re
 import threading
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from time import monotonic, perf_counter
+from time import perf_counter
 from typing import Callable, Optional
 
 from .budget import BudgetMeter
@@ -335,11 +335,12 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(session, str) or not session or len(session) > ID_MAX:
             session = None
         transcript_path = data.get("transcript_path") if isinstance(data, dict) else None
-        checkpoint_started = monotonic() if initial else float('inf')
+        hub = self.server.hub
+        generation = hub.checkpoint_generation(session) if initial and session else None
         budget_paused = False
         if initial and session:
-            budget_paused = self._check_budgets(session, transcript_path, checkpoint_started)
-        paused, stop = self.server.hub.wait_gate(wait, session, checkpoint_started=checkpoint_started)
+            budget_paused = self._check_budgets(session, transcript_path, generation)
+        paused, stop = hub.wait_gate(wait, session, checkpoint_generation=generation)
         if budget_paused and paused:
             try:
                 self.server.emit_event(INTERNAL_BUDGET_PAUSE, None, {"session": session})
@@ -352,14 +353,14 @@ class _Handler(BaseHTTPRequestHandler):
                 log.exception("on_event 回调出错")
         self._send(200, {"paused": paused, "stop": stop})
 
-    def _check_budgets(self, session, path, checkpoint_started):
+    def _check_budgets(self, session, path, generation):
         try:
             if not self.server.hub.link_enabled or not self.server.usage_enabled():
                 return False
             total = self._meter_usage(session, path) if isinstance(path, str) and path else None
             policy = self.server.budget_policy
             if policy is not None and self.server.usage_enabled():
-                return policy.observe(session, total, self.server.hub, checkpoint_started=checkpoint_started)
+                return policy.observe(session, total, self.server.hub, checkpoint_generation=generation)
         except Exception:
             # Optional accounting must never interfere with the checkpoint response.
             pass
