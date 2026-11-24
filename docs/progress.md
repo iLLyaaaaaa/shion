@@ -4,6 +4,12 @@
 
 ## 当前状态总览
 
+### 2026-11-24 诗音 3.2.0 · 已发布
+
+- `master` 快进到 `a0c2377`，向 `origin/master` 推送 22 个提交。附注标签 `v3.2.0` 指向 `a0c2377`，`v3.1.0` 指向 `03a92aa`，3.1.0 内容并入 3.2.0。已核对 GitHub 上的分支和标签指向，发布提交的 552 个文件与本地 Git 清单逐项一致。
+- [Shion 3.2.0](https://github.com/iLLyaaaaaa/shion/releases/tag/v3.2.0) 于北京时间 19:21:46 发布，标为 Latest。正文使用审核通过的英中日说明，末尾附 SHA-256。`v3.1.0` 仅保留标签。
+- GitHub 附件 `Shion-3.2.0-win64.zip` 为 75,099,049 字节。GitHub 记录的 SHA-256 为 `084297a704a6a47aa69eee7d23068d53c187e2097bb992cbfff605377997f9d6`，与本地包一致。
+
 ### 2026-11-24 诗音 3.2.0 · 合并与本地打包
 
 - `71d81ef` 保留了「计划待确认已搁置」记录。`38b851c` 把 `fix/codex-chip-states` 非快进合并到 `feature/quota-budget`。进度冲突保留两边内容并按日期排列。确认无 reparse point 后移除 `shion-codex-chips` worktree。
