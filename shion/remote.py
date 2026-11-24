@@ -159,6 +159,16 @@ class RemoteHub:
             self._cond.notify_all()
             return True
 
+    def update_budget_hold(self, session: str, budget: int | None) -> None:
+        with self._cond:
+            hold = self._budget_pauses.get(session)
+            if hold is not None:
+                if budget is None or budget > hold.total:
+                    del self._budget_pauses[session]
+                    self._cond.notify_all()
+                elif budget != hold.budget:
+                    self._budget_pauses[session] = BudgetPause(hold.total, budget)
+
     def resume(self, session: Optional[str] = None) -> None:
         """None：解除全部暂停（原行为）。给了会话：只放行这个会话，其他会话的暂停不变。"""
         with self._cond:

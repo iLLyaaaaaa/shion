@@ -257,6 +257,9 @@ def test_disabled_matches_a55825f_menu_status_and_counts(env, tmp_path, lang):
         chip_action, = [item for item in settings["children"] if item["text"] == chip_label]
         assert chip_action["checkable"] and chip_action["checked"]
         settings["children"].remove(chip_action)  # Historical baseline predates the task-chip setting.
+        for key in ("budget_default", "budget_default_note"):
+            budget_action, = [item for item in settings["children"] if item["text"] == ctl.lines.ui(key)]
+            settings["children"].remove(budget_action)
         menu = json.dumps(structure, ensure_ascii=False, sort_keys=True)
         trace.append({"stage": stage, "menu_sha256": sha256(menu.encode("utf-8")).hexdigest(),
                       "status": ctl.status_text(), "chatgpt_status": ctl.chatgpt.status(ctl.lines.ui),

@@ -41,6 +41,7 @@ class SpeechGate:
         self.until = 0.0
         self.last_low: dict[str, float] = {}
         self.sticky = False  # 正在显示的是不会自己消失的“暂停中”
+        self.category: str | None = None
 
     def allows(self, now: float, priority: Priority, category: str) -> bool:
         if priority == Priority.HIGH:
@@ -62,6 +63,7 @@ class SpeechGate:
             return False
         # “暂停中”一直挂着，但别的台词可以盖掉它，所以按低优先级占位
         self.priority, self.started, self.sticky = (Priority.LOW if sticky else priority), now, sticky
+        self.category = category
         self.until = float("inf") if sticky else (
             now + len(text.replace("\r\n", "\n")) * CHAR_INTERVAL + HOLD + FADE)
         if priority == Priority.LOW:
@@ -71,6 +73,7 @@ class SpeechGate:
     def dismiss(self) -> None:
         self.until = 0.0
         self.sticky = False
+        self.category = None
 
 
 class PatSession:

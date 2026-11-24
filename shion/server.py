@@ -40,7 +40,7 @@ PROC_NAMES = ("claude.exe", "node.exe", "bun.exe")  # hook 报来的工作进程
 PERM_KEY_RE = re.compile(r"[0-9a-f]{1,64}")  # 授权请求的指纹：工具名 + 参数的哈希（十六进制）
 IDLE_PROMPT = "idle_prompt"  # Notification 的 notification_type：CC 回复完约 60 秒用户没输入
 PROJECT_MAX = 64  # 项目文件夹名（只给菜单显示用）的长度上限
-PROMPT_HEAD_MAX = 40  # 提示词开头（只给菜单区分同项目的会话）的长度上限
+PROMPT_HEAD_MAX = 200  # 提示词开头（会话名与任务悬停提示）的长度上限
 
 
 def clean_project(value) -> Optional[str]:
@@ -55,8 +55,8 @@ def clean_project(value) -> Optional[str]:
 
 
 def clean_prompt_head(value) -> Optional[str]:
-    """hook 报来的提示词开头（只给菜单区分会话，只存内存、不记日志）。和 clean_project 同样清理：
-    控制字符和格式字符换成空格、压缩空白；不是字符串、清理后为空或超过 40 字时返回 None（只忽略这个字段）。"""
+    """hook 报来的提示词开头，只存内存、不记日志。
+    控制字符和格式字符换成空格、压缩空白。空或超过 200 字时忽略该字段。"""
     if not isinstance(value, str) or len(value) > PROMPT_HEAD_MAX * 4:
         return None
     text = " ".join("".join(c if unicodedata.category(c) not in ("Cc", "Cf") else " " for c in value).split())

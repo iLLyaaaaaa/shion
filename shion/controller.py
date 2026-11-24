@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QProcess, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QGuiApplication
-from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 from shion import __version__
 from shion.windowing import position_dialog, raise_without_activation, set_topmost
@@ -33,7 +33,8 @@ from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
 from shion.permission_text import permission_summary
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
-from shion.budget_policy import BudgetPolicy
+from shion.budget_policy import BudgetPolicy, budget_number
+from shion.budget_ui import BudgetInput, add_budget_choices
 from shion.remote import RemoteHub
 from shion.sessions import LABEL_W, SessionNames
 from shion.runtime import console_send_command, hook_process_images
@@ -92,6 +93,7 @@ class PetController(QObject):
         self.bubble = bubble
         self.hub = hub or RemoteHub()
         self.budget_policy = BudgetPolicy(state.save.task_budget_default, state.save.session_budgets, clock=now_fn)
+        self._budget_editor = None
         self.hub.set_link_enabled(state.save.claude_link_enabled)  # 在 HTTP 服务启动之前
         self._held_said = False  # 这次停下已经说过“已经停下啦～”
         self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示标签，直到继续）
@@ -239,6 +241,8 @@ class PetController(QObject):
             ledger_ttl=ledger.ttl if ledger is not None else BoardInputs.ledger_ttl,
             ledger_now=ledger.clock() if ledger is not None else None,
             private=self.state.save.privacy_mode,
+            cc_usage=self.budget_policy.usage if self.state.save.usage_enabled else None,
+            lang=self.lines.lang,
         )
         view = self.task_board.snapshot(inputs, now=self.window.monotonic_time(),
                                         session_names=self.session_names, ui=self.lines.ui)
@@ -250,6 +254,7 @@ class PetController(QObject):
         if self._task_chips is None:
             self._task_chips = TaskChips(self.window)
             self._task_chips.chip_clicked.connect(self._on_task_chip)
+            self._task_chips.budget_menu_requested.connect(self._show_budget_menu)
             self._task_chips.clear_clicked.connect(self._clear_task_chips)
         obstacles = tuple(window for window in (self.bubble, self.window._pause_badge,
                           self._perm_panel, self._checkpoint) if window is not None)
@@ -279,6 +284,96 @@ class PetController(QObject):
         self.task_board.clear_done()
         self._sync_task_chips(self._now())
 
+    def build_budget_menu(self, chip) -> QMenu | None:
+        if chip.source != "claude_code":
+            return None
+        session = chip.key[1]
+        ui = self.lines.ui
+        hint = ""
+        if not self.state.save.usage_enabled:
+            hint = ui("budget_usage_required")
+        elif not session:
+            hint = ui("budget_session_unavailable")
+        usage = self.budget_policy.usage(session)
+        menu = QMenu(self.window)
+        used = budget_number(usage.total if not hint else None, self.lines.lang)
+        summary = menu.addAction(ui("budget_menu_used", used=used))
+        summary.setEnabled(False)
+        summary.setToolTip(hint)
+        menu.addSeparator()
+        add_budget_choices(menu, ui, usage.budget, lambda value: self._set_session_budget(session, value),
+                           lambda: self._edit_budget(session), disabled_hint=hint)
+        if hint:
+            menu.addSeparator()
+            menu.addAction(hint).setEnabled(False)
+        return menu
+
+    def _show_budget_menu(self, chip, pos: QPoint) -> None:
+        menu = self.build_budget_menu(chip)
+        if menu is not None:
+            self._menu_open = True
+            try:
+                menu.exec(pos)
+            finally:
+                self._menu_open = False
+                menu.deleteLater()
+
+    def _set_session_budget(self, session, value) -> None:
+        if self.state.save.usage_enabled and self.hub.link_enabled and session:
+            self.budget_policy.set_session(session, value, self.hub)
+            self.sync_budget_save()
+            self._sync_pause()
+            self.sync()
+
+    def set_default_budget(self, value) -> None:
+        if self.state.save.usage_enabled:
+            self.budget_policy.set_default(value)
+            self.state.save.task_budget_default = value
+            self.scheduler.mark_dirty(self._now())
+            self.sync()
+
+    def _edit_budget(self, session=None) -> None:
+        from shion.badge import checkpoint_budget_texts
+
+        if not self.state.save.usage_enabled:
+            return
+        if self._budget_editor is not None:
+            raise_without_activation(self._budget_editor)
+            return
+        ui = self.lines.ui
+
+        def warning(value):
+            total = self.budget_policy.usage(session).total
+            return ui("budget_next_checkpoint") if total is not None and value <= total else None
+
+        usage = self.budget_policy.usage(session) if session is not None else None
+        current = usage.budget if usage else self.state.save.task_budget_default
+        apply = self.set_default_budget if session is None else lambda value: self._set_session_budget(session, value)
+        dialog = BudgetInput(self.window, checkpoint_budget_texts(self.lines), current, apply,
+                             warning=warning if session is not None else None)
+        self._budget_editor = dialog
+
+        def close():
+            self._budget_editor = None
+            dialog.deleteLater()
+
+        dialog.finished.connect(close)
+        dialog.show()
+
+    def _try_budget_warning(self) -> None:
+        if not self.state.save.usage_enabled or not self.hub.link_enabled or self.state.save.bubble_muted:
+            return
+        warnings = self.budget_policy.warnings()
+        if not warnings:
+            return
+        session, usage = next(iter(warnings.items()))
+        labels = self.session_labels(self.session_names.ordered([*self.remote_sessions(), *warnings]))
+        text = self.lines.ui("budget_warning", name=labels[session],
+                             used=budget_number(usage.total, self.lines.lang),
+                             budget=budget_number(usage.budget, self.lines.lang))
+        if self.say(text, priority=Priority.MEDIUM, category="budget_warning"):
+            self.budget_policy.mark_warned(session, usage.budget)
+
     def set_show_task_chips(self, on: bool) -> None:
         self.state.save.show_task_chips = on
         self.scheduler.mark_dirty(self._now())
@@ -303,6 +398,7 @@ class PetController(QObject):
         self.react(self.state.tick(now))
         self.sync()
         self._try_stamina_notice(now)
+        self._try_budget_warning()
         if self.v2.core.enabled:
             if self.v2.notice() and not self.state.save.bubble_muted:
                 self.say(self.v2.text(self.lines.ui), priority=Priority.HIGH, category="v2_observation")
@@ -412,7 +508,7 @@ class PetController(QObject):
             category: str = "status", sticky: bool = False) -> bool:
         if not self._speech.start(self.window.monotonic_time(), text, priority, category, sticky):
             return False
-        if category != "desktop_chat":
+        if category not in ("desktop_chat", "budget_warning"):
             log.info("说：%s", text)
         if sticky:
             self._say_fn(text, sticky=True)
@@ -626,8 +722,13 @@ class PetController(QObject):
         self.activity.clear()  # 之前记下的文件名等不会在切换后冒出来
         if private:
             self.session_names.forget_prompts()  # 已记的第一句话也丢掉，关掉隐私后不会再冒出来
+            if self._speech.category == "budget_warning":
+                self._speech.dismiss()
+                if self.bubble is not None:
+                    self.bubble.dismiss()
         self.scheduler.mark_dirty(self._now())
         self._sync_task_chips(self._now())
+        self._sync_checkpoint_display()
         self._sync_permission()
         self._try_time_speech()
 
@@ -713,6 +814,42 @@ class PetController(QObject):
         for window in (*self._pet_windows(), *self._dialog_windows()):
             if window is not None:
                 raise_without_activation(window)
+
+    def show_from_tray(self) -> None:
+        self.relocate()
+        self.window.show()
+        self._bring_forward()
+        self.save_position()
+
+    def build_tray_menu(self) -> QMenu:
+        menu = QMenu(self.window)
+
+        def refresh():
+            for old in menu.findChildren(QMenu):
+                old.deleteLater()
+            menu.clear()
+            ui = self.lines.ui
+            menu.addAction(ui("tray_show")).triggered.connect(self.show_from_tray)
+            self._add_settings_menu(menu)
+            menu.addSeparator()
+            menu.addAction(ui("menu_quit")).triggered.connect(self.quit)
+
+        refresh()
+        menu.aboutToShow.connect(refresh)
+        return menu
+
+    def create_tray(self) -> QSystemTrayIcon | None:
+        from shion.icons import application_icon
+
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return None
+        tray = QSystemTrayIcon(application_icon(), self)
+        tray.setToolTip("Shion")
+        tray.setContextMenu(self.build_tray_menu())
+        tray.activated.connect(
+            lambda reason: self.show_from_tray() if reason == QSystemTrayIcon.Trigger else None)
+        tray.show()
+        return tray
 
     # ------------------------------------------------------------ 来自 Claude 的事件
     def _sync_observed_working(self):
@@ -1417,6 +1554,8 @@ class PetController(QObject):
     def dispose(self) -> None:
         """立刻在当前（GUI）线程销毁面板。测试收尾用：避免面板被别的线程里的垃圾回收销毁而崩溃。"""
         self.usage.close()
+        if self._budget_editor is not None:
+            self._budget_editor.reject()
         if self._weekly_window is not None:
             self._weekly_window.close()
             self._weekly_window.deleteLater()
@@ -1438,6 +1577,8 @@ class PetController(QObject):
 
     def quit(self) -> None:
         self.usage.close()
+        if self._budget_editor is not None:
+            self._budget_editor.reject()
         if self._task_chips is not None:
             self._task_chips.withdraw()
         if self._weekly_window is not None:
@@ -1484,12 +1625,15 @@ class PetController(QObject):
 
     def set_usage_enabled(self, enabled):
         self.state.save.usage_enabled = bool(enabled)
+        if not enabled and self._budget_editor is not None:
+            self._budget_editor.reject()
         self.scheduler.mark_dirty(self._now())
         if enabled:
             self.usage.request()
         self.usage.poll(bool(enabled))
         if self._weekly_window is not None:
             self._weekly_window.update_report(self._weekly_data())
+        self.sync()
 
     def set_weekly_branding(self, enabled):
         self.state.save.weekly_branding = bool(enabled)
@@ -2000,6 +2144,16 @@ class PetController(QObject):
             desktop.addAction(ui("desktop_connect")).triggered.connect(lambda: self.manage_desktop_chat())
         desktop.addAction(ui("desktop_copy")).triggered.connect(self.copy_desktop_preference)
 
+        self._add_settings_menu(menu)
+
+        menu.addAction(ui("weekly_report")).triggered.connect(lambda: self.open_weekly(True))
+        menu.addSeparator()
+        menu.addAction(ui("menu_about")).triggered.connect(self.show_about)
+        menu.addAction(ui("menu_quit")).triggered.connect(self.quit)
+        return menu
+
+    def _add_settings_menu(self, menu: QMenu) -> None:
+        ui = self.lines.ui
         settings_menu = menu.addMenu(ui("menu_settings"))
         settings_menu.setToolTipsVisible(True)  # 开机自启错误
         chips = settings_menu.addAction(ui("menu_show_task_chips"))
@@ -2032,19 +2186,19 @@ class PetController(QObject):
         usage.setCheckable(True)
         usage.setChecked(self.state.save.usage_enabled)
         usage.triggered.connect(self.set_usage_enabled)
+        default = settings_menu.addMenu(ui("budget_default"))
+        hint = "" if self.state.save.usage_enabled else ui("budget_usage_required")
+        default.menuAction().setEnabled(not hint)
+        default.menuAction().setToolTip(hint)
+        add_budget_choices(default, ui, self.state.save.task_budget_default, self.set_default_budget,
+                           self._edit_budget, unlimited_first=True, disabled_hint=hint)
+        settings_menu.addAction(ui("budget_default_note")).setEnabled(False)
+        if hint:
+            settings_menu.addAction(hint).setEnabled(False)
         branding = settings_menu.addAction(ui("weekly_branding"))
         branding.setCheckable(True)
         branding.setChecked(self.state.save.weekly_branding)
         branding.triggered.connect(self.set_weekly_branding)
-
-
-        # 默认打开上周（已完成、有称号）；窗口里可切换本周。
-        menu.addAction(ui("weekly_report")).triggered.connect(lambda: self.open_weekly(True))
-
-        menu.addSeparator()
-        menu.addAction(ui("menu_about")).triggered.connect(self.show_about)
-        menu.addAction(ui("menu_quit")).triggered.connect(self.quit)
-        return menu
 
     def claude_activity(self) -> str:
         """菜单“活动”行：off / stopped / permission / working / idle（都来自诗音自己的状态）。"""

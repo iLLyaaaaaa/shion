@@ -453,7 +453,7 @@ def project_name(cwd) -> str:
     return name if 0 < len(name) <= PROJECT_MAX and not name.endswith(":") else ""
 
 
-PROMPT_HEAD_MAX = 40
+PROMPT_HEAD_MAX = 200
 
 
 def prompt_head(text) -> str:

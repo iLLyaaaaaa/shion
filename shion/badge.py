@@ -6,15 +6,13 @@
 from __future__ import annotations
 
 import math
-import re
-from decimal import Decimal
-
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF, QImage, QPainter, QPainterPath, QRegion
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QLayout, QVBoxLayout, QWidget
 
 from shion.bubble import BG, BORDER, FG, FONT_PX, PAD_X, PAD_Y, pick_font_family
-from shion.budget_policy import BUDGET_TIERS
+from shion.budget_policy import BUDGET_TIERS, budget_number
+from shion.budget_ui import BudgetInput
 from shion.panel import ARM_DELAY, STYLE, MouseOnlyButton
 from shion.sessions import LABEL_W as SESSION_LABEL_W
 from shion.windowing import set_topmost
@@ -287,7 +285,12 @@ class CheckpointPanel(QWidget):
                 item.widget().hide()
                 item.widget().deleteLater()
         self.buttons = {}
-        self._title.setText(self._texts.get("title", ""))
+        single_budget = len(self._rows) == 1 and bool(self._budgets)
+        title = self._texts.get("title", "")
+        if single_budget:
+            name = self.fontMetrics().elidedText(self._rows[0][1], Qt.ElideRight, SESSION_LABEL_W)
+            title = self._texts["named_title"].format(name=name)
+        self._title.setText(title)
         for row, (session, name) in enumerate(self._rows):
             if session in self._budgets:
                 self._grid.addWidget(self._budget_row(session, name), row, 0, 1, 3)
@@ -312,8 +315,6 @@ class CheckpointPanel(QWidget):
         self.follow()
 
     def _budget_row(self, session, name):
-        from shion.weekly_ui import number
-
         hold, manual = self._budgets[session]
         texts = self._texts
         lang = texts["lang"]
@@ -322,15 +323,17 @@ class CheckpointPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         if len(self._rows) > 1:
-            layout.addWidget(QLabel(self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W),
+            name = self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W)
+            layout.addWidget(QLabel(texts["named_title"].format(name=name),
                                     textFormat=Qt.PlainText))
-        body = texts["used"].format(used=number(hold.total, lang), budget=number(hold.budget, lang))
+        body = texts["used"].format(used=budget_number(hold.total, lang), budget=budget_number(hold.budget, lang))
         layout.addWidget(QLabel(body, textFormat=Qt.PlainText))
         if manual:
             note = QLabel(texts["also_manual"], textFormat=Qt.PlainText)
             note.setWordWrap(True)
             layout.addWidget(note)
 
+        layout.addWidget(QLabel(texts["choose"], textFormat=Qt.PlainText))
         choices = QHBoxLayout()
         choices.setSpacing(6)
         for value, label in zip(BUDGET_TIERS, texts["tiers"]):
@@ -361,35 +364,17 @@ class CheckpointPanel(QWidget):
         if self._budgets.get(session, (None,))[0] is not hold:
             return
         texts = self._texts
-        units = 1_000_000 if texts["lang"] == "en" else 10_000
         # Parent to the pet so the input can take focus while the checkpoint panel cannot.
-        dialog = QInputDialog(self.pet)
-        dialog.setWindowTitle(texts["custom"])
-        dialog.setLabelText(texts["input"])
-        dialog.setOkButtonText(texts["apply"])
-        dialog.setCancelButtonText(texts["cancel"])
-        dialog.setWindowModality(Qt.NonModal)
-        dialog.setWindowFlag(Qt.WindowStaysOnTopHint, bool(self.pet.windowFlags() & Qt.WindowStaysOnTopHint))
-        dialog.setTextValue("")
-        dialog.findChild(QLineEdit).setMaxLength(24)
+        dialog = BudgetInput(self.pet, texts, None,
+                             lambda value: self._select_budget(session, hold, value),
+                             check=lambda value: texts["too_low"] if value <= hold.total else None)
         self._budget_input = session, hold, dialog
-
-        def apply():
-            value = parse_custom_budget(dialog.textValue(), units)
-            if value is None or value <= hold.total:
-                dialog.setLabelText(texts["invalid"] if value is None else texts["too_low"])
-                dialog.show()
-                dialog.findChild(QLineEdit).selectAll()
-                return
-            close()
-            self._select_budget(session, hold, value)
 
         def close():
             self._budget_input = None
             dialog.deleteLater()
 
-        dialog.accepted.connect(apply)
-        dialog.rejected.connect(close)
+        dialog.finished.connect(close)
         dialog.show()
 
     def _click(self, signal, session: str, *args) -> None:
@@ -404,18 +389,11 @@ class CheckpointPanel(QWidget):
         event.ignore()
 
 
-def parse_custom_budget(text: str, units: int) -> int | None:
-    text = text.strip()
-    if not re.fullmatch(r"[0-9]{1,18}(?:\.[0-9]{1,6})?", text):
-        return None
-    tokens = Decimal(text) * units
-    return int(tokens) if tokens == tokens.to_integral_value() else None
-
-
 def checkpoint_budget_texts(lines) -> dict:
     ui = lines.ui
     return {
-        "title": ui("budget_title"), "lang": lines.lang,
+        "title": ui("budget_title"), "named_title": ui("budget_named_title"), "lang": lines.lang,
+        "choose": ui("budget_choose"),
         "used": ui("budget_used"), "manual": ui("budget_manual"),
         "also_manual": ui("budget_also_manual"),
         "tiers": tuple(ui(f"budget_tier_{size}") for size in (10, 50, 100)),

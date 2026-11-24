@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from .activity import Entry, describe
+from .budget_policy import BudgetUsage, budget_number
 from .sessions import SessionNames
 from .tasks import TaskRecord
 
@@ -32,6 +33,8 @@ class BoardInputs:
     ledger_tasks: Mapping[LedgerKey, TaskRecord] = field(default_factory=dict)
     ledger_ttl: float = 300.0
     private: bool = False
+    cc_usage: Callable[[str], BudgetUsage] | None = None
+    lang: str = "zh"
     ledger_now: float | None = None
 
 
@@ -45,6 +48,8 @@ class TaskChip:
     wait_reason: WaitReason | None
     tooltip: str
     activity: str = ""
+    usage_text: str = ""
+    usage_color: str = ""
 
 
 @dataclass(frozen=True)
@@ -267,11 +272,11 @@ class TaskBoard:
         rows.sort(key=lambda row: (STATUS_ORDER[row.status], row.timing.started_at, row.timing.sequence))
         cc_labels = session_names.labels((row.key[1] for row in rows if row.source == "claude_code"),
                                         inputs.private, ui)
-        chips = tuple(self._chip(row, cc_labels, ui, now) for row in rows)
+        chips = tuple(self._chip(row, cc_labels, ui, now, inputs) for row in rows)
         return BoardView(chips, chips[:MAX_VISIBLE], max(0, len(chips) - MAX_VISIBLE), len(done) > 2)
 
     def _chip(self, row: _Row, cc_labels: Mapping[str, str], ui: Callable[..., str],
-              now: float) -> TaskChip:
+              now: float, inputs: BoardInputs) -> TaskChip:
         source_label = ui(f"task_board_source_{row.source}")
         if row.source == "claude_code":
             name = cc_labels.get(row.key[1], source_label)
@@ -285,14 +290,27 @@ class TaskBoard:
         duration = max(0, int(end - row.timing.started_at))
         tooltip = ui("task_board_tooltip", source=source_label, name=name, state=status, seconds=duration)
         activity = ""
-        if row.source == "claude_code" and row.status == "working":
+        usage_text = usage_color = ""
+        if row.source == "claude_code":
             content = self._cc_content.get(row.key[1])
             if content is not None:
-                if content.tool is not None and (content.tool.target or not content.prompt):
-                    activity = describe(content.tool, ui, private=False)
+                tool = describe(content.tool, ui, private=False) if content.tool is not None else ""
+                if row.status == "working":
+                    activity = tool if tool and (content.tool.target or not content.prompt) else content.prompt
+                if content.prompt:
+                    tooltip += "\n" + ui("task_board_prompt", text=content.prompt)
+                if tool:
+                    tooltip += "\n" + ui("task_board_working_on", text=tool)
+            usage = inputs.cc_usage(row.key[1]) if row.key[1] and inputs.cc_usage else None
+            if usage is not None:
+                used = budget_number(usage.total, inputs.lang)
+                if usage.budget is not None:
+                    budget = budget_number(usage.budget, inputs.lang)
+                    usage_text = f"{used} / {budget}"
+                    usage_color = "over" if usage.over_limit else "near" if usage.near_limit else ""
+                    limit = ui("budget_tooltip_limit", budget=budget)
                 else:
-                    activity = content.prompt
-        if activity:
-            tooltip = f"{tooltip}\n{activity}"
+                    limit = ui("budget_unlimited")
+                tooltip += "\n" + ui("budget_tooltip_used", used=used, limit=limit)
         return TaskChip(row.key, row.source, name, row.status, row.timing.started_at,
-                        row.wait_reason, tooltip, activity)
+                        row.wait_reason, tooltip, activity, usage_text, usage_color)

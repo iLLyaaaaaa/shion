@@ -547,6 +547,8 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
             require(True, "live-gui-hook-events")
             for name in ("state.json", "shion.log"):
                 shutil.copy2(data / name, evidence / name)
+            offscreen_log = (data / "shion.log").read_text(encoding="utf-8")
+            require("tray=unavailable" in offscreen_log, "offscreen-tray-unavailable")
             own_processes(exe, terminate=True)
             require(not own_processes(exe), "own-process-cleanup")
 
@@ -580,6 +582,9 @@ def check_bundle(bundle: Path, evidence: Path, expected_version: str) -> dict:
                     live.kill()
             live_log = (live_data / "shion.log").read_text(encoding="utf-8", errors="replace")
             require(not log_errors(live_log), "live-log-clean")
+            tray_states = re.findall(r"\btray=(visible|unavailable|failed)\b", live_log)
+            require(tray_states in (["visible"], ["unavailable"]), "live-tray-startup")
+            report["live_tray"] = tray_states[0]
             observer_file = json.loads((live_data / "chatgpt-observer.json").read_text(encoding="utf-8"))
             require(observer_file["port"] == int(live_env["SHION_OBSERVER_PORT"]) != 47614, "live-observer-port-isolated")
             require((live_data / "state.json").is_file(), "live-saved-state-on-exit")

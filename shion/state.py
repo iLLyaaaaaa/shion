@@ -218,6 +218,7 @@ def valid_budget(value) -> bool:
 class SessionBudget:
     budget: int | None
     last_active: datetime
+    warned: frozenset[int] = frozenset()
 
 
 def _session_budgets(raw) -> dict[str, SessionBudget]:
@@ -229,7 +230,9 @@ def _session_budgets(raw) -> dict[str, SessionBudget]:
             stamp = _parse_dt(entry.get("last_active"))
             budget = entry.get("budget")
             if stamp is not None and "budget" in entry and (budget is None or valid_budget(budget)):
-                records[session] = SessionBudget(budget, stamp)
+                warned = entry.get("warned")
+                values = frozenset(v for v in warned if valid_budget(v)) if isinstance(warned, list) else frozenset()
+                records[session] = SessionBudget(budget, stamp, values)
     return records
 
 
@@ -277,7 +280,8 @@ class SaveData:
             "usage_enabled": self.usage_enabled,
             "task_budget_default": self.task_budget_default,
             "session_budgets": {
-                session: {"budget": record.budget, "last_active": record.last_active.isoformat()}
+                session: {"budget": record.budget, "last_active": record.last_active.isoformat(),
+                          **({"warned": sorted(record.warned)} if record.warned else {})}
                 for session, record in self.session_budgets.items()
             },
             "weekly_branding": self.weekly_branding,

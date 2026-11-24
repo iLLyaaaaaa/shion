@@ -84,8 +84,8 @@ def test_summary_cleanup():
     ("a\x00b\x1bc", "a b c"),
     ("\u202egnp.exe", "gnp.exe"),  # RTL 覆盖等格式字符
     ("   \n\t ", None),
-    ("x" * 40, "x" * 40),
-    ("x" * 41, None),
+    ("x" * 200, "x" * 200),
+    ("x" * 201, None),
     (123, None),
     (None, None),
 ])
@@ -103,7 +103,7 @@ def test_bad_prompt_head_is_ignored_not_rejected():
 def test_hook_prompt_head_is_cleaned_and_short():
     from tests.test_hook import load_hook
     h = load_hook()
-    assert h.prompt_head("第一行\n\x07第二行" + "长" * 100) == ("第一行 第二行" + "长" * 100)[:40]
+    assert h.prompt_head("第一行\n\x07第二行" + "长" * 250) == ("第一行 第二行" + "长" * 250)[:200]
     assert h.prompt_head(None) == "" and h.prompt_head("\n\n") == ""
 
 

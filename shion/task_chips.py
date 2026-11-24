@@ -14,9 +14,13 @@ from shion.v3_display import desired_side
 from shion.windowing import raise_without_activation, set_topmost
 
 WIDTH, ROW, SPACING, GAP = 192, 26, 4, 10
+USAGE_ROW = 18
+TOOLTIP_WIDTH = 360
 BADGES = {"claude_code": "CC", "claude_chat": "Claude", "chatgpt": "GPT"}
 DOTS = {"waiting": QColor("#855314"), "working": QColor("#75B9F8")}
 DONE_MARK = QColor("#82CF9A")
+USAGE_COLORS = {"near": QColor("#FFC36A"), "over": QColor("#FF827B")}
+WAITING_USAGE_COLORS = {"near": QColor("#855314"), "over": QColor("#9E231E")}
 GEOMETRY_EVENTS = (QEvent.Move, QEvent.Resize, QEvent.Show, QEvent.Hide)
 
 
@@ -50,6 +54,7 @@ def place_chips(body: QRect, pet_bounds: QRect, size: QSize, avail: QRect,
 
 class TaskChips(QWidget):
     chip_clicked = Signal(object)
+    budget_menu_requested = Signal(object, QPoint)
     clear_clicked = Signal()
 
     def __init__(self, pet, *, available=None):
@@ -69,10 +74,12 @@ class TaskChips(QWidget):
         self._config = ()
         self._appearance = ()
         self._rows = ()
+        self._row_rects = ()
         self._shown_chips = ()
         self._obstacles = ()
         self._scene_overlay = None
         self._pressed = None
+        self._right_pressed = None
         self._relayout = QTimer(self, singleShot=True, interval=0)
         self._relayout.timeout.connect(self.follow)
         pet.installEventFilter(self)
@@ -81,11 +88,13 @@ class TaskChips(QWidget):
     def present(self, view, ui, fallback=(), obstacles=()):
         self.view = view
         config = (tuple(fallback), ui("task_board_clear"), ui("task_board_collapse"))
-        appearance = tuple((chip.key, chip.name, chip.status, chip.wait_reason, chip.activity)
+        appearance = tuple((chip.key, chip.name, chip.status, chip.wait_reason, chip.activity,
+                            chip.usage_text, chip.usage_color)
                            for chip in view.all_chips)
         if config != self._config or appearance != self._appearance:
             QToolTip.hideText()
             self._pressed = None
+            self._right_pressed = None
             if config != self._config:
                 self.setFont(label_font(fallback))
             self._config = config
@@ -107,6 +116,7 @@ class TaskChips(QWidget):
             QToolTip.hideText()
             self.hide()
         self._pressed = None
+        self._right_pressed = None
         self.expanded = False
         self._offset = 0
 
@@ -119,7 +129,8 @@ class TaskChips(QWidget):
             else:
                 chips = view.visible_chips
             count = len(chips) + bool(view.overflow_count) + view.show_clear_done
-            size = QSize(WIDTH, count * (ROW + SPACING) - SPACING)
+            extra = USAGE_ROW * sum(bool(chip.usage_text) for chip in chips)
+            size = QSize(WIDTH, count * (ROW + SPACING) - SPACING + extra)
             rect = place_chips(body, pet_bounds, size, avail, obstacles, self._side)
             if rect is not None:
                 self._limit = limit
@@ -150,14 +161,20 @@ class TaskChips(QWidget):
             self.withdraw()
             return
         rows = [(f"{chip.activity} · {chip.name}" if chip.activity else chip.name,
-                 BADGES[chip.source], chip.status) for chip in chips]
+                 BADGES[chip.source], chip.status, chip.usage_text, chip.usage_color) for chip in chips]
         if self.view.overflow_count:
-            rows.append((self._config[2] if self.expanded else f"+{self.view.overflow_count}", "", "toggle"))
+            rows.append((self._config[2] if self.expanded else f"+{self.view.overflow_count}", "", "toggle", "", ""))
         if self.view.show_clear_done:
-            rows.append((self._config[1], "", "clear"))
+            rows.append((self._config[1], "", "clear", "", ""))
         self._shown_chips = chips
         if self._rows != rows:
             self._rows = rows
+            y, positions = 0, []
+            for _, _, _, usage, _ in rows:
+                height = ROW + (USAGE_ROW if usage else 0)
+                positions.append(QRect(0, y, WIDTH, height))
+                y += height + SPACING
+            self._row_rects = positions
             self.update()
         if self.geometry() != rect:
             self.setGeometry(rect)
@@ -193,22 +210,29 @@ class TaskChips(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setFont(self.font())
         metrics = QFontMetrics(self.font())
-        for i, (name, badge, status) in enumerate(self._rows):
-            row = QRect(0, i * (ROW + SPACING), WIDTH, ROW)
+        for (name, badge, status, usage, level), row in zip(self._rows, self._row_rects):
+            title = QRect(row.x(), row.y(), row.width(), ROW)
             waiting = status == "waiting"
             painter.setPen(QColor("#D1A351") if waiting else BORDER)
             painter.setBrush(QColor("#FFE6A8") if waiting else BG)
             painter.drawRoundedRect(row.adjusted(1, 1, -1, -1), ROW / 2, ROW / 2)
-            painter.setPen(QColor("#542F0E") if waiting else FG)
+            fg = QColor("#542F0E") if waiting else FG
+            painter.setPen(fg)
             if not badge:
                 painter.drawText(row, Qt.AlignCenter, name)
                 continue
-            painter.drawText(row.adjusted(10, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, badge)
+            painter.drawText(title.adjusted(10, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, badge)
             x = 10 + metrics.horizontalAdvance(badge) + 9
-            text = row.adjusted(x, 0, -27, 0)
+            text = title.adjusted(x, 0, -27, 0)
             painter.drawText(text, Qt.AlignVCenter | Qt.AlignLeft,
                              metrics.elidedText(name, Qt.ElideRight, text.width()))
-            center = QPoint(WIDTH - 14, row.center().y())
+            if usage:
+                palette = WAITING_USAGE_COLORS if waiting else USAGE_COLORS
+                painter.setPen(palette.get(level, fg))
+                text = QRect(x, row.y() + ROW - 4, WIDTH - x - 9, USAGE_ROW)
+                painter.drawText(text, Qt.AlignVCenter | Qt.AlignLeft,
+                                 metrics.elidedText(usage, Qt.ElideRight, text.width()))
+            center = QPoint(WIDTH - 14, title.center().y())
             if status == "done":
                 painter.setPen(QPen(DONE_MARK, 2.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
                 painter.drawPolyline([center + QPoint(-5, 0), center + QPoint(-2, 3), center + QPoint(5, -4)])
@@ -219,15 +243,25 @@ class TaskChips(QWidget):
                 painter.drawEllipse(center, radius, radius)
 
     def _row_at(self, pos):
-        if self.rect().contains(pos) and pos.y() % (ROW + SPACING) < ROW:
-            return pos.y() // (ROW + SPACING)
-        return -1
+        return next((i for i, rect in enumerate(self._row_rects) if rect.contains(pos)), -1)
+
+    def _budget_chip_at(self, pos):
+        index = self._row_at(pos)
+        if 0 <= index < len(self._shown_chips):
+            chip = self._shown_chips[index]
+            if chip.source == "claude_code":
+                return chip
+        return None
 
     def event(self, event):
         if event.type() == QEvent.ToolTip:
             index = self._row_at(event.pos())
             if 0 <= index < len(self._shown_chips):
-                text = "<qt>" + escape(self._shown_chips[index].tooltip).replace("\n", "<br>") + "</qt>"
+                chip = self._shown_chips[index]
+                body = escape(chip.tooltip).replace("\n", "<br>")
+                text = (f'<qt><table width="{TOOLTIP_WIDTH}" cellspacing="0" cellpadding="0">'
+                        f"<tr><td>{body}</td></tr></table></qt>" if chip.source == "claude_code"
+                        else f"<qt>{body}</qt>")
                 QToolTip.showText(event.globalPos(), text, self)
             else:
                 QToolTip.hideText()
@@ -235,10 +269,23 @@ class TaskChips(QWidget):
         return super().event(event)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            chip = self._budget_chip_at(event.position().toPoint())
+            self._right_pressed = chip.key if chip else None
+            event.accept()
+            return
         self._pressed = self._action_at(event.position().toPoint()) if event.button() == Qt.LeftButton else None
         event.setAccepted(self._pressed is not None)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.RightButton:
+            chip = self._budget_chip_at(event.position().toPoint())
+            pressed, self._right_pressed = self._right_pressed, None
+            event.accept()
+            if chip is not None and chip.key == pressed:
+                QToolTip.hideText()
+                self.budget_menu_requested.emit(chip, event.globalPosition().toPoint())
+            return
         action = self._action_at(event.position().toPoint()) if event.button() == Qt.LeftButton else None
         clicked = action is not None and action == self._pressed
         self._pressed = None

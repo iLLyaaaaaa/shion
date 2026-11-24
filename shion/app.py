@@ -225,6 +225,11 @@ def run() -> int:
 
     controller.restore_position()
     win.show()
+    tray = controller.create_tray()
+    if tray is not None:
+        app.aboutToQuit.connect(tray.hide)
+    log.info("tray=%s", "unavailable" if tray is None else
+             "visible" if tray.isVisible() and not tray.icon().isNull() else "failed")
     log.info("Shion 启动，存档：%s", save_path)
     controller.greet_startup(first_start, from_hook=os.environ.get("SHION_LAUNCHED_BY_HOOK") == "1")
     warning = link_warning(link_status, lines.ui, port)
