@@ -4,6 +4,21 @@
 
 ## 当前状态总览
 
+### 2026-11-24 Codex 任务标签 · 按顺序配对授权
+
+- 第 0 步按本机 `codex --version` 报告的 `0.171.0-alpha.13` 核对了对应发布源码 `581161ab`。同一次调用由工具注册表先等待 `PreToolUse`，再进入工具处理与授权路径触发 `PermissionRequest`。未发现同一调用反向触发的路径。 [工具注册表](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/registry.rs#L896-L1017) · [授权入口](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/approvals.rs#L595-L625)
+- 并行工具使用共享锁，别的调用可以在这两个 hook 之间发出 `PreToolUse`。拒绝会使执行审批返回错误，`PostToolUse` 只在工具成功且有后置载荷时触发。这个版本的 hook 事件定义没有 `PostToolUseFailure`。 [并行派发](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/parallel.rs#L330-L381) · [后置 hook](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/registry.rs#L1013-L1045) · [事件定义](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/hooks/src/schema.rs#L103-L127)
+
+- 在 `fix/codex-chip-states` 的 `8a037c5` 上实现规则一。只有一项在跑且没有未配对请求时，`TaskLedger` 用该工具 ID 登记、去重并向 Scheduler 返回配对结果。对应工具有结果即清除等待，并行有歧义或拒绝后无结果时由轮次结束或中断兜底。Codex hook 投影继续只传生命周期元数据，诗音只观察授权。
+- 同轮已收到工具结果且无新工具在跑时，忽略可能迟到的无 ID 请求。接收时间早于新工具开始的乱序请求也会被忽略。如果旧请求直到新工具开跑后才进入观察通道，且元数据与新请求完全相同，两者无法区分。
+- 相关测试共 168 项通过，覆盖标签、调度、观察接入、租约和配置。真实桌面端留待日常使用中验证，审阅后再决定合并。
+
+### 2026-11-24 Codex 任务标签 · 授权等待配对
+
+- 在 `fix/codex-chip-states` 上从 `03a92aa` 修复授权等待。按同会话、同轮次和 `tool_use_id` 配对后置工具事件，逐个清除待确认请求。缺 ID 的请求保留到轮次结束或中断。独立请求记录继续使用原有解决事件，诗音只做观察。
+- 相关测试 189 项通过，覆盖自动与手动批准、拒绝、并行工具和缺 ID。当前 Codex `PermissionRequest` 公开输入和诗音安装的投影都没有 `tool_use_id`，这类真机请求无法配对。真实桌面端行为留待日常使用中验证。
+- 计划待确认已搁置。当前 Codex CLI 对应源码从审批策略生成 `permission_mode`，`Stop` hook 未提供可区分计划待确认和普通轮次结束的字段。暂不跑探针，等 Codex hook 提供可靠字段后再评估。
+
 ### 2026-11-24 诗音 3.2.0 · 额度预算阶段 4「每日总计 + 文档」
 
 - 每日总计复用周报的本地当天 token 数据。CC 工作期间按 60 秒间隔主动刷新，Stop 后立即请求刷新。检查点只读已发布的扫描结果。首次扫描未返回、扫描失败或结果跨日时，用量视为未知。每日判断日志只写用量、上限、扫描距今时间和结果。

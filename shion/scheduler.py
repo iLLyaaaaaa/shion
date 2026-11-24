@@ -118,27 +118,27 @@ class Scheduler:
             return
         if event.event != "PermissionRequest":
             raise ValueError("human wait requires request evidence")
+        if event.provider not in ("claude", "chatgpt"):
+            raise ValueError("unknown provider")
+        identity = event.key, request_id
         if (self._caps(event).human_wait and isinstance(request_id, str) and ID.fullmatch(request_id)
-                and (event.key, request_id) in self.requests):
+                and identity in self.requests):
             return  # Request dedup is separate from lifecycle dedup, including resolved tombstones.
-        previous = self.ledger.tasks.get(event.key)
-        prior_unknown = previous.permission_unknown if previous else False
-        self.observe(event)
+        permission = self.ledger.accept_permission(event)
+        self._maintain()
         task = self.ledger.tasks.get(event.key)
-        if (task is None or task.terminal or (task.observation_gap_at is not None
+        if (permission is None or task is None or task.terminal or (task.observation_gap_at is not None
                 and event.received_at is not None and event.received_at <= task.observation_gap_at)):
             return
         if not self._caps(event).human_wait or not self._request_slot(event.key, request_id):
-            task.permission_unknown = True
             return
-        identity = event.key, request_id
-        # Resolution/unknown tombstones cannot be reopened by delayed duplicates.
-        if identity not in self.requests:
-            self.requests[identity] = RequestRecord("open", self.clock())
-            task.permission_unknown = prior_unknown
-            task.state = "waiting_user_confirmed"
-            task.continuity_lost = False
-            task.observation_paused = False
+        # Confirmed requests have an independent identity and resolution contract.
+        self.requests[identity] = RequestRecord("open", self.clock())
+        if not permission.already_pending:
+            task.permission_requests.discard(permission.tool_use_id)
+        task.state = "waiting_user_confirmed"
+        task.continuity_lost = False
+        task.observation_paused = False
 
     def resolve_request(self, event: Observation, request_id: str):
         """Consume resolution metadata only; does not send a control command."""
@@ -203,7 +203,7 @@ class Scheduler:
                                              or task.state in ("uncertain", "disconnected")):
                 request.status = "unknown"
                 if task and not task.terminal:
-                    task.permission_unknown = True
+                    task.permission_requests.add("")
         for token, notice in list(self.notices.items()):
             if self.clock() - notice.created >= self.notice_ttl:
                 del self.notices[token]

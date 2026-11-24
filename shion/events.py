@@ -4,8 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-          "PermissionRequest", "Stop", "Interrupt")
+CODEX_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                     "PermissionRequest", "Stop", "Interrupt")
+EVENTS = CODEX_HOOK_EVENTS + ("PostToolUseFailure",)
 ID = re.compile(r"[A-Za-z0-9_.:/-]{1,128}\Z")
 
 
