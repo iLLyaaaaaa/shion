@@ -1,3 +1,4 @@
+from dataclasses import replace
 import http.client
 import json
 import subprocess
@@ -55,7 +56,7 @@ def test_duplicate_sources_do_not_double_count():
     assert ledger.working == 1 and ledger.pending and ledger.duplicates == 1
 
 
-def test_permission_preserves_activity_until_terminal_or_expiry():
+def test_idless_permission_preserves_activity_and_clears_on_tool_completion():
     now = [0.0]
     ledger = TaskLedger(clock=lambda: now[0])
     ledger.accept(event("PreToolUse", tool_use_id="tool"))
@@ -63,11 +64,73 @@ def test_permission_preserves_activity_until_terminal_or_expiry():
     now[0] = 299.9
     assert ledger.working == 1 and ledger.pending
     ledger.accept(event("PostToolUse", tool_use_id="tool"))
-    assert ledger.working == 1 and ledger.pending
-    ledger.accept(event("Stop"))
-    assert ledger.working == 0
+    assert ledger.working == 1 and not ledger.pending
     ledger.accept(event("PermissionRequest"))
-    assert ledger.working == 0
+    assert ledger.working == 1 and not ledger.pending
+    ledger.accept(event("Stop"))
+    ledger.accept(event("PermissionRequest"))
+    assert ledger.working == 0 and not ledger.pending
+
+
+def test_idless_permissions_bind_each_sequential_tool_once():
+    ledger = TaskLedger()
+    request = event("PermissionRequest")
+    for tool_id in ("first", "second"):
+        ledger.accept(event("PreToolUse", tool_use_id=tool_id))
+        ledger.accept(request)
+        ledger.accept(request)
+        assert ledger.tasks[request.key].permission_requests == {tool_id}
+        ledger.accept(event("PostToolUse", tool_use_id=tool_id))
+        ledger.accept(request)
+        assert ledger.working == 1 and not ledger.pending
+    assert ledger.duplicates == 2
+
+
+@pytest.mark.parametrize("pre_arrived_late", [False, True])
+def test_first_idless_request_after_tool_result_cannot_open_wait(pre_arrived_late):
+    ledger = TaskLedger()
+    start = event("PreToolUse", tool_use_id="first")
+    if not pre_arrived_late:
+        ledger.accept(start)
+    ledger.accept(event("PostToolUse", tool_use_id="first"))
+    if pre_arrived_late:
+        ledger.accept(start)
+    ledger.accept(event("PermissionRequest"))
+    assert ledger.working == 1 and not ledger.pending
+
+
+def test_idless_request_received_before_new_tool_cannot_bind_to_it():
+    ledger = TaskLedger(clock=lambda: 4)
+    ledger.accept(replace(event("PreToolUse", tool_use_id="first"), received_at=1))
+    ledger.accept(replace(event("PostToolUse", tool_use_id="first"), received_at=2))
+    ledger.accept(replace(event("PreToolUse", tool_use_id="second"), received_at=4))
+    ledger.accept(replace(event("PermissionRequest"), received_at=3))
+    assert ledger.working == 1 and not ledger.pending
+
+
+def test_early_idless_requests_stay_unbound():
+    ledger = TaskLedger()
+    request = event("PermissionRequest")
+    ledger.accept(request)
+    ledger.accept(request)
+    ledger.accept(event("PreToolUse", tool_use_id="tool"))
+    ledger.accept(event("PermissionRequest"))
+    ledger.accept(event("PostToolUse", tool_use_id="tool"))
+    assert ledger.tasks[request.key].permission_requests == {""}
+    ledger.accept(event("Stop"))
+    assert not ledger.pending
+
+
+def test_claude_permission_with_tool_id_still_pairs_by_that_id():
+    ledger = TaskLedger()
+    request = replace(event("PermissionRequest", tool_use_id="permission"), provider="claude")
+    ledger.accept(replace(request, event="PreToolUse", tool_use_id="other"))
+    ledger.accept(request)
+    ledger.accept(replace(request, event="PostToolUse", tool_use_id="other"))
+    assert ledger.tasks[request.key].permission_requests == {"permission"}
+    ledger.accept(replace(request, event="PostToolUseFailure"))
+    ledger.accept(request)
+    assert ledger.working == 1 and not ledger.pending
 
 
 def test_matching_tool_failure_is_metadata_and_clears_wait():
@@ -140,6 +203,20 @@ def test_http_isolation_and_mcp_transport(tmp_path):
             "arguments": {"event": "Stop", "source": "global", "session_id": "s", "turn_id": "t"}}}, tmp_path, "o")
         assert result["content"][0]["text"] == "{}"
         assert server.inbox.drain()[0].session_id == "s"
+
+        ledger = TaskLedger()
+        for kind, expected_pending in (("PreToolUse", False), ("PermissionRequest", True),
+                                       ("PostToolUse", False)):
+            arguments = {"event": kind, "source": "global", "session_id": "s", "turn_id": "t"}
+            if kind != "PermissionRequest":
+                arguments["tool_use_id"] = "tool"
+            result = dispatch({"method": "tools/call", "params": {"name": "observe_lifecycle",
+                "arguments": arguments}}, tmp_path, "o")
+            assert result["content"][0]["text"] == "{}"
+            observation, = server.inbox.drain()
+            ledger.accept(observation)
+            assert ledger.pending is expected_pending
+
         conn = http.client.HTTPConnection("127.0.0.1", server.server.server_port, timeout=1)
         conn.request("POST", "/permission/open", "{}")
         assert conn.getresponse().status == 403

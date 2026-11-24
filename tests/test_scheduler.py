@@ -151,6 +151,45 @@ def test_chatgpt_permissions_and_tool_errors_do_not_invent_capabilities(core):
     assert s.select().state == "uncertain"
 
 
+def test_chatgpt_idless_request_uses_ledger_match_without_opening_confirmed_request(core):
+    scheduler, _ = core
+    start = event("PreToolUse", provider="chatgpt", namespace="codex-local", tool_use_id="tool")
+    request = replace(start, event="PermissionRequest", tool_use_id="")
+    scheduler.observe(start)
+    scheduler.open_request(request, "synthetic-request")
+    assert scheduler.ledger.tasks[start.key].permission_requests == {"tool"}
+    assert scheduler.select().state == "uncertain"
+    assert not scheduler.pending_requests
+
+    scheduler.observe(replace(start, event="PostToolUse"))
+    scheduler.open_request(request, "synthetic-request")
+    assert scheduler.select().state == "observed_working"
+    assert not scheduler.ledger.tasks[start.key].permission_unknown
+    assert not scheduler.requests
+
+
+@pytest.mark.parametrize("already_pending", [False, True])
+def test_independent_confirmation_discards_only_new_ledger_match(already_pending):
+    scheduler = Scheduler(enabled=True, capabilities={
+        ("chatgpt", "codex-local", "global", "unknown"): SourceCapabilities(True, True)})
+    start = event("PreToolUse", provider="chatgpt", namespace="codex-local", tool_use_id="tool")
+    request = replace(start, event="PermissionRequest", tool_use_id="")
+    scheduler.observe(start)
+    if already_pending:
+        scheduler.observe(request)
+    scheduler.open_request(request, "independent")
+    task = scheduler.ledger.tasks[start.key]
+    assert task.permission_requests == ({"tool"} if already_pending else set())
+
+    scheduler.observe(replace(start, event="PostToolUse"))
+    assert not task.permission_unknown
+    assert scheduler.pending_requests == ((start.key, "independent"),)
+    scheduler.resolve_request(request, "independent")
+    scheduler.open_request(request, "independent")
+    scheduler.open_request(request, "late")
+    assert not scheduler.pending_requests and not task.permission_unknown
+
+
 def test_client_capabilities_and_full_ids_remain_separate():
     s = Scheduler(enabled=True, capabilities={
         ("chatgpt", "codex-local", "global", "cli"): SourceCapabilities(human_wait=True)})

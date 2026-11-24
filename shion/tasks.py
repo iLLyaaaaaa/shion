@@ -8,6 +8,7 @@ import time
 from .events import Observation, ObserverHeartbeat
 
 OBSERVER_LEASE = 10.0  # Five missed 2s pulses; receiver monotonic time only.
+TOOL_RESULTS = ("PostToolUse", "PostToolUseFailure")
 
 
 @dataclass
@@ -31,6 +32,12 @@ class TaskRecord:
     @property
     def permission_unknown(self) -> bool:
         return bool(self.permission_requests)
+
+
+@dataclass(frozen=True)
+class PermissionMatch:
+    tool_use_id: str
+    already_pending: bool
 
 
 @dataclass
@@ -80,7 +87,31 @@ class TaskLedger:
         lease = self.leases.get(observer)
         return lease is not None and self.clock() - lease.last < self.lease_ttl
 
-    def accept(self, event: Observation):
+    def accept(self, event: Observation) -> str | None:
+        result = self._accept(event)
+        return result if isinstance(result, str) else None
+
+    def accept_permission(self, event: Observation) -> PermissionMatch | None:
+        result = self._accept(event)
+        return result if isinstance(result, PermissionMatch) else None
+
+    @staticmethod
+    def _permission_tool_id(task: TaskRecord, event: Observation) -> str | None:
+        if event.tool_use_id or event.provider != "chatgpt":
+            return event.tool_use_id
+        if event.received_at is not None and event.received_at < task.last:
+            return None  # A delayed packet must not attach to a newer tool.
+        if not task.tools and any(kind in TOOL_RESULTS for kind, _ in task.seen):
+            # With no active tool, this could be the request for a finished call.
+            return None
+        if len(task.tools) == 1 and "" not in task.permission_requests and not task.continuity_lost:
+            tool_use_id, = task.tools
+            if any((kind, tool_use_id) in task.seen for kind in TOOL_RESULTS):
+                return None
+            return tool_use_id
+        return ""
+
+    def _accept(self, event: Observation) -> str | PermissionMatch | None:
         self.expire()
         self.received += 1
         self.received_by_provider[event.provider] = self.received_by_provider.get(event.provider, 0) + 1
@@ -94,14 +125,14 @@ class TaskLedger:
         if not event.session_id or not event.turn_id:
             self.uncertain = True
             return None
-        now = self.clock()
+        received_at = self.clock() if event.received_at is None else event.received_at
         task = self.tasks.get(event.key)
         if task is None:
             # Do not evict terminal tombstones and revive delayed old events.
             if len(self.tasks) >= self.capacity:
                 self.uncertain = True
                 return None
-            task = TaskRecord("uncertain", now)
+            task = TaskRecord("uncertain", received_at)
             self.tasks[event.key] = task
         task.sources.add(event.source)
         context = event.provider, event.namespace, event.client_surface, event.source, event.observer
@@ -113,10 +144,22 @@ class TaskLedger:
         task.conflict |= len(task.sources) > 1
         if task.conflict:
             self.uncertain = True
-        identity = (event.event, event.tool_use_id)
-        dedupable = event.event in ("Stop", "Interrupt", "UserPromptSubmit") or bool(event.tool_use_id)
+        tool_use_id = event.tool_use_id
+        permission = None
+        if event.event == "PermissionRequest":
+            tool_use_id = self._permission_tool_id(task, event)
+            if tool_use_id is None:
+                return None
+            permission = PermissionMatch(tool_use_id, tool_use_id in task.permission_requests)
+
+        identity = (event.event, tool_use_id)
+        dedupable = event.event in ("Stop", "Interrupt", "UserPromptSubmit") or bool(tool_use_id)
         if dedupable and identity in task.seen:
             self.duplicates += 1
+            # A confirmed request can have independent identity. For an inferred
+            # match, a settled tool must never open another request.
+            if permission is not None and (permission.already_pending or event.tool_use_id):
+                return permission
             return None
         if task.terminal:
             if event.event == "Interrupt":
@@ -131,7 +174,7 @@ class TaskLedger:
         if (task.observation_gap_at is not None and event.received_at is not None
                 and event.received_at <= task.observation_gap_at):
             return None  # A packet received before invalidation cannot bridge the gap.
-        task.last = now if event.received_at is None else event.received_at
+        task.last = received_at
         if event.leased:
             task.observers.add(event.observer)
             task.lease_supported = True
@@ -147,7 +190,7 @@ class TaskLedger:
             task.observation_paused = False
             if event.tool_use_id:
                 task.tools.add(event.tool_use_id)
-        elif event.event in ("PostToolUse", "PostToolUseFailure"):
+        elif event.event in TOOL_RESULTS:
             task.tools.discard(event.tool_use_id)
             if event.tool_use_id:
                 task.permission_requests.discard(event.tool_use_id)
@@ -155,9 +198,10 @@ class TaskLedger:
             task.state = "observed_working"
             task.continuity_lost = False
             task.observation_paused = False
-        elif event.event == "PermissionRequest":
-            task.permission_requests.add(event.tool_use_id)
+        elif permission is not None:
             # Permission outcome is unknown; retain independently observed activity.
+            task.permission_requests.add(permission.tool_use_id)
+            return permission
         return None
 
     def expire(self):

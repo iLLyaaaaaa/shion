@@ -163,7 +163,8 @@ def test_codex_permission_wait_clears_on_matching_completion(completion, approva
     ledger = TaskLedger(clock=lambda: now)
     board = TaskBoard()
 
-    codex_event(ledger, "PermissionRequest", tool_use_id="approval")
+    codex_event(ledger, "PreToolUse", tool_use_id="approval")
+    codex_event(ledger, "PermissionRequest")
     now += approval_delay
     assert summary(snapshot(board, ledger_tasks=ledger.tasks, now=now)) == [
         ("ChatGPT", "waiting", "permission_unknown"),
@@ -173,7 +174,29 @@ def test_codex_permission_wait_clears_on_matching_completion(completion, approva
     assert summary(snapshot(board, ledger_tasks=ledger.tasks, now=now)) == [
         ("ChatGPT", "working", None),
     ]
-    assert not ledger.pending
+    task, = ledger.tasks.values()
+    assert task.state == "observed_working" and not ledger.pending
+
+
+def test_codex_parallel_tools_leave_idless_permission_wait_until_stop():
+    ledger = TaskLedger(clock=lambda: 1)
+    board = TaskBoard()
+
+    codex_event(ledger, "PreToolUse", tool_use_id="first")
+    codex_event(ledger, "PreToolUse", tool_use_id="second")
+    codex_event(ledger, "PermissionRequest")
+    codex_event(ledger, "PostToolUse", tool_use_id="first")
+
+    task, = ledger.tasks.values()
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
+    codex_event(ledger, "PermissionRequest")
+    assert task.permission_requests == {""}
+    codex_event(ledger, "PostToolUse", tool_use_id="second")
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
+
+    codex_event(ledger, "Stop")
+    assert not task.permission_unknown
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].status == "done"
 
 
 def test_codex_parallel_permission_wait_clears_one_tool_at_a_time():
@@ -210,7 +233,8 @@ def test_codex_declined_permission_without_tool_completion_ends_with_turn(ending
     ledger = TaskLedger(clock=lambda: 1)
     board = TaskBoard()
 
-    codex_event(ledger, "PermissionRequest", tool_use_id="declined")
+    codex_event(ledger, "PreToolUse", tool_use_id="declined")
+    codex_event(ledger, "PermissionRequest")
     assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
 
     codex_event(ledger, ending)
