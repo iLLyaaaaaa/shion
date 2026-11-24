@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import tomlkit
 
-from shion.events import EVENTS
+from shion.events import CODEX_HOOK_EVENTS as EVENTS
 from shion import observer_files as secure
 
 NAME = "shion_lifecycle_v1"

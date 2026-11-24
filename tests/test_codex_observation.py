@@ -70,6 +70,15 @@ def test_permission_preserves_activity_until_terminal_or_expiry():
     assert ledger.working == 0
 
 
+def test_matching_tool_failure_is_metadata_and_clears_wait():
+    ledger = TaskLedger()
+    request = event("PermissionRequest", tool_use_id="tool")
+    ledger.accept(request)
+    ledger.accept(event("PostToolUseFailure", tool_use_id="tool"))
+    ledger.accept(request)  # A delayed duplicate cannot reopen the wait.
+    assert ledger.working == 1 and not ledger.pending
+
+
 def test_permission_does_not_revive_disconnected_or_expired_work():
     now = [0.0]
     ledger = TaskLedger(clock=lambda: now[0])

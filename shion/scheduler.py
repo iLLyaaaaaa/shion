@@ -122,20 +122,21 @@ class Scheduler:
                 and (event.key, request_id) in self.requests):
             return  # Request dedup is separate from lifecycle dedup, including resolved tombstones.
         previous = self.ledger.tasks.get(event.key)
-        prior_unknown = previous.permission_unknown if previous else False
+        already_pending = previous is not None and event.tool_use_id in previous.permission_requests
         self.observe(event)
         task = self.ledger.tasks.get(event.key)
         if (task is None or task.terminal or (task.observation_gap_at is not None
                 and event.received_at is not None and event.received_at <= task.observation_gap_at)):
             return
         if not self._caps(event).human_wait or not self._request_slot(event.key, request_id):
-            task.permission_unknown = True
             return
         identity = event.key, request_id
         # Resolution/unknown tombstones cannot be reopened by delayed duplicates.
         if identity not in self.requests:
             self.requests[identity] = RequestRecord("open", self.clock())
-            task.permission_unknown = prior_unknown
+            if not already_pending:
+                # This request has its own resolution contract.
+                task.permission_requests.discard(event.tool_use_id)
             task.state = "waiting_user_confirmed"
             task.continuity_lost = False
             task.observation_paused = False
@@ -203,7 +204,7 @@ class Scheduler:
                                              or task.state in ("uncertain", "disconnected")):
                 request.status = "unknown"
                 if task and not task.terminal:
-                    task.permission_unknown = True
+                    task.permission_requests.add("")
         for token, notice in list(self.notices.items()):
             if self.clock() - notice.created >= self.notice_ttl:
                 del self.notices[token]

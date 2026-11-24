@@ -122,6 +122,21 @@ def test_independent_p1_requests_duplicate_and_resolution_tombstones(core):
     assert len(s.pending_requests) == 1  # Only the other session remains open.
 
 
+def test_confirmed_request_keeps_its_independent_resolution(core):
+    scheduler, _ = core
+    request = event("PermissionRequest", tool_use_id="confirmed")
+    scheduler.observe(replace(request, tool_use_id="observed"))
+    scheduler.open_request(request, "request")
+    scheduler.observe(replace(request, event="PostToolUse"))
+    assert scheduler.pending_requests == ((request.key, "request"),)
+    assert scheduler.ledger.tasks[request.key].permission_unknown
+
+    scheduler.resolve_request(request, "request")
+    scheduler.observe(replace(request, event="PostToolUse", tool_use_id="observed"))
+    assert not scheduler.pending_requests
+    assert not scheduler.ledger.tasks[request.key].permission_unknown
+
+
 def test_chatgpt_permissions_and_tool_errors_do_not_invent_capabilities(core):
     s, _ = core
     a = event(provider="chatgpt", namespace="codex-local")

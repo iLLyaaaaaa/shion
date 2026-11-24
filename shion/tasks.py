@@ -18,7 +18,7 @@ class TaskRecord:
     tools: set[str] = field(default_factory=set)
     seen: set[tuple] = field(default_factory=set)
     conflict: bool = False
-    permission_unknown: bool = False
+    permission_requests: set[str] = field(default_factory=set)  # Empty ID means uncorrelated.
     terminal: bool = False
     result: str = "unknown"
     observers: set[str] = field(default_factory=set)
@@ -27,6 +27,10 @@ class TaskRecord:
     continuity_lost: bool = False
     observation_paused: bool = False  # Explicit v2 switch, not a failed transport.
     observation_gap_at: float | None = None
+
+    @property
+    def permission_unknown(self) -> bool:
+        return bool(self.permission_requests)
 
 
 @dataclass
@@ -135,6 +139,7 @@ class TaskLedger:
             task.state = "interrupted" if event.event == "Interrupt" else "turn_ended"
             task.terminal = True
             task.tools.clear()
+            task.permission_requests.clear()
             return task.state
         if event.event in ("UserPromptSubmit", "PreToolUse"):
             task.state = "observed_working"
@@ -142,14 +147,16 @@ class TaskLedger:
             task.observation_paused = False
             if event.tool_use_id:
                 task.tools.add(event.tool_use_id)
-        elif event.event == "PostToolUse":
+        elif event.event in ("PostToolUse", "PostToolUseFailure"):
             task.tools.discard(event.tool_use_id)
+            if event.tool_use_id:
+                task.permission_requests.discard(event.tool_use_id)
             # A tool result is evidence of activity, never of final success.
             task.state = "observed_working"
             task.continuity_lost = False
             task.observation_paused = False
         elif event.event == "PermissionRequest":
-            task.permission_unknown = True
+            task.permission_requests.add(event.tool_use_id)
             # Permission outcome is unknown; retain independently observed activity.
         return None
 

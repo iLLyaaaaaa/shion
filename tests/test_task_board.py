@@ -153,6 +153,73 @@ def test_codex_permissions_and_loss():
     assert view().all_chips == ()
 
 
+@pytest.mark.parametrize(("completion", "approval_delay"), [
+    pytest.param("PostToolUse", 0, id="automatic"),
+    pytest.param("PostToolUse", 30, id="manual"),
+    pytest.param("PostToolUseFailure", 0, id="tool-failed-after-approval"),
+])
+def test_codex_permission_wait_clears_on_matching_completion(completion, approval_delay):
+    now = 1
+    ledger = TaskLedger(clock=lambda: now)
+    board = TaskBoard()
+
+    codex_event(ledger, "PermissionRequest", tool_use_id="approval")
+    now += approval_delay
+    assert summary(snapshot(board, ledger_tasks=ledger.tasks, now=now)) == [
+        ("ChatGPT", "waiting", "permission_unknown"),
+    ]
+
+    codex_event(ledger, completion, tool_use_id="approval")
+    assert summary(snapshot(board, ledger_tasks=ledger.tasks, now=now)) == [
+        ("ChatGPT", "working", None),
+    ]
+    assert not ledger.pending
+
+
+def test_codex_parallel_permission_wait_clears_one_tool_at_a_time():
+    ledger = TaskLedger(clock=lambda: 1)
+    board = TaskBoard()
+
+    codex_event(ledger, "PreToolUse", turn="old", tool_use_id="second")
+    codex_event(ledger, "PermissionRequest", tool_use_id="first")
+    codex_event(ledger, "PermissionRequest", tool_use_id="second")
+    codex_event(ledger, "PostToolUse", turn="old", tool_use_id="second")
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
+    for tool in ("unrelated", "first"):
+        codex_event(ledger, "PostToolUse", tool_use_id=tool)
+        assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
+
+    codex_event(ledger, "PostToolUse", tool_use_id="second")
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].status == "working"
+
+
+def test_codex_permission_without_tool_id_stays_pending():
+    ledger = TaskLedger(clock=lambda: 1)
+    board = TaskBoard()
+
+    codex_event(ledger, "PermissionRequest")
+    codex_event(ledger, "PermissionRequest", tool_use_id="correlated")
+    codex_event(ledger, "PostToolUse")
+    codex_event(ledger, "PostToolUse", tool_use_id="correlated")
+
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
+
+
+@pytest.mark.parametrize("ending", ["Stop", "Interrupt"])
+def test_codex_declined_permission_without_tool_completion_ends_with_turn(ending):
+    ledger = TaskLedger(clock=lambda: 1)
+    board = TaskBoard()
+
+    codex_event(ledger, "PermissionRequest", tool_use_id="declined")
+    assert snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips[0].wait_reason == "permission_unknown"
+
+    codex_event(ledger, ending)
+    task, = ledger.tasks.values()
+    assert task.terminal and task.result == "unknown" and not task.permission_unknown
+    chips = snapshot(board, ledger_tasks=ledger.tasks, now=1).all_chips
+    assert [chip.status for chip in chips] == (["done"] if ending == "Stop" else [])
+
+
 def test_codex_leased_permission_wait_expires():
     now = 1
     ledger = TaskLedger(clock=lambda: now, lease_ttl=4)
