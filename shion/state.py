@@ -11,7 +11,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -221,6 +221,34 @@ class SessionBudget:
     warned: frozenset[int] = frozenset()
 
 
+@dataclass(frozen=True)
+class DailyBudget:
+    day: date
+    override: int | None = None
+    has_override: bool = False
+    warned: frozenset[int] = frozenset()
+
+    def to_dict(self):
+        data = {"date": self.day.isoformat(), "warned": sorted(self.warned)}
+        if self.has_override:
+            data["override"] = self.override
+        return data
+
+    @classmethod
+    def from_dict(cls, raw):
+        if not isinstance(raw, dict):
+            return None
+        try:
+            day = date.fromisoformat(raw.get("date"))
+        except (ValueError, TypeError):
+            return None
+        override = raw.get("override")
+        has_override = "override" in raw and (override is None or valid_budget(override))
+        warned = raw.get("warned")
+        values = frozenset(v for v in warned if valid_budget(v)) if isinstance(warned, list) else frozenset()
+        return cls(day, override if has_override else None, has_override, values)
+
+
 def _session_budgets(raw) -> dict[str, SessionBudget]:
     records = {}
     if isinstance(raw, dict):
@@ -268,6 +296,8 @@ class SaveData:
     usage_enabled: bool = True
     task_budget_default: int | None = None
     session_budgets: dict[str, SessionBudget] = field(default_factory=dict)
+    daily_budget_default: int | None = None
+    daily_budget: DailyBudget | None = None
     weekly_branding: bool = True
     weekly_announced: str = ""
     stamina_announced: dict = field(default_factory=dict)
@@ -279,6 +309,8 @@ class SaveData:
             "weekly_stats": clean_stats(self.weekly_stats),
             "usage_enabled": self.usage_enabled,
             "task_budget_default": self.task_budget_default,
+            "daily_budget_default": self.daily_budget_default,
+            "daily_budget": self.daily_budget.to_dict() if self.daily_budget else None,
             "session_budgets": {
                 session: {"budget": record.budget, "last_active": record.last_active.isoformat(),
                           **({"warned": sorted(record.warned)} if record.warned else {})}
@@ -325,6 +357,9 @@ class SaveData:
         default = raw.get("task_budget_default")
         d.task_budget_default = default if valid_budget(default) else None
         d.session_budgets = _session_budgets(raw.get("session_budgets"))
+        daily_default = raw.get("daily_budget_default")
+        d.daily_budget_default = daily_default if valid_budget(daily_default) else None
+        d.daily_budget = DailyBudget.from_dict(raw.get("daily_budget"))
         d.weekly_branding = _bool(raw.get("weekly_branding"), True)
         announced = raw.get("weekly_announced")
         d.stamina_announced = clean_announced(raw.get('stamina_announced'))

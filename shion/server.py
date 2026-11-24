@@ -15,7 +15,7 @@ import re
 import threading
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Callable, Optional
 
 from .budget import BudgetMeter
@@ -335,10 +335,11 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(session, str) or not session or len(session) > ID_MAX:
             session = None
         transcript_path = data.get("transcript_path") if isinstance(data, dict) else None
+        checkpoint_started = monotonic() if initial else float('inf')
         budget_paused = False
-        if initial and session and isinstance(transcript_path, str) and transcript_path:
-            budget_paused = self._meter_usage(session, transcript_path)
-        paused, stop = self.server.hub.wait_gate(wait, session)
+        if initial and session:
+            budget_paused = self._check_budgets(session, transcript_path, checkpoint_started)
+        paused, stop = self.server.hub.wait_gate(wait, session, checkpoint_started=checkpoint_started)
         if budget_paused and paused:
             try:
                 self.server.emit_event(INTERNAL_BUDGET_PAUSE, None, {"session": session})
@@ -351,25 +352,30 @@ class _Handler(BaseHTTPRequestHandler):
                 log.exception("on_event 回调出错")
         self._send(200, {"paused": paused, "stop": stop})
 
-    def _meter_usage(self, session, path):
+    def _check_budgets(self, session, path, checkpoint_started):
         try:
             if not self.server.hub.link_enabled or not self.server.usage_enabled():
                 return False
-            start = perf_counter()
-            result = self.server.budget_meter.observe(session, path)
-            elapsed = (perf_counter() - start) * 1000
-            if result is not None:
-                short_id = re.sub(r"[^a-zA-Z0-9_-]", "_", session[:8])
-                suffix = "" if result.complete else "（超时，部分结果）"
-                log.info("预算计量 会话%s 累计 %d（主 %d / 子代理 %d）耗时 %.1f 毫秒%s",
-                         short_id, result.total, result.main, result.subagents, elapsed, suffix)
-                policy = self.server.budget_policy
-                if policy is not None and self.server.usage_enabled():
-                    return policy.observe(session, result.total, self.server.hub)
+            total = self._meter_usage(session, path) if isinstance(path, str) and path else None
+            policy = self.server.budget_policy
+            if policy is not None and self.server.usage_enabled():
+                return policy.observe(session, total, self.server.hub, checkpoint_started=checkpoint_started)
         except Exception:
             # Optional accounting must never interfere with the checkpoint response.
             pass
         return False
+
+    def _meter_usage(self, session, path):
+        start = perf_counter()
+        result = self.server.budget_meter.observe(session, path)
+        if result is None:
+            return None
+        elapsed = (perf_counter() - start) * 1000
+        short_id = re.sub(r"[^a-zA-Z0-9_-]", "_", session[:8])
+        suffix = "" if result.complete else "（超时，部分结果）"
+        log.info("预算计量 会话%s 累计 %d（主 %d / 子代理 %d）耗时 %.1f 毫秒%s",
+                 short_id, result.total, result.main, result.subagents, elapsed, suffix)
+        return result.total
 
     # ---- 同意 / 否决 ----
     # 安全：这里只有“登记请求 / 等结果 / 撤回 / 已在 CC 里答过就撤掉”。没有任何接口、任何字段能写入 allow 或 deny，

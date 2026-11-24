@@ -54,6 +54,17 @@ She doesn't read your code, doesn't go online, and doesn't chat with the AI on y
 
 <p align="center"><img src="docs/images/task-chips.png" alt="Shion beside task chips: a yellow waiting chip, two blue working indicators, a green completion check, and a +1 row" width="480"><br>Task chips with synthetic data.</p>
 
+### Claude Code token budgets
+
+- Right-click a Claude Code task chip to set its session budget. In **Settings**, use **Default budget for new sessions** and **CC daily total**. Both default to unlimited and support presets and custom limits.
+- Budgets count input, output, cache writes, cache reads, and subagent usage in Claude Code. Claude chat is excluded. Session usage counts from the start of the session. Daily usage resets at local midnight and may lag by about a minute.
+- A session pauses at its next checkpoint, so usage can go slightly over the limit. When both limits are reached, the daily limit takes priority. From the daily panel you can raise today's limit, choose **Unlimited today**, or end every turn paused for the daily limit.
+- Turning off **Usage statistics** greys out the budget settings and disables budget pauses and reminders.
+
+### System tray icon
+
+- Click Shion's icon in the Windows notification area to bring her back, or right-click it for the menu. Hover to see today's Claude Code usage and limit.
+
 ### Shion Weekly
 - Right-click → **Shion Weekly**. It opens last week by default; switch to **This week** in the window. On the first launch each Monday, Shion holds up the report to let you know
 - The card shows a weekly title, Claude Code total and output tokens, a tokens-per-day chart, active days, latest activity, and what Shion counted herself: tasks finished, working time, approvals / denials, head pats and treats

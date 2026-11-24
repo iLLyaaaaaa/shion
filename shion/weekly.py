@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from shion.limits import number
 
-from shion.usage import FIELDS, SYNTHETIC, Pricing
+from shion.usage import FIELDS, SYNTHETIC, Pricing, model_tokens
 
 ROOT = Path(__file__).resolve().parents[1]
 COUNTERS = ('tasks', 'seconds', 'approvals', 'denials', 'pats', 'snacks')
@@ -134,7 +134,7 @@ def report(start, stats, usage, lang='zh', enabled=True, pricing=None, today=Non
         for model, tiers in selected.get(day, {}).items():
             if model == SYNTHETIC:
                 continue
-            tokens = sum(c.get(k, 0) for c in tiers.values() for k in FIELDS)
+            tokens = model_tokens(tiers)
             if not tokens:
                 continue
             day_tokens += tokens

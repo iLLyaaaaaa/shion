@@ -18,16 +18,17 @@ def parse_custom_budget(text: str, units: int) -> int | None:
     return int(tokens) if tokens > 0 and tokens == tokens.to_integral_value() else None
 
 
-def add_budget_choices(menu, ui, current, select, custom, *, unlimited_first=False, disabled_hint=""):
-    tiers = [(v, ui(f"budget_tier_{v // 1_000_000}")) for v in BUDGET_TIERS]
+def add_budget_choices(menu, ui, current, select, custom, *, tiers=BUDGET_TIERS,
+                       unlimited_first=False, disabled_hint=""):
+    presets = [(v, ui(f"budget_tier_{v // 1_000_000}")) for v in tiers]
     unlimited = (None, ui("budget_unlimited"))
-    items = [*tiers, ("custom", ui("budget_custom") + "…")]
+    items = [*presets, ("custom", ui("budget_custom") + "…")]
     items.insert(0 if unlimited_first else len(items), unlimited)
     menu.setToolTipsVisible(True)
     for value, label in items:
         action = menu.addAction(label)
         action.setCheckable(True)
-        action.setChecked(current not in (*BUDGET_TIERS, None) if value == "custom" else value == current)
+        action.setChecked(current not in (*tiers, None) if value == "custom" else value == current)
         if disabled_hint:
             action.setToolTip(disabled_hint)
             action.setEnabled(False)

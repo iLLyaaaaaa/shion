@@ -18,6 +18,15 @@ CACHE_VERSION = 2  # 2: <synthetic> is kept apart from <unknown>.
 SYNTHETIC = '<synthetic>'
 
 
+def model_tokens(tiers):
+    return sum(counts.get(key, 0) for counts in tiers.values() for key in FIELDS)
+
+
+def daily_tokens(usage, day):
+    return sum(model_tokens(tiers) for model, tiers in usage['days'].get(day.isoformat(), {}).items()
+               if model != SYNTHETIC)
+
+
 def sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -287,7 +296,9 @@ class UsageScanner:
 
     def _read(self, initial, paths, today, cancelled, full=False):
         data = deepcopy(initial)
-        oldest, recent, newest = str(today - timedelta(days=55)), str(today - timedelta(days=7)), str(today)
+        oldest, recent = str(today - timedelta(days=55)), str(today - timedelta(days=7))
+        tomorrow = today + timedelta(days=1)
+        newest = str(tomorrow)
         for key, path in paths:
             if cancelled():
                 return None, False
@@ -304,6 +315,7 @@ class UsageScanner:
                 self.skipped += 1
                 continue
             with stream:
+                next_day_offset = None
                 while True:
                     if cancelled():
                         return None, False
@@ -326,6 +338,11 @@ class UsageScanner:
                         self.skipped += 1
                         continue
                     dt, ident, record, bad = parse_transcript_line(line, oldest, newest)
+                    if dt is not None and dt.date() == tomorrow:
+                        # A scan started before midnight can see records appended after midnight.
+                        if next_day_offset is None:
+                            next_day_offset = start
+                        continue
                     if bad:
                         self.skipped += 1
                     if dt is None:
@@ -346,7 +363,7 @@ class UsageScanner:
                         return None, True  # Expired dedup key: rebuild rather than double count.
                     add_record(data, record, 1)
                     data['seen'][ident] = record
-                offset = stream.tell()
+                offset = stream.tell() if next_day_offset is None else next_day_offset
                 stat = path.stat()
                 data['files'][key] = {'offset': offset, 'anchor': anchor(stream, offset),
                                      'identity': stat.st_ino, 'size': stat.st_size, 'modified': stat.st_mtime_ns}

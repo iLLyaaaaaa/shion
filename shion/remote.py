@@ -9,6 +9,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 
 MAX_WAIT = 30.0  # 单次长轮询最多等多久（秒）
@@ -19,6 +20,7 @@ HOLD_GRACE = 2.0  # hook 两段长轮询之间的空当，这么久之内仍算�
 class BudgetPause:
     total: int
     budget: int
+    day: date | None = None  # Daily holds share one object for this local date.
 
 
 class RemoteHub:
@@ -131,16 +133,25 @@ class RemoteHub:
         with self._cond:
             return set(self._paused_sessions)
 
-    def pause(self, session: Optional[str] = None, *, budget: BudgetPause | None = None) -> bool:
+    def pause(self, session: Optional[str] = None, *, budget: BudgetPause | None = None,
+              checkpoint_started: float = float('inf')) -> bool:
         """None：全局停下（原行为，之后才开始工作的会话也会停）。给了会话：只停这个会话。"""
         with self._cond:
             if budget is not None:
-                existing = self._budget_pauses.get(session)
-                if existing is not None and budget.total > existing.total:
-                    self._budget_pauses[session] = budget
-                    return False  # another checkpoint already opened the panel
-                if not self._link or not session or self._paused_for(session) or session in self._interrupts:
+                if not self._link or not session or session in self._interrupts:
                     return False
+                if self._budget_ended.get(session, float('-inf')) >= checkpoint_started:
+                    return False  # This turn was ended while its checkpoint was being evaluated.
+                existing = self._budget_pauses.get(session)
+                if budget.day is None:
+                    if existing is not None and existing.day is None and budget.total > existing.total:
+                        self._budget_pauses[session] = budget
+                    if existing is not None or self._manual_for(session):
+                        return False
+                else:
+                    if existing is not None and existing.day == budget.day:
+                        return False
+                    budget = next((hold for hold in self._budget_pauses.values() if hold.day == budget.day), budget)
                 self._budget_pauses[session] = budget
             elif session is None:
                 self._paused = True
@@ -153,7 +164,7 @@ class RemoteHub:
 
     def resume_budget(self, session: str, hold: BudgetPause) -> bool:
         with self._cond:
-            if self._budget_pauses.get(session) is not hold:
+            if hold.day is not None or self._budget_pauses.get(session) is not hold:
                 return False
             del self._budget_pauses[session]
             self._cond.notify_all()
@@ -162,12 +173,34 @@ class RemoteHub:
     def update_budget_hold(self, session: str, budget: int | None) -> None:
         with self._cond:
             hold = self._budget_pauses.get(session)
-            if hold is not None:
+            if hold is not None and hold.day is None:
                 if budget is None or budget > hold.total:
                     del self._budget_pauses[session]
                     self._cond.notify_all()
                 elif budget != hold.budget:
                     self._budget_pauses[session] = BudgetPause(hold.total, budget)
+
+    def resolve_daily_budget(self, hold: BudgetPause, *, end: bool = False) -> bool:
+        with self._cond:
+            sessions = [session for session, current in self._budget_pauses.items() if current is hold]
+            if hold.day is None or not sessions:
+                return False
+            for session in sessions:
+                if end:
+                    self._end_budget(session)
+                else:
+                    del self._budget_pauses[session]
+            self._cond.notify_all()
+            return True
+
+    def clear_daily_budgets(self, *, keep_day: date | None = None) -> None:
+        with self._cond:
+            stale = [session for session, hold in self._budget_pauses.items()
+                     if hold.day is not None and (keep_day is None or hold.day < keep_day)]
+            for session in stale:
+                del self._budget_pauses[session]
+            if stale:
+                self._cond.notify_all()
 
     def resume(self, session: Optional[str] = None) -> None:
         """None：解除全部暂停（原行为）。给了会话：只放行这个会话，其他会话的暂停不变。"""
@@ -217,8 +250,12 @@ class RemoteHub:
 
     def budget_timeout(self, session: str) -> bool:
         with self._cond:
-            if session in self._budget_pauses:
-                self._end_budget(session)
+            hold = self._budget_pauses.get(session)
+            if hold is not None:
+                if hold.day is None:
+                    self._end_budget(session)
+                else:
+                    self.resolve_daily_budget(hold, end=True)
                 return True
             return time.monotonic() - self._budget_ended.get(session, float("-inf")) < HOLD_GRACE
 
@@ -262,7 +299,8 @@ class RemoteHub:
         with self._cond:
             return session in self._interrupts
 
-    def wait_gate(self, seconds: float, session: Optional[str] = None) -> tuple[bool, bool]:
+    def wait_gate(self, seconds: float, session: Optional[str] = None, *,
+                  checkpoint_started: float = float('inf')) -> tuple[bool, bool]:
         """检查点：最多等 seconds 秒，直到这个会话不再暂停。返回 (仍在暂停, 这次要停下)。
 
         等待期间被“结束这一轮”（全局，或针对这个会话），返回 stop=True（此刻并行等待的同范围 hook 都会拿到）；
@@ -272,7 +310,8 @@ class RemoteHub:
         with self._cond:
             if not self._link:
                 return False, False  # 临时关闭联动：不停、不中断
-            if seconds > 0 and time.monotonic() - self._budget_ended.get(session, float("-inf")) < HOLD_GRACE:
+            ended_at = self._budget_ended.get(session, float('-inf'))
+            if ended_at >= checkpoint_started or (seconds > 0 and time.monotonic() - ended_at < HOLD_GRACE):
                 return False, True
             if session is not None and session in self._interrupts:
                 self._interrupts.discard(session)

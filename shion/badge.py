@@ -11,7 +11,7 @@ from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF, QImage, QPainter,
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QLayout, QVBoxLayout, QWidget
 
 from shion.bubble import BG, BORDER, FG, FONT_PX, PAD_X, PAD_Y, pick_font_family
-from shion.budget_policy import BUDGET_TIERS, budget_number
+from shion.budget_policy import BUDGET_TIERS, DAILY_BUDGET_TIERS, budget_number
 from shion.budget_ui import BudgetInput
 from shion.panel import ARM_DELAY, STYLE, MouseOnlyButton
 from shion.sessions import LABEL_W as SESSION_LABEL_W
@@ -189,6 +189,8 @@ class CheckpointPanel(QWidget):
     resume_clicked = Signal(str)
     end_clicked = Signal(str)
     budget_selected = Signal(str, object, object)
+    daily_selected = Signal(object, object)
+    daily_ended = Signal(object)
 
     def __init__(self, pet, fallback=()):
         super().__init__(pet, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -207,6 +209,7 @@ class CheckpointPanel(QWidget):
         self._rows: list[tuple[str, str]] = []
         self._texts: dict[str, str] = {}
         self._budgets = {}
+        self._daily = None
         self._budget_input = None
         self.wanted = False
         self._title = QLabel()
@@ -232,19 +235,27 @@ class CheckpointPanel(QWidget):
     def armed(self) -> bool:
         return self._clock() >= self._armed_at
 
-    def present(self, rows: list[tuple[str, str]], texts: dict[str, str], *, budgets=None) -> None:
+    @property
+    def daily_hold(self):
+        return self._daily[0] if self._daily else None
+
+    def present(self, rows: list[tuple[str, str]], texts: dict[str, str], *, budgets=None, daily=None) -> None:
         """rows：[(会话, 显示名)]，按开始停住的先后。会话集合或文字变了就重建并重新计时防误点。"""
         rows = list(rows)
         budgets = dict(budgets or {})
-        if rows != self._rows or texts != self._texts or budgets != self._budgets:
+        if rows != self._rows or texts != self._texts or budgets != self._budgets or daily != self._daily:
+            daily_hold = daily[0] if daily else None
             if self._budget_input is not None:
                 session, hold, dialog = self._budget_input
-                if budgets.get(session, (None,))[0] is not hold:
+                current = daily_hold if session is None else budgets.get(session, (None,))[0]
+                if current is not hold:
                     dialog.reject()
-            if budgets != self._budgets or [r[0] for r in rows] != [r[0] for r in self._rows]:
+            if (daily_hold is not self.daily_hold or budgets != self._budgets
+                    or [r[0] for r in rows] != [r[0] for r in self._rows]):
                 self._armed_at = self._clock() + ARM_DELAY
             self._rows, self._texts = rows, dict(texts)
             self._budgets = budgets
+            self._daily = daily
             self._rebuild()
         self.wanted = True
         self.refresh()
@@ -255,6 +266,7 @@ class CheckpointPanel(QWidget):
         self.wanted = False
         self._rows = []
         self._budgets = {}
+        self._daily = None
         self.refresh()
 
     def refresh(self) -> None:
@@ -285,17 +297,25 @@ class CheckpointPanel(QWidget):
                 item.widget().hide()
                 item.widget().deleteLater()
         self.buttons = {}
-        single_budget = len(self._rows) == 1 and bool(self._budgets)
+        single_budget = self._daily is None and len(self._rows) == 1 and bool(self._budgets)
         title = self._texts.get("title", "")
-        if single_budget:
+        first_row = 0
+        if self._daily is not None:
+            _, usage, _ = self._daily
+            texts = self._texts["daily"]
+            title = texts["used"].format(used=budget_number(usage.total, texts["lang"]),
+                                         budget=budget_number(usage.budget, texts["lang"]))
+            self._grid.addWidget(self._budget_row(None, ""), 0, 0, 1, 3)
+            first_row = 1
+        elif single_budget:
             name = self.fontMetrics().elidedText(self._rows[0][1], Qt.ElideRight, SESSION_LABEL_W)
             title = self._texts["named_title"].format(name=name)
         self._title.setText(title)
-        for row, (session, name) in enumerate(self._rows):
+        for row, (session, name) in enumerate(self._rows, start=first_row):
             if session in self._budgets:
                 self._grid.addWidget(self._budget_row(session, name), row, 0, 1, 3)
                 continue
-            if self._budgets:
+            if self._budgets or self._daily is not None:
                 name = f"{name} · {self._texts['manual']}"
             label = QLabel(self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W))
             label.setTextFormat(Qt.PlainText)  # 文件夹名是外部文字，不能按富文本解析
@@ -315,19 +335,24 @@ class CheckpointPanel(QWidget):
         self.follow()
 
     def _budget_row(self, session, name):
-        hold, manual = self._budgets[session]
-        texts = self._texts
-        lang = texts["lang"]
+        daily = session is None
+        if daily:
+            hold, usage, manual = self._daily
+            texts, total, tiers = self._texts["daily"], usage.total, DAILY_BUDGET_TIERS
+        else:
+            hold, manual = self._budgets[session]
+            texts, total, tiers = self._texts, hold.total, BUDGET_TIERS
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
-        if len(self._rows) > 1:
-            name = self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W)
-            layout.addWidget(QLabel(texts["named_title"].format(name=name),
-                                    textFormat=Qt.PlainText))
-        body = texts["used"].format(used=budget_number(hold.total, lang), budget=budget_number(hold.budget, lang))
-        layout.addWidget(QLabel(body, textFormat=Qt.PlainText))
+        if not daily:
+            if len(self._rows) > 1 or self._daily is not None:
+                name = self.fontMetrics().elidedText(name, Qt.ElideRight, LABEL_W)
+                layout.addWidget(QLabel(texts["named_title"].format(name=name), textFormat=Qt.PlainText))
+            lang = texts["lang"]
+            body = texts["used"].format(used=budget_number(total, lang), budget=budget_number(hold.budget, lang))
+            layout.addWidget(QLabel(body, textFormat=Qt.PlainText))
         if manual:
             note = QLabel(texts["also_manual"], textFormat=Qt.PlainText)
             note.setWordWrap(True)
@@ -336,8 +361,8 @@ class CheckpointPanel(QWidget):
         layout.addWidget(QLabel(texts["choose"], textFormat=Qt.PlainText))
         choices = QHBoxLayout()
         choices.setSpacing(6)
-        for value, label in zip(BUDGET_TIERS, texts["tiers"]):
-            if value > hold.total:
+        for value, label in zip(tiers, texts["tiers"]):
+            if value > total:
                 button = MouseOnlyButton(label)
                 button.clicked.connect(lambda _=False, v=value: self._select_budget(session, hold, v))
                 choices.addWidget(button)
@@ -350,24 +375,36 @@ class CheckpointPanel(QWidget):
         choices.addStretch()
         layout.addLayout(choices)
         end = MouseOnlyButton(texts["end"])
-        end.clicked.connect(lambda: self._click(self.end_clicked, session))
+        if daily:
+            end.clicked.connect(lambda: self._click(self.daily_ended, None, hold))
+        else:
+            end.clicked.connect(lambda: self._click(self.end_clicked, session))
         layout.addWidget(end, alignment=Qt.AlignRight)
         return widget
 
+    def _row_hold(self, session):
+        return self.daily_hold if session is None else self._budgets.get(session, (None,))[0]
+
     def _select_budget(self, session, hold, value):
-        if self._budgets.get(session, (None,))[0] is hold:
-            self._click(self.budget_selected, session, hold, value)
+        if self._row_hold(session) is hold:
+            signal = self.daily_selected if session is None else self.budget_selected
+            self._click(signal, session, hold, value)
 
     def _custom_budget(self, session, hold):
         if not self.armed() or not self.isVisible() or self._budget_input is not None:
             return
-        if self._budgets.get(session, (None,))[0] is not hold:
+        if self._row_hold(session) is not hold:
             return
-        texts = self._texts
+        texts = self._texts["daily"] if session is None else self._texts
+
+        def check(value):
+            total = self._daily[1].total if session is None and self._daily else hold.total
+            return texts["too_low"] if value <= total else None
+
         # Parent to the pet so the input can take focus while the checkpoint panel cannot.
         dialog = BudgetInput(self.pet, texts, None,
                              lambda value: self._select_budget(session, hold, value),
-                             check=lambda value: texts["too_low"] if value <= hold.total else None)
+                             check=check)
         self._budget_input = session, hold, dialog
 
         def close():
@@ -377,9 +414,13 @@ class CheckpointPanel(QWidget):
         dialog.finished.connect(close)
         dialog.show()
 
-    def _click(self, signal, session: str, *args) -> None:
+    def _click(self, signal, session: str | None, *args) -> None:
         # 防误点：刚出现 / 停住的会话刚变过的 ARM_DELAY 内，即使按钮事件进来了也不算
-        if self.wanted and self.isVisible() and self.armed() and any(s == session for s, _ in self._rows):
+        if not self.wanted or not self.isVisible() or not self.armed():
+            return
+        if session is None and self.daily_hold is args[0]:
+            signal.emit(*args)
+        elif any(s == session for s, _ in self._rows):
             signal.emit(session, *args)
 
     def keyPressEvent(self, event) -> None:
@@ -389,15 +430,17 @@ class CheckpointPanel(QWidget):
         event.ignore()
 
 
-def checkpoint_budget_texts(lines) -> dict:
+def checkpoint_budget_texts(lines, *, daily=False) -> dict:
     ui = lines.ui
     return {
         "title": ui("budget_title"), "named_title": ui("budget_named_title"), "lang": lines.lang,
-        "choose": ui("budget_choose"),
-        "used": ui("budget_used"), "manual": ui("budget_manual"),
+        "choose": ui("budget_daily_choose" if daily else "budget_choose"),
+        "used": ui("budget_daily_used" if daily else "budget_used"), "manual": ui("budget_manual"),
         "also_manual": ui("budget_also_manual"),
-        "tiers": tuple(ui(f"budget_tier_{size}") for size in (10, 50, 100)),
-        "custom": ui("budget_custom"), "unlimited": ui("budget_unlimited"),
+        "tiers": tuple(ui(f"budget_tier_{v // 1_000_000}") for v in (DAILY_BUDGET_TIERS if daily else BUDGET_TIERS)),
+        "custom": ui("budget_custom"), "unlimited": ui("budget_daily_unlimited" if daily else "budget_unlimited"),
         "input": ui("budget_input"), "invalid": ui("budget_invalid"),
-        "too_low": ui("budget_too_low"), "apply": ui("budget_apply"), "cancel": ui("panel_cancel"),
+        "too_low": ui("budget_daily_too_low" if daily else "budget_too_low"),
+        "apply": ui("budget_apply"), "cancel": ui("panel_cancel"),
+        **({"end": ui("budget_daily_end")} if daily else {}),
     }

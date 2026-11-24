@@ -33,7 +33,7 @@ from shion.panel import ConnectionPanel, InputPanel, PermissionPanel
 from shion.permission_text import permission_summary
 from shion.startup import Startup
 from tools.hooks_config import HookConnection
-from shion.budget_policy import BudgetPolicy, budget_number
+from shion.budget_policy import DAILY_BUDGET_TIERS, BudgetPolicy, budget_number
 from shion.budget_ui import BudgetInput, add_budget_choices
 from shion.remote import RemoteHub
 from shion.sessions import LABEL_W, SessionNames
@@ -92,8 +92,11 @@ class PetController(QObject):
         self.overlay = overlay
         self.bubble = bubble
         self.hub = hub or RemoteHub()
-        self.budget_policy = BudgetPolicy(state.save.task_budget_default, state.save.session_budgets, clock=now_fn)
+        self.budget_policy = BudgetPolicy(state.save.task_budget_default, state.save.session_budgets,
+                                         daily_default=state.save.daily_budget_default, daily=state.save.daily_budget,
+                                         clock=now_fn)
         self._budget_editor = None
+        self._tray = None
         self.hub.set_link_enabled(state.save.claude_link_enabled)  # 在 HTTP 服务启动之前
         self._held_said = False  # 这次停下已经说过“已经停下啦～”
         self._held_seen = False  # 这次停下 hook 已经真的在检查点停住过（显示标签，直到继续）
@@ -221,6 +224,10 @@ class PetController(QObject):
         self.window.set_calm(calm)
         self.window.set_activity(self.state.save.activity_level)
         self._sync_checkpoint_display()
+        if self._tray is not None:
+            tooltip = self.tray_tooltip()
+            if self._tray.toolTip() != tooltip:
+                self._tray.setToolTip(tooltip)
         if calm and self.window.idle_motion_active:
             self.window.stop_motion()
         if cur == "sleep" and self.state.sleep_in_bed(now) and self.state._is_asleep(now):
@@ -332,7 +339,16 @@ class PetController(QObject):
             self.scheduler.mark_dirty(self._now())
             self.sync()
 
-    def _edit_budget(self, session=None) -> None:
+    def set_daily_budget(self, value) -> None:
+        if self.state.save.usage_enabled:
+            self.budget_policy.set_daily_default(value, self.hub)
+            self.state.save.daily_budget_default = value
+            self.sync_budget_save()
+            self.scheduler.mark_dirty(self._now())
+            self._sync_pause()
+            self.sync()
+
+    def _edit_budget(self, session=None, *, daily=False) -> None:
         from shion.badge import checkpoint_budget_texts
 
         if not self.state.save.usage_enabled:
@@ -346,9 +362,13 @@ class PetController(QObject):
             total = self.budget_policy.usage(session).total
             return ui("budget_next_checkpoint") if total is not None and value <= total else None
 
-        usage = self.budget_policy.usage(session) if session is not None else None
-        current = usage.budget if usage else self.state.save.task_budget_default
-        apply = self.set_default_budget if session is None else lambda value: self._set_session_budget(session, value)
+        if daily:
+            current, apply = self.state.save.daily_budget_default, self.set_daily_budget
+        elif session is None:
+            current, apply = self.state.save.task_budget_default, self.set_default_budget
+        else:
+            current = self.budget_policy.usage(session).budget
+            apply = lambda value: self._set_session_budget(session, value)
         dialog = BudgetInput(self.window, checkpoint_budget_texts(self.lines), current, apply,
                              warning=warning if session is not None else None)
         self._budget_editor = dialog
@@ -363,6 +383,15 @@ class PetController(QObject):
     def _try_budget_warning(self) -> None:
         if not self.state.save.usage_enabled or not self.hub.link_enabled or self.state.save.bubble_muted:
             return
+        day = self._now().date()
+        daily = self.budget_policy.daily_warning(day)
+        if daily is not None:
+            text = self.lines.ui("budget_daily_warning", used=budget_number(daily.total, self.lines.lang),
+                                 budget=budget_number(daily.budget, self.lines.lang))
+            if self.say(text, priority=Priority.MEDIUM, category="budget_warning"):
+                self.budget_policy.mark_daily_warned(day, daily.budget)
+                self.sync_budget_save()
+                return
         warnings = self.budget_policy.warnings()
         if not warnings:
             return
@@ -382,8 +411,8 @@ class PetController(QObject):
     def tick(self) -> None:
         now = self._now()
         self.sync_budget_save()
-        if self.usage.poll(self.state.save.usage_enabled) and self._weekly_window is not None and self._weekly_window.isVisible():
-            self._weekly_window.update_report(self._weekly_data())
+        self.hub.clear_daily_budgets(keep_day=now.date())
+        self._poll_usage(now)
         self._try_weekly_notice(now)
         if self.chatgpt is not None:
             if self.v2.core.enabled:
@@ -844,12 +873,22 @@ class PetController(QObject):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return None
         tray = QSystemTrayIcon(application_icon(), self)
-        tray.setToolTip("Shion")
+        tray.setToolTip(self.tray_tooltip())
         tray.setContextMenu(self.build_tray_menu())
         tray.activated.connect(
             lambda reason: self.show_from_tray() if reason == QSystemTrayIcon.Trigger else None)
         tray.show()
+        self._tray = tray
         return tray
+
+    def tray_tooltip(self) -> str:
+        if not self.state.save.usage_enabled:
+            return "Shion"
+        usage = self.budget_policy.daily_usage()
+        ui, lang = self.lines.ui, self.lines.lang
+        used = ui("budget_daily_unknown") if usage.total is None else budget_number(usage.total, lang)
+        limit = ui("budget_unlimited") if usage.budget is None else budget_number(usage.budget, lang)
+        return "Shion\n" + ui("budget_daily_used", used=used, budget=limit)
 
     # ------------------------------------------------------------ 来自 Claude 的事件
     def _sync_observed_working(self):
@@ -884,9 +923,12 @@ class PetController(QObject):
         meta = meta or {}
         session, tool_id = meta.get("session"), meta.get("tool_id")
         if etype == "budget_pause":
+            hold = self.hub.budget_pauses().get(session)
+            already_shown = self._checkpoint is not None and self._checkpoint.daily_hold is hold and hold is not None
             self._sync_pause()
             self.sync()
-            self._bring_forward()
+            if not already_shown:
+                self._bring_forward()
             return
         if etype == 'usage_limits':
             self.limits.update(meta, self._now().timestamp())
@@ -932,7 +974,8 @@ class PetController(QObject):
         if etype == "stop":
             self.scheduler.mark_dirty(now)
             if self.state.save.usage_enabled:
-                self.usage.request(30)
+                self.usage.request()
+                self._poll_usage(now)
         if etype == "pause_timeout":
             self._interrupt_waiting.discard(session)
             self._mark_end_pending(session)
@@ -1132,6 +1175,9 @@ class PetController(QObject):
         if not self.hub.link_enabled or not session:
             return
         self.hub.end(session)
+        self._finish_end_turn()
+
+    def _finish_end_turn(self) -> None:
         if not self.hub.is_paused:
             self._leave_pause()
         if not self.state.save.bubble_muted:
@@ -1182,9 +1228,16 @@ class PetController(QObject):
         ui = self.lines.ui
         shown = self.state.paused and self._held_seen
         holding = self.hub.holding_sessions() if shown else []
-        budgets = {s: (hold, self.hub.is_session_manually_paused(s))
-                   for s, hold in self.hub.budget_pauses().items() if s in holding}
-        panel = len(holding) >= 2 or bool(budgets)
+        holds = self.hub.budget_pauses()
+        daily_sessions = [s for s in holding if s in holds and holds[s].day is not None]
+        daily = None
+        if daily_sessions:
+            hold = holds[daily_sessions[0]]
+            daily = (hold, self.budget_policy.held_daily_usage(hold),
+                     any(self.hub.is_session_manually_paused(s) for s in daily_sessions))
+            holding = [s for s in holding if s not in daily_sessions]
+        budgets = {s: (holds[s], self.hub.is_session_manually_paused(s)) for s in holding if s in holds}
+        panel = len(holding) >= 2 or bool(budgets) or daily is not None
         labels = self.session_labels(self.session_names.ordered([*self.remote_sessions(), *holding])) if holding else {}
         text = ui("pause_label")
         if len(holding) == 1 and not self.state.save.privacy_mode and self.session_names.project(holding[0]):
@@ -1200,13 +1253,17 @@ class PetController(QObject):
                 self._checkpoint.resume_clicked.connect(lambda s: self.resume_work(s))
                 self._checkpoint.end_clicked.connect(self.end_turn)
                 self._checkpoint.budget_selected.connect(self._choose_budget)
+                self._checkpoint.daily_selected.connect(self._choose_daily_budget)
+                self._checkpoint.daily_ended.connect(self._end_daily_budget)
             texts = {
                 "title": (ui("pause_label_cc", label=ui("checkpoint_title"))
                           if self.chat_activity.phase == "working" else ui("checkpoint_title")),
                 "resume": ui("checkpoint_resume"), "end": ui("checkpoint_end")}
-            if budgets:
+            if budgets or daily is not None:
                 texts.update(checkpoint_budget_texts(self.lines))
-            self._checkpoint.present([(s, labels[s]) for s in holding], texts, budgets=budgets)
+            if daily is not None:
+                texts["daily"] = checkpoint_budget_texts(self.lines, daily=True)
+            self._checkpoint.present([(s, labels[s]) for s in holding], texts, budgets=budgets, daily=daily)
         elif self._checkpoint is not None and self._checkpoint.wanted:
             self._checkpoint.withdraw()
 
@@ -1216,12 +1273,26 @@ class PetController(QObject):
             self._sync_pause()
             self.sync()
 
+    def _choose_daily_budget(self, hold, value) -> None:
+        if self.state.save.usage_enabled and self.budget_policy.choose_daily(hold, value, self.hub):
+            self.sync_budget_save()
+            self._sync_pause()
+            self.sync()
+
+    def _end_daily_budget(self, hold) -> None:
+        if self.hub.resolve_daily_budget(hold, end=True):
+            self._finish_end_turn()
+
     def sync_budget_save(self) -> None:
         changes = self.budget_policy.take_changes()
+        day = self.budget_policy.daily_state
+        daily_changed = day != self.state.save.daily_budget
+        if daily_changed:
+            self.state.save.daily_budget = day
         if changes is not None:
             self.state.save.session_budgets = changes
-            if not self.scheduler.dirty:
-                self.scheduler.mark_dirty(self._now())
+        if (daily_changed or changes is not None) and not self.scheduler.dirty:
+            self.scheduler.mark_dirty(self._now())
 
     def _on_pause_timeout(self, session: Optional[str] = None, *, budget: bool = False) -> None:
         """hook 停满上限后已返回 continue: false：放掉其他并行等待的 hook，提醒一次。只在停下等待中有效。
@@ -1623,6 +1694,13 @@ class PetController(QObject):
         self._weekly_window.show()
         position_dialog(self._weekly_window, self.window.body_rect())
 
+    def _poll_usage(self, now):
+        changed = self.usage.poll(self.state.save.usage_enabled, day=now.date(),
+                                  working=self.hub.link_enabled and self.state.is_working(now))
+        self.budget_policy.set_daily_reading(self.usage.daily_reading)
+        if changed and self._weekly_window is not None and self._weekly_window.isVisible():
+            self._weekly_window.update_report(self._weekly_data())
+
     def set_usage_enabled(self, enabled):
         self.state.save.usage_enabled = bool(enabled)
         if not enabled and self._budget_editor is not None:
@@ -1630,7 +1708,10 @@ class PetController(QObject):
         self.scheduler.mark_dirty(self._now())
         if enabled:
             self.usage.request()
-        self.usage.poll(bool(enabled))
+        self._poll_usage(self._now())
+        if not enabled:
+            self.hub.clear_daily_budgets()
+            self._sync_pause()
         if self._weekly_window is not None:
             self._weekly_window.update_report(self._weekly_data())
         self.sync()
@@ -2193,6 +2274,12 @@ class PetController(QObject):
         add_budget_choices(default, ui, self.state.save.task_budget_default, self.set_default_budget,
                            self._edit_budget, unlimited_first=True, disabled_hint=hint)
         settings_menu.addAction(ui("budget_default_note")).setEnabled(False)
+        daily = settings_menu.addMenu(ui("budget_daily"))
+        daily.menuAction().setEnabled(not hint)
+        daily.menuAction().setToolTip(hint)
+        add_budget_choices(daily, ui, self.state.save.daily_budget_default, self.set_daily_budget,
+                           lambda: self._edit_budget(daily=True), tiers=DAILY_BUDGET_TIERS, disabled_hint=hint)
+        settings_menu.addAction(ui("budget_daily_note")).setEnabled(False)
         if hint:
             settings_menu.addAction(hint).setEnabled(False)
         branding = settings_menu.addAction(ui("weekly_branding"))
