@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
@@ -258,10 +259,14 @@ class TaskChips(QWidget):
             index = self._row_at(event.pos())
             if 0 <= index < len(self._shown_chips):
                 chip = self._shown_chips[index]
-                body = escape(chip.tooltip).replace("\n", "<br>")
-                text = (f'<qt><table width="{TOOLTIP_WIDTH}" cellspacing="0" cellpadding="0">'
-                        f"<tr><td>{body}</td></tr></table></qt>" if chip.source == "claude_code"
-                        else f"<qt>{body}</qt>")
+                if chip.source == "claude_code":
+                    # Qt rich-text tables expand for unbreakable text, even with a fixed width.
+                    wrapped = re.sub(r"\S{16}(?=\S)", r"\g<0>" + "\u200b", chip.tooltip)
+                    body = escape(wrapped).replace("\n", "<br>")
+                    text = (f'<qt><table width="{TOOLTIP_WIDTH}" cellspacing="0" cellpadding="0">'
+                            f"<tr><td>{body}</td></tr></table></qt>")
+                else:
+                    text = "<qt>" + escape(chip.tooltip).replace("\n", "<br>") + "</qt>"
                 QToolTip.showText(event.globalPos(), text, self)
             else:
                 QToolTip.hideText()

@@ -1,9 +1,10 @@
 from dataclasses import replace
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QHelpEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDialogButtonBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QSystemTrayIcon, QToolTip
 
 from shion.budget_policy import BudgetPolicy
 from shion.budget_ui import parse_custom_budget
@@ -134,7 +135,7 @@ def test_stats_off_disables_session_and_default_choices(env):
     assert ctl.budget_policy.usage("new-session").budget == 10_000_000
 
 
-def test_two_line_label_and_tooltip_use_latest_usage_and_hide_private_text(env):
+def test_two_line_label_and_tooltip_use_latest_usage_and_hide_private_text(env, qapp):
     ctl = env.ctl
     ctl.lines = Lines("en")
     ctl.set_default_budget(10_000_000)
@@ -151,6 +152,13 @@ def test_two_line_label_and_tooltip_use_latest_usage_and_hide_private_text(env):
     assert "Task: " + prompt in chip.tooltip
     assert "Working on: " in chip.tooltip and "private-file.py" in chip.tooltip
     assert "Used: 10.2M (budget 10M)" in chip.tooltip
+    pos = chips._row_rects[0].center()
+    QApplication.sendEvent(chips, QHelpEvent(QEvent.ToolTip, pos, chips.mapToGlobal(pos)))
+    tip, = [widget for widget in qapp.topLevelWidgets()
+            if widget.isVisible() and widget.objectName() == "qtooltip_label"]
+    assert tip.width() <= 390
+    assert prompt in QToolTip.text().replace("\u200b", "")
+    QToolTip.hideText()
     assert ctl.hub.wait_gate(0, SESSION) == (True, False)
     ctl.handle_event("budget_pause", meta={"session": SESSION})
     assert chips.view.all_chips[0].status == "waiting"
