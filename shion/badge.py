@@ -215,6 +215,8 @@ class CheckpointPanel(QWidget):
         self._title = QLabel()
         self._title.setTextFormat(Qt.PlainText)
         self._title.setMinimumHeight(LINE_H)
+        self._daily_paused = QLabel(textFormat=Qt.PlainText)
+        self._daily_paused.hide()
         self._grid = QGridLayout()
         self._grid.setHorizontalSpacing(6)
         self._grid.setVerticalSpacing(4)
@@ -223,6 +225,7 @@ class CheckpointPanel(QWidget):
         layout.setContentsMargins(10, 6, 10, 8)
         layout.setSpacing(6)
         layout.addWidget(self._title)
+        layout.addWidget(self._daily_paused)
         layout.addLayout(self._grid)
         self.buttons: dict[str, tuple[MouseOnlyButton, MouseOnlyButton]] = {}
         pet.moved.connect(self.follow)
@@ -239,10 +242,15 @@ class CheckpointPanel(QWidget):
     def daily_hold(self):
         return self._daily[0] if self._daily else None
 
-    def present(self, rows: list[tuple[str, str]], texts: dict[str, str], *, budgets=None, daily=None) -> None:
+    def present(self, rows: list[tuple[str, str]], texts: dict[str, str], *, budgets=None, daily=None,
+                daily_paused_text: str = "") -> None:
         """rows：[(会话, 显示名)]，按开始停住的先后。会话集合或文字变了就重建并重新计时防误点。"""
         rows = list(rows)
         budgets = dict(budgets or {})
+        if daily_paused_text != self._daily_paused.text():
+            self._daily_paused.setText(daily_paused_text)
+            self._daily_paused.setVisible(bool(daily_paused_text))
+            self.layout().activate()
         if rows != self._rows or texts != self._texts or budgets != self._budgets or daily != self._daily:
             daily_hold = daily[0] if daily else None
             if self._budget_input is not None:

@@ -109,6 +109,11 @@ class Lines:
         self._meta = _sub(cur, "meta")
 
     @property
+    def display_name(self) -> str:
+        name = self._meta.get("display_name")
+        return name.strip() if isinstance(name, str) and name.strip() else "Shion"
+
+    @property
     def font_fallback(self) -> list[str]:
         v = self._meta.get("font_fallback")
         return [s for s in v if isinstance(s, str)] if isinstance(v, list) else []

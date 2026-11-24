@@ -882,13 +882,16 @@ class PetController(QObject):
         return tray
 
     def tray_tooltip(self) -> str:
+        name = self.lines.display_name
         if not self.state.save.usage_enabled:
-            return "Shion"
+            return name
         usage = self.budget_policy.daily_usage()
         ui, lang = self.lines.ui, self.lines.lang
-        used = ui("budget_daily_unknown") if usage.total is None else budget_number(usage.total, lang)
+        if usage.total is None:
+            return name + "\n" + ui("budget_daily_pending")
+        used = budget_number(usage.total, lang)
         limit = ui("budget_unlimited") if usage.budget is None else budget_number(usage.budget, lang)
-        return "Shion\n" + ui("budget_daily_used", used=used, budget=limit)
+        return name + "\n" + ui("budget_daily_used", used=used, budget=limit)
 
     # ------------------------------------------------------------ 来自 Claude 的事件
     def _sync_observed_working(self):
@@ -1263,7 +1266,9 @@ class PetController(QObject):
                 texts.update(checkpoint_budget_texts(self.lines))
             if daily is not None:
                 texts["daily"] = checkpoint_budget_texts(self.lines, daily=True)
-            self._checkpoint.present([(s, labels[s]) for s in holding], texts, budgets=budgets, daily=daily)
+            daily_paused_text = ui("budget_daily_paused", count=len(daily_sessions)) if daily_sessions else ""
+            self._checkpoint.present([(s, labels[s]) for s in holding], texts, budgets=budgets, daily=daily,
+                                     daily_paused_text=daily_paused_text)
         elif self._checkpoint is not None and self._checkpoint.wanted:
             self._checkpoint.withdraw()
 

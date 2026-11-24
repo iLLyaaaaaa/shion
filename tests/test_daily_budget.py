@@ -244,27 +244,28 @@ def test_stop_immediately_schedules_a_background_scan(env, monkeypatch):
     assert calls == [env.now.date()] and env.ctl.usage.daily_reading is None
 
 
-@pytest.mark.parametrize('lang, used, excluded, custom_value', [
-    ('zh', 'CC 今日已用 5030万 / 5000万', '5000万', '5029'),
-    ('en', 'CC usage today 50.3M / 50M', '50M', '50.29'),
-    ('ja', 'CC 今日の使用量 5030万 / 5000万', '5000万', '5029'),
+@pytest.mark.parametrize('lang, name, paused, used, excluded, custom_value', [
+    ('zh', '诗音', '已暂停 {count} 个会话', 'CC 今日已用 5030万 / 5000万', '5000万', '5029'),
+    ('en', 'Shion', 'Paused sessions: {count}', 'CC usage today 50.3M / 50M', '50M', '50.29'),
+    ('ja', '詩音', '一時停止中のセッション {count} 件', 'CC 今日の使用量 5030万 / 5000万', '5000万', '5029'),
 ])
-def test_single_daily_panel_buttons_and_tray_tooltip(env, lang, used, excluded, custom_value):
+def test_single_daily_panel_buttons_and_tray_tooltip(env, lang, name, paused, used, excluded, custom_value):
     ctl = env.ctl
     env.win.show()
     ctl.lines = Lines(lang)
     ui = ctl.lines.ui
     ctl.set_daily_budget(50_000_000)
     publish(env, 50_300_000)
-    for session in ('a', 'b'):
+    for count, session in enumerate(('a', 'b'), start=1):
         assert ctl.budget_policy.observe(session, None, ctl.hub)
         ctl.hub.wait_gate(0, session)
         ctl.handle_event('budget_pause', meta={'session': session})
+        panel = ctl._checkpoint
+        assert panel.layout().itemAt(1).widget().text() == paused.format(count=count)
     env.advance(1)
-    panel = ctl._checkpoint
     assert panel.isVisible() and panel.rows == []
     assert panel._title.text() == used
-    assert ctl.tray_tooltip() == f'Shion\n{used}'
+    assert ctl.tray_tooltip() == f'{name}\n{used}'
     buttons = [button for button in panel.findChildren(QPushButton) if button.isVisible()]
     by_text = {button.text(): button for button in buttons}
     assert len(by_text) == len(buttons) == 5
@@ -280,6 +281,43 @@ def test_single_daily_panel_buttons_and_tray_tooltip(env, lang, used, excluded, 
     assert ctl.tray_tooltip().endswith(ui('budget_unlimited'))
 
 
+@pytest.mark.parametrize('lang, name, pending', [
+    ('zh', '诗音', 'CC 今日用量统计中…'),
+    ('en', 'Shion', 'Calculating CC usage today…'),
+    ('ja', '詩音', 'CC 今日の使用量を集計中…'),
+])
+def test_tray_tooltip_while_daily_usage_is_unknown(env, monkeypatch, lang, name, pending):
+    ctl = env.ctl
+    ctl.set_language(lang)
+    expected = f'{name}\n{pending}'
+    scans = [Future(), Future()]
+    submits = iter(scans)
+    monkeypatch.setattr(ctl.usage.executor, 'submit', lambda *_: next(submits))
+
+    ctl.usage.request()
+    ctl._poll_usage(env.now)
+    assert ctl.usage.future is scans[0] and not scans[0].done()
+    assert ctl.tray_tooltip() == expected
+
+    scans[0].set_result({'days': {}})
+    ctl._poll_usage(env.now)
+    assert ' 0 / ' in ctl.tray_tooltip()
+
+    ctl.usage.request()
+    ctl._poll_usage(env.now)
+    scans[1].set_exception(OSError())
+    ctl._poll_usage(env.now)
+    assert ctl.tray_tooltip() == expected
+
+    publish(env, 123)
+    env.now += timedelta(days=1)
+    ctl._poll_usage(env.now)
+    assert ctl.tray_tooltip() == expected
+
+    ctl.set_usage_enabled(False)
+    assert ctl.tray_tooltip() == name
+
+
 def test_daily_budget_is_grey_and_turning_statistics_off_releases_daily_pauses(env):
     ctl = env.ctl
     ui = ctl.lines.ui
@@ -293,7 +331,7 @@ def test_daily_budget_is_grey_and_turning_statistics_off_releases_daily_pauses(e
     daily = action(settings, ui('budget_daily'))
     assert not daily.isEnabled()
     assert all(not preset.isEnabled() for preset in daily.menu().actions())
-    assert ctl.tray_tooltip() == 'Shion'
+    assert ctl.tray_tooltip() == '诗音'
     assert ctl.budget_policy.daily_usage().total is None
     assert not ctl.hub.budget_pauses()
 
